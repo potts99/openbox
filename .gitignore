@@ -1,1 +1,10 @@
-docs
+# The approved product specification is maintained outside Git by request.
+/docs/specs/
+
+# Local build and dependency outputs.
+/openbox
+/openboxd
+/node_modules/
+/web/dist/
+/web/node_modules/
+/web/*.tsbuildinfo
