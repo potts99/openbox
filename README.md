@@ -15,6 +15,17 @@ make check
 
 `make check` reproduces the formatting, linting, test, policy, generated-file, and build checks run by CI.
 
+## Host preflight
+
+On a Linux host with Incus installed, inspect container and VM readiness through the local Unix socket:
+
+```sh
+openbox doctor
+openbox doctor --json
+```
+
+Missing KVM is reported as unavailable rather than fatal because OpenBox supports container-only hosts. See [the runtime preflight guide](docs/runtime-preflight.md) for socket overrides, bootstrap safety, and integration testing.
+
 ## Security
 
 Do not report vulnerabilities in a public issue. See [SECURITY.md](SECURITY.md) for private reporting instructions.
