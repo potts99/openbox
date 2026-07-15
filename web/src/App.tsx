@@ -39,10 +39,9 @@ export function App({ api = defaultApi }: { api?: OpenBoxApi }) {
   if (entry.status === "error") {
     return (
       <main className="system-message" id="main-content">
-        <p className="eyebrow">Connection fault</p>
-        <h1>Console unavailable</h1>
+        <h1>OpenBox</h1>
         <p role="alert">{entry.message}</p>
-        <button type="button" onClick={() => window.location.reload()}>Retry connection</button>
+        <button className="btn" type="button" onClick={() => window.location.reload()}>Retry</button>
       </main>
     );
   }
@@ -77,9 +76,8 @@ export function App({ api = defaultApi }: { api?: OpenBoxApi }) {
 function LoadingScreen() {
   return (
     <main className="system-message" id="main-content" aria-busy="true">
-      <p className="eyebrow">Local control plane</p>
       <h1>OpenBox</h1>
-      <p role="status">Reading system state…</p>
+      <p role="status">Loading…</p>
     </main>
   );
 }

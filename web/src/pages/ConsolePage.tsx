@@ -44,7 +44,7 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
       await api.logout();
       onLoggedOut();
     } catch {
-      setLogoutError("OpenBox could not lock this session. Try again.");
+      setLogoutError("Could not sign out. Try again.");
     } finally {
       setLogoutPending(false);
     }
@@ -89,7 +89,7 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
         <div className="owner-control">
           <span><small>OWNER</small>{session.owner.displayName}</span>
           <button type="button" onClick={() => { void logout(); }} disabled={logoutPending}>
-            {logoutPending ? "Locking…" : "Lock"}
+            {logoutPending ? "Signing out…" : "Sign out"}
           </button>
         </div>
       </header>
@@ -97,37 +97,31 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
       <div className="console-workspace">
         <main id="main-content" tabIndex={-1}>
           <div className="page-heading">
-            <div>
-              <p className="eyebrow">Compute inventory / local host</p>
-              <h1 id="instances">Instances</h1>
-            </div>
+            <h1 id="instances">Instances</h1>
             <button className="primary-action" type="button" disabled title="Instance creation arrives in a later slice">
-              + New instance
+              New
             </button>
           </div>
 
-          {data.status === "loading" ? <p className="data-message" role="status">Reading runtime state…</p> : null}
+          {data.status === "loading" ? <p className="data-message" role="status">Loading…</p> : null}
           {data.status === "error" ? <p className="data-message is-error" role="alert">{data.message}</p> : null}
           {data.status === "ready" ? (
             <>
               <CapabilityBanner capabilities={data.capabilities} />
               <section className="instance-ledger" aria-labelledby="inventory-heading">
                 <div className="ledger-header">
-                  <h2 id="inventory-heading">Host inventory</h2>
-                  <span>{data.instances.length.toString().padStart(2, "0")} ACTIVE RECORDS</span>
+                  <h2 id="inventory-heading">Inventory</h2>
+                  <span>{data.instances.length}</span>
                 </div>
                 {data.instances.length === 0 ? (
                   <div className="empty-inventory">
-                    <div className="empty-glyph" aria-hidden="true"><span /><span /><span /></div>
-                    <div>
-                      <h3>No instances yet</h3>
-                      <p>This control plane is ready. Instance creation will be enabled in the next delivery slice.</p>
-                    </div>
+                    <h3>No instances</h3>
+                    <p>Create instances from the CLI once the runtime is available.</p>
                   </div>
                 ) : (
                   <table>
                     <caption className="sr-only">OpenBox instances</caption>
-                    <thead><tr><th>Name</th><th>Kind</th><th>Status</th><th>Terminal</th></tr></thead>
+                    <thead><tr><th>Name</th><th>Kind</th><th>Status</th><th></th></tr></thead>
                     <tbody>{data.instances.map((instance) => (
                       <tr key={instance.id}>
                         <th scope="row">{instance.name}</th>
@@ -140,7 +134,7 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
                             aria-label={`Open terminal for ${instance.name}`}
                             onClick={() => setTerminalInstance(instance)}
                           >
-                            Open terminal
+                            Terminal
                           </button>
                         </td>
                       </tr>
@@ -155,7 +149,7 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
           <OperationDrawer open={drawerOpen} operations={operations} onClose={closeDrawer} />
         </div>
       </div>
-      <footer><span>OPENBOX CONTROL PLANE</span><span>API V1</span></footer>
+      <footer><span>openbox</span><span>v1</span></footer>
     </div>
   );
 }
