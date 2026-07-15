@@ -215,4 +215,44 @@ describe("InstanceTerminal", () => {
     }));
     expect(await screen.findByRole("status", { name: "Terminal connection state" })).toHaveTextContent(/connected/i);
   });
+
+  it("auto-hides chrome after connect and reveals it on Escape or disconnect", async () => {
+    const user = userEvent.setup();
+    renderTerminal();
+
+    const toolbar = document.querySelector(".terminal-toolbar");
+    expect(toolbar).not.toHaveClass("terminal-toolbar--hidden");
+
+    openConnectedSocket();
+    expect(await screen.findByRole("status", { name: "Terminal connection state" })).toHaveTextContent(/connected/i);
+
+    await waitFor(() => {
+      expect(toolbar).toHaveClass("terminal-toolbar--hidden");
+    }, { timeout: 2500 });
+
+    await user.keyboard("{Escape}");
+    expect(toolbar).not.toHaveClass("terminal-toolbar--hidden");
+
+    await user.keyboard("{Escape}");
+    expect(toolbar).toHaveClass("terminal-toolbar--hidden");
+
+    FakeWebSocket.instances[0]?.close();
+    expect(await screen.findByRole("status", { name: "Terminal connection state" })).toHaveTextContent(/disconnected/i);
+    expect(toolbar).not.toHaveClass("terminal-toolbar--hidden");
+    expect(screen.getByRole("button", { name: "Reconnect" })).toBeInTheDocument();
+  });
+
+  it("reveals chrome when the top affordance is activated", async () => {
+    const user = userEvent.setup();
+    renderTerminal();
+    openConnectedSocket();
+    expect(await screen.findByRole("status", { name: "Terminal connection state" })).toHaveTextContent(/connected/i);
+
+    await waitFor(() => {
+      expect(document.querySelector(".terminal-toolbar")).toHaveClass("terminal-toolbar--hidden");
+    }, { timeout: 2500 });
+
+    await user.click(screen.getByRole("button", { name: "Show terminal controls" }));
+    expect(document.querySelector(".terminal-toolbar")).not.toHaveClass("terminal-toolbar--hidden");
+  });
 });

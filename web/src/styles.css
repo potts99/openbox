@@ -626,6 +626,7 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   padding: .55rem .75rem;
   border-bottom: 1px solid #2a2a27;
   background: rgba(22, 22, 20, .96);
+  transition: transform .18s ease, opacity .18s ease;
 }
 .terminal-toolbar h1 {
   margin: 0;
@@ -660,6 +661,25 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   font-size: .7rem;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
 }
+.terminal-toolbar--hidden {
+  transform: translateY(-100%);
+  pointer-events: none;
+  opacity: 0;
+}
+.terminal-reveal {
+  position: absolute;
+  z-index: 6;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.terminal-reveal[hidden] { display: none; }
 
 @media (max-width: 720px) {
   .console-header { flex-wrap: wrap; padding: .65rem 1rem; gap: .5rem 1rem; }
