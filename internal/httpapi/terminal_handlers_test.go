@@ -552,12 +552,30 @@ func TestTerminalRejectsConcurrentSessionsAtCapacity(t *testing.T) {
 		t.Fatalf("open ack: %v", err)
 	}
 
-	status, err := dialTerminalHTTP(t, wsURL, header)
-	if err == nil {
-		t.Fatal("expected second upgrade rejected")
+	// Upgrade still succeeds; the session slot is acquired only after open, so
+	// the limit is reported as a protocol error frame instead of HTTP 429.
+	second, err := dialTerminal(t, wsURL, header)
+	if err != nil {
+		t.Fatalf("second dial: %v", err)
 	}
-	if status != http.StatusTooManyRequests {
-		t.Fatalf("status=%d want %d", status, http.StatusTooManyRequests)
+	defer second.Close(websocket.StatusNormalClosure, "")
+	if err := second.Write(ctx, websocket.MessageText, openPayload); err != nil {
+		t.Fatal(err)
+	}
+	_, data, err := second.Read(ctx)
+	if err != nil {
+		t.Fatalf("read limit frame: %v", err)
+	}
+	frame, err := terminal.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	errFrame, ok := frame.(terminal.ErrorFrame)
+	if !ok {
+		t.Fatalf("frame type %T, want ErrorFrame", frame)
+	}
+	if errFrame.Code != "session_limit" {
+		t.Fatalf("error code=%q want session_limit", errFrame.Code)
 	}
 }
 
