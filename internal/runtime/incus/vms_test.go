@@ -348,27 +348,11 @@ func (a *vmAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeSync(w, instanceStateRecord{})
 			return
 		}
-		state := instanceStateRecord{Network: map[string]struct {
-			Addresses []struct {
-				Family  string `json:"family"`
-				Address string `json:"address"`
-				Scope   string `json:"scope"`
-			} `json:"addresses"`
-		}{}}
+		state := instanceStateRecord{Network: map[string]instanceStateNetwork{}}
 		if a.address != "" {
-			network := struct {
-				Addresses []struct {
-					Family  string `json:"family"`
-					Address string `json:"address"`
-					Scope   string `json:"scope"`
-				} `json:"addresses"`
-			}{}
-			network.Addresses = append(network.Addresses, struct {
-				Family  string `json:"family"`
-				Address string `json:"address"`
-				Scope   string `json:"scope"`
-			}{Family: "inet", Address: a.address, Scope: "global"})
-			state.Network["eth0"] = network
+			state.Network["eth0"] = instanceStateNetwork{
+				Addresses: []instanceStateAddress{{Family: "inet", Address: a.address, Scope: "global"}},
+			}
 		}
 		writeSync(w, state)
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/1.0/instances/"):

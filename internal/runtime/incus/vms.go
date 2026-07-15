@@ -94,13 +94,39 @@ func (a *Adapter) createVM(ctx context.Context, request runtimeapi.CreateRequest
 }
 
 type instanceStateRecord struct {
-	Network map[string]struct {
-		Addresses []struct {
-			Family  string `json:"family"`
-			Address string `json:"address"`
-			Scope   string `json:"scope"`
-		} `json:"addresses"`
-	} `json:"network"`
+	Status  string                          `json:"status"`
+	CPU     instanceStateCPU                `json:"cpu"`
+	Memory  instanceStateMemory             `json:"memory"`
+	Disk    map[string]instanceStateDisk    `json:"disk"`
+	Network map[string]instanceStateNetwork `json:"network"`
+}
+
+type instanceStateCPU struct {
+	Usage int64 `json:"usage"`
+}
+
+type instanceStateMemory struct {
+	Usage int64 `json:"usage"`
+}
+
+type instanceStateDisk struct {
+	Usage int64 `json:"usage"`
+}
+
+type instanceStateNetwork struct {
+	Addresses []instanceStateAddress `json:"addresses"`
+	Counters  instanceStateCounters  `json:"counters"`
+}
+
+type instanceStateAddress struct {
+	Family  string `json:"family"`
+	Address string `json:"address"`
+	Scope   string `json:"scope"`
+}
+
+type instanceStateCounters struct {
+	BytesReceived int64 `json:"bytes_received"`
+	BytesSent     int64 `json:"bytes_sent"`
 }
 
 func (a *Adapter) WaitInstanceReady(ctx context.Context, request runtimeapi.ReadinessRequest) error {
