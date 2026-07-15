@@ -26,6 +26,8 @@ openbox doctor --json
 
 Missing KVM is reported as unavailable rather than fatal because OpenBox supports container-only hosts. See [the runtime preflight guide](docs/runtime-preflight.md) for socket overrides, bootstrap safety, and integration testing.
 
+See [the strong-isolation operator guide](docs/operators/strong-isolation.md) for VM selection, image requirements, readiness, and the opt-in KVM test.
+
 ## Security
 
 Do not report vulnerabilities in a public issue. See [SECURITY.md](SECURITY.md) for private reporting instructions.

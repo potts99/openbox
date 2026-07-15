@@ -27,7 +27,11 @@ type Options struct {
 	HostProbe        HostProbe
 	Project          string
 	ContainerProfile string
+	VMProfile        string
 	StoragePool      string
+	Network          string
+	ReadinessTimeout time.Duration
+	ReadinessPoll    time.Duration
 }
 
 type Adapter struct {
@@ -38,7 +42,12 @@ type Adapter struct {
 	hostProbe        HostProbe
 	project          string
 	containerProfile string
+	vmProfile        string
 	storagePool      string
+	network          string
+	readinessTimeout time.Duration
+	readinessPoll    time.Duration
+	sshProbe         func(context.Context, string) (bool, error)
 }
 
 func New(options Options) (*Adapter, error) {
@@ -82,6 +91,28 @@ func New(options Options) (*Adapter, error) {
 	if containerProfile == "" {
 		containerProfile = "openbox-container"
 	}
+	vmProfile := options.VMProfile
+	if vmProfile == "" {
+		vmProfile = "openbox-vm"
+	}
+	networkName := options.Network
+	if networkName == "" {
+		networkName = "openbox0"
+	}
+	readinessTimeout := options.ReadinessTimeout
+	if readinessTimeout < 0 {
+		return nil, fmt.Errorf("Incus readiness timeout must not be negative")
+	}
+	if readinessTimeout == 0 {
+		readinessTimeout = 5 * time.Minute
+	}
+	readinessPoll := options.ReadinessPoll
+	if readinessPoll < 0 {
+		return nil, fmt.Errorf("Incus readiness poll interval must not be negative")
+	}
+	if readinessPoll == 0 {
+		readinessPoll = time.Second
+	}
 	return &Adapter{
 		socketPath:       socketPath,
 		timeout:          timeout,
@@ -90,7 +121,11 @@ func New(options Options) (*Adapter, error) {
 		hostProbe:        probe,
 		project:          project,
 		containerProfile: containerProfile,
+		vmProfile:        vmProfile,
 		storagePool:      options.StoragePool,
+		network:          networkName,
+		readinessTimeout: readinessTimeout,
+		readinessPoll:    readinessPoll,
 	}, nil
 }
 

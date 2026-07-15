@@ -94,7 +94,7 @@ func (a *Adapter) InspectInstance(ctx context.Context, ref string) (runtimeapi.I
 
 func (a *Adapter) CreateInstance(ctx context.Context, request runtimeapi.CreateRequest) (runtimeapi.Instance, error) {
 	if request.VM {
-		return runtimeapi.Instance{}, fmt.Errorf("create VM: %w", runtimeapi.ErrUnsupported)
+		return a.createVM(ctx, request)
 	}
 	if !request.Unprivileged {
 		return runtimeapi.Instance{}, fmt.Errorf("privileged containers: %w", runtimeapi.ErrUnsupported)
@@ -166,7 +166,7 @@ func (a *Adapter) changeState(ctx context.Context, ref, action string) error {
 		return runtimeapi.ErrNotFound
 	}
 	if err != nil {
-		return fmt.Errorf("%s Incus container: %w", action, err)
+		return fmt.Errorf("%s Incus instance: %w", action, err)
 	}
 	return nil
 }
@@ -177,7 +177,7 @@ func (a *Adapter) DeleteInstance(ctx context.Context, ref string) error {
 		return runtimeapi.ErrNotFound
 	}
 	if err != nil {
-		return fmt.Errorf("delete Incus container: %w", err)
+		return fmt.Errorf("delete Incus instance: %w", err)
 	}
 	return nil
 }

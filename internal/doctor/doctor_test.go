@@ -4,6 +4,7 @@ package doctor_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -46,6 +47,27 @@ func TestDaemonFailureIsFatalAndActionable(t *testing.T) {
 	report := doctor.Run(context.Background(), discoverer{err: errors.New("permission denied")})
 	if !report.HasFatal() || !strings.Contains(report.Checks[0].Guidance, "permissions") {
 		t.Fatalf("report = %#v", report)
+	}
+}
+
+func TestDoctorJSONPreservesHostKVMWhenIncusVMsAreUnavailable(t *testing.T) {
+	report := doctor.Run(context.Background(), discoverer{capabilities: runtimeapi.Capabilities{
+		Architecture: "x86_64", IncusVersion: "6.23", Containers: true,
+		Namespaces: map[string]bool{"mnt": true, "net": true, "pid": true, "user": true},
+		Cgroups:    true, StorageDrivers: []string{"dir"},
+		NetworkTools: map[string]bool{"dnsmasq": true, "ip": true, "nft": true},
+		KVM:          true, VirtualMachines: false, VMAvailability: runtimeapi.VMUnavailableIncus,
+	}})
+	assertStatus(t, report, "strong-isolation", doctor.StatusUnavailable)
+	encoded, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(encoded)
+	for _, wanted := range []string{`"kvm":true`, `"virtual_machines":false`, `"vm_availability":"incus_vm_unsupported"`} {
+		if !strings.Contains(output, wanted) {
+			t.Fatalf("JSON missing %s: %s", wanted, output)
+		}
 	}
 }
 

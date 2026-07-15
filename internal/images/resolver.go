@@ -20,8 +20,17 @@ func (e *AmbiguousError) Error() string {
 }
 
 func Resolve(reference string, available []runtimeapi.Image) (runtimeapi.Image, error) {
+	return ResolveForType(reference, "", available)
+}
+
+// ResolveForType resolves an alias or fingerprint only among images compatible
+// with the selected runtime type. The returned fingerprint is immutable.
+func ResolveForType(reference, imageType string, available []runtimeapi.Image) (runtimeapi.Image, error) {
 	var matches []runtimeapi.Image
 	for _, image := range available {
+		if imageType != "" && image.Type != imageType {
+			continue
+		}
 		if image.Fingerprint == reference || contains(image.Aliases, reference) {
 			matches = append(matches, image)
 		}

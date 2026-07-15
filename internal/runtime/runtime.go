@@ -25,7 +25,19 @@ type Capabilities struct {
 	KVM             bool            `json:"kvm"`
 	Containers      bool            `json:"containers"`
 	VirtualMachines bool            `json:"virtual_machines"`
+	VMAvailability  VMAvailability  `json:"vm_availability"`
+	VMReason        string          `json:"vm_reason,omitempty"`
 }
+
+type VMAvailability string
+
+const (
+	VMAvailable                       VMAvailability = "supported"
+	VMUnavailableKVMAbsent            VMAvailability = "kvm_absent"
+	VMUnavailableKVMPermission        VMAvailability = "kvm_permission_denied"
+	VMUnavailableNestedVirtualization VMAvailability = "nested_virtualization_unavailable"
+	VMUnavailableIncus                VMAvailability = "incus_vm_unsupported"
+)
 
 type Image struct {
 	Fingerprint  string
@@ -68,6 +80,11 @@ type CreateRequest struct {
 	Resources      Resources
 }
 
+type ReadinessRequest struct {
+	Ref   string
+	Stage func(string) error
+}
+
 type ExecRequest struct {
 	Ref     string
 	Command []string
@@ -92,6 +109,7 @@ type Runtime interface {
 	InspectInstance(context.Context, string) (Instance, error)
 	CreateInstance(context.Context, CreateRequest) (Instance, error)
 	StartInstance(context.Context, string) error
+	WaitInstanceReady(context.Context, ReadinessRequest) error
 	StopInstance(context.Context, string) error
 	Exec(context.Context, ExecRequest) (ExecResult, error)
 	CreateSnapshot(context.Context, string, string) error

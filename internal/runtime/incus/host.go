@@ -4,17 +4,22 @@ package incus
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	goruntime "runtime"
+
+	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 )
 
 type HostCapabilities struct {
-	Architecture string
-	Namespaces   map[string]bool
-	Cgroups      bool
-	NetworkTools map[string]bool
-	KVM          bool
+	Architecture   string
+	Namespaces     map[string]bool
+	Cgroups        bool
+	NetworkTools   map[string]bool
+	KVM            bool
+	VMAvailability runtimeapi.VMAvailability
+	VMReason       string
 }
 
 type HostProbe interface {
@@ -22,6 +27,8 @@ type HostProbe interface {
 }
 
 type OSHostProbe struct{}
+
+const kvmStableAPIVersion = 12
 
 func (OSHostProbe) Discover(ctx context.Context) (HostCapabilities, error) {
 	if err := ctx.Err(); err != nil {
@@ -45,9 +52,19 @@ func (OSHostProbe) Discover(ctx context.Context) (HostCapabilities, error) {
 		_, err := exec.LookPath(tool)
 		capabilities.NetworkTools[tool] = err == nil
 	}
-	if file, err := os.OpenFile("/dev/kvm", os.O_RDWR, 0); err == nil {
+	capabilities.VMAvailability, capabilities.VMReason = probeKVM("/dev/kvm")
+	if capabilities.VMAvailability == runtimeapi.VMAvailable {
 		capabilities.KVM = true
-		_ = file.Close()
 	}
 	return capabilities, nil
+}
+
+func classifyKVMAPIVersion(version uintptr, probeErr error) (runtimeapi.VMAvailability, string) {
+	if probeErr != nil {
+		return runtimeapi.VMUnavailableNestedVirtualization, "KVM API probe failed: " + probeErr.Error()
+	}
+	if version != kvmStableAPIVersion {
+		return runtimeapi.VMUnavailableNestedVirtualization, fmt.Sprintf("KVM API version %d is incompatible; OpenBox requires %d", version, kvmStableAPIVersion)
+	}
+	return runtimeapi.VMAvailable, ""
 }

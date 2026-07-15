@@ -13,7 +13,7 @@ import (
 )
 
 func TestRuntimeContract(t *testing.T) {
-	capabilities := runtimeapi.Capabilities{Architecture: "x86_64", Containers: true, KVM: true, VirtualMachines: true}
+	capabilities := runtimeapi.Capabilities{Architecture: "x86_64", Containers: true, KVM: true, VirtualMachines: true, VMAvailability: runtimeapi.VMAvailable}
 	r := fake.New(capabilities)
 	r.AddImage(runtimeapi.Image{Fingerprint: "sha256:base", Aliases: []string{"base"}, Architecture: "x86_64"})
 
@@ -60,6 +60,44 @@ func TestRuntimeContract(t *testing.T) {
 	}
 	if _, err := r.InspectInstance(context.Background(), "copy"); !errors.Is(err, runtimeapi.ErrNotFound) {
 		t.Fatalf("inspect deleted error = %v", err)
+	}
+}
+
+func TestContainerAndVMLifecycleIdentityParity(t *testing.T) {
+	for _, vm := range []bool{false, true} {
+		name := "container"
+		if vm {
+			name = "virtual-machine"
+		}
+		t.Run(name, func(t *testing.T) {
+			r := fake.New(runtimeapi.Capabilities{})
+			r.AddImage(runtimeapi.Image{Fingerprint: "sha256:image"})
+			metadata := map[string]string{"user.openbox.instance_id": "instance-1"}
+			created, err := r.CreateInstance(context.Background(), runtimeapi.CreateRequest{Ref: name, Image: "sha256:image", VM: vm, Unprivileged: !vm, Metadata: metadata})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if created.IsVM != vm || created.Metadata["user.openbox.instance_id"] != "instance-1" || created.State != runtimeapi.StateStopped {
+				t.Fatalf("created = %+v", created)
+			}
+			if err := r.StartInstance(context.Background(), name); err != nil {
+				t.Fatal(err)
+			}
+			if vm {
+				if err := r.WaitInstanceReady(context.Background(), runtimeapi.ReadinessRequest{Ref: name}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := r.StopInstance(context.Background(), name); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.DeleteInstance(context.Background(), name); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := r.InspectInstance(context.Background(), name); !errors.Is(err, runtimeapi.ErrNotFound) {
+				t.Fatalf("deleted inspect = %v", err)
+			}
+		})
 	}
 }
 

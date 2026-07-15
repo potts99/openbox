@@ -138,6 +138,30 @@ func (r *Runtime) StartInstance(ctx context.Context, ref string) error {
 	return r.setState(ctx, "instance.start", ref, runtimeapi.StateRunning)
 }
 
+func (r *Runtime) WaitInstanceReady(ctx context.Context, request runtimeapi.ReadinessRequest) error {
+	if err := r.begin(ctx, "instance.wait_ready"); err != nil {
+		return err
+	}
+	if request.Stage != nil {
+		if err := request.Stage("waiting_for_agent"); err != nil {
+			return err
+		}
+		if err := request.Stage("waiting_for_ssh"); err != nil {
+			return err
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	instance, exists := r.instances[request.Ref]
+	if !exists {
+		return runtimeapi.ErrNotFound
+	}
+	if !instance.IsVM || instance.State != runtimeapi.StateRunning {
+		return runtimeapi.ErrUnsupported
+	}
+	return nil
+}
+
 func (r *Runtime) StopInstance(ctx context.Context, ref string) error {
 	return r.setState(ctx, "instance.stop", ref, runtimeapi.StateStopped)
 }

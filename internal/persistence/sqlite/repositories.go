@@ -161,6 +161,26 @@ func (s *Store) CompleteOperation(ctx context.Context, ownerID domain.OwnerID, i
 	return &domain.Error{Code: domain.CodeConflict, Field: "operation.status"}
 }
 
+func (s *Store) UpdateOperationStage(ctx context.Context, ownerID domain.OwnerID, id domain.OperationID, stage string, progress int, updatedAt time.Time) error {
+	if stage == "" || progress < 0 || progress > 99 {
+		return &domain.Error{Code: domain.CodeInvalidArgument, Field: "operation.stage"}
+	}
+	release, err := s.acquireWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	result, err := s.db.ExecContext(ctx, `UPDATE operations SET status=?,stage=?,progress=?,updated_at=? WHERE owner_id=? AND id=? AND status IN (?,?)`,
+		domain.OperationRunning, stage, progress, formatTime(updatedAt), ownerID, id, domain.OperationPending, domain.OperationRunning)
+	if err != nil {
+		return mapWriteError(err)
+	}
+	if count, _ := result.RowsAffected(); count != 1 {
+		return &domain.Error{Code: domain.CodeConflict, Field: "operation.status"}
+	}
+	return nil
+}
+
 // UpdateInstanceObservation persists runtime facts while preventing runtime
 // identity changes and invalid lifecycle transitions.
 func (s *Store) UpdateInstanceObservation(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID, runtimeRef string, actual domain.IsolationType, observed domain.ObservedState, errorCode domain.ErrorCode, updatedAt time.Time) error {
@@ -181,8 +201,11 @@ func (s *Store) UpdateInstanceObservation(ctx context.Context, ownerID domain.Ow
 	if current.RuntimeRef != runtimeRef {
 		return &domain.Error{Code: domain.CodeConflict, Field: "runtime_ref"}
 	}
-	if actual != domain.IsolationContainer {
+	if actual != domain.IsolationContainer && actual != domain.IsolationVM {
 		return &domain.Error{Code: domain.CodeInvalidArgument, Field: "actual_isolation"}
+	}
+	if current.ActualIsolation != actual {
+		return &domain.Error{Code: domain.CodeConflict, Field: "actual_isolation"}
 	}
 	if err := domain.ValidateObservedTransition(current.ObservedState, observed); err != nil {
 		return err

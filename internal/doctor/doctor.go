@@ -91,8 +91,16 @@ func Run(ctx context.Context, discoverer Discoverer) Report {
 		report.Checks = append(report.Checks, Check{Name: "strong-isolation", Status: StatusPass, Message: "KVM-backed virtual machines are available"})
 	} else {
 		guidance := "install on a host exposing accessible /dev/kvm to enable strong isolation"
-		if capabilities.KVM {
+		switch capabilities.VMAvailability {
+		case runtimeapi.VMUnavailableKVMPermission:
+			guidance = "grant the OpenBox/Incus service permission to open /dev/kvm"
+		case runtimeapi.VMUnavailableNestedVirtualization:
+			guidance = "enable nested virtualization in the parent hypervisor or use container isolation"
+		case runtimeapi.VMUnavailableIncus:
 			guidance = "upgrade or configure Incus with virtual-machine support"
+		}
+		if capabilities.VMReason != "" {
+			guidance += ": " + capabilities.VMReason
 		}
 		report.Checks = append(report.Checks, Check{Name: "strong-isolation", Status: StatusUnavailable, Message: "strong isolation is unavailable; container mode remains supported", Guidance: guidance})
 	}

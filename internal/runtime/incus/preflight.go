@@ -42,6 +42,21 @@ func (a *Adapter) DiscoverCapabilities(ctx context.Context) (runtimeapi.Capabili
 		architecture = host.Architecture
 	}
 	vmAPI := containsString(server.APIExtensions, "virtual-machines")
+	availability := host.VMAvailability
+	if availability == "" {
+		if host.KVM {
+			availability = runtimeapi.VMAvailable
+		} else {
+			availability = runtimeapi.VMUnavailableKVMAbsent
+		}
+	}
+	vmReason := host.VMReason
+	hostKVMAvailable := availability == runtimeapi.VMAvailable
+	if availability == runtimeapi.VMAvailable && !vmAPI {
+		availability = runtimeapi.VMUnavailableIncus
+		vmReason = "the Incus daemon does not advertise virtual-machine support"
+	}
+	vmUsable := availability == runtimeapi.VMAvailable && vmAPI
 	return runtimeapi.Capabilities{
 		Architecture:    architecture,
 		IncusVersion:    server.Environment.ServerVersion,
@@ -49,9 +64,11 @@ func (a *Adapter) DiscoverCapabilities(ctx context.Context) (runtimeapi.Capabili
 		Cgroups:         host.Cgroups,
 		StorageDrivers:  drivers,
 		NetworkTools:    cloneBoolMap(host.NetworkTools),
-		KVM:             host.KVM,
+		KVM:             hostKVMAvailable,
 		Containers:      true,
-		VirtualMachines: host.KVM && vmAPI,
+		VirtualMachines: vmUsable,
+		VMAvailability:  availability,
+		VMReason:        vmReason,
 	}, nil
 }
 
