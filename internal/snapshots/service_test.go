@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/openbox-dev/openbox/internal/domain"
-	"github.com/openbox-dev/openbox/internal/runtime/fake"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
+	"github.com/openbox-dev/openbox/internal/runtime/fake"
 	"github.com/openbox-dev/openbox/internal/snapshots"
 )
 
@@ -133,6 +133,7 @@ func seedRunningInstance(t *testing.T, repo *memoryRepo, runtime *fake.Runtime, 
 	runtime.AddImage(runtimeapi.Image{Fingerprint: "sha256:ubuntu", Aliases: []string{"ubuntu"}, Architecture: "x86_64", Type: "container", CloudInit: true})
 	if _, err := runtime.CreateInstance(context.Background(), runtimeapi.CreateRequest{
 		Ref: instance.RuntimeRef, Image: "sha256:ubuntu", Unprivileged: true,
+		Metadata: map[string]string{"user.openbox.managed": "true", "user.openbox.resource": "instance", "user.openbox.instance_id": id, "user.openbox.owner_id": "owner-1"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -153,6 +154,15 @@ func (m *memoryRepo) CreateInstance(_ context.Context, instance domain.Instance,
 	m.instances[instance.ID] = instance
 	m.ops[string(operation.ID)] = operation
 	return operation, false, nil
+}
+func (m *memoryRepo) UpdateInstanceObservation(_ context.Context, owner domain.OwnerID, id domain.InstanceID, runtimeRef string, actual domain.IsolationType, observed domain.ObservedState, code domain.ErrorCode, at time.Time) error {
+	instance, ok := m.instances[id]
+	if !ok || instance.OwnerID != owner {
+		return &domain.Error{Code: domain.CodeNotFound, Field: "instance"}
+	}
+	instance.RuntimeRef, instance.ActualIsolation, instance.ObservedState, instance.ErrorCode, instance.UpdatedAt = runtimeRef, actual, observed, code, at
+	m.instances[id] = instance
+	return nil
 }
 func (m *memoryRepo) CreateSnapshotRecord(_ context.Context, snapshot domain.Snapshot, operation domain.Operation) (domain.Operation, bool, error) {
 	for _, existing := range m.snapshots {
