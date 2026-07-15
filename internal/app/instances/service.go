@@ -19,6 +19,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/operations"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 	"github.com/openbox-dev/openbox/internal/sandbox"
+	"github.com/openbox-dev/openbox/internal/software"
 )
 
 const (
@@ -62,6 +63,9 @@ type Repository interface {
 	ListOperations(context.Context, domain.OwnerID, int) ([]domain.Operation, error)
 	ListOperationEventsAfter(context.Context, domain.OwnerID, domain.OperationID, int, int) ([]domain.OperationEvent, error)
 	CancelPendingOperation(context.Context, domain.OwnerID, domain.OperationID, time.Time) (domain.Operation, error)
+	UpsertInstanceSoftware(context.Context, domain.InstanceSoftware) error
+	ListInstanceSoftware(context.Context, domain.OwnerID, domain.InstanceID) ([]domain.InstanceSoftware, error)
+	GetInstanceSoftware(context.Context, domain.OwnerID, domain.InstanceID, string) (domain.InstanceSoftware, error)
 }
 
 type CapabilityError struct {
@@ -132,10 +136,12 @@ type CreateInput struct {
 	Lifetime           time.Duration // Sandbox only; 0 means kind default
 	OwnerPublicKey     string
 	IdempotencyKey     string
+	Packages           []string // catalog package IDs to install after ready
 }
 
 type createRecoveryPayload struct {
-	OwnerPublicKey string `json:"owner_public_key"`
+	OwnerPublicKey string   `json:"owner_public_key"`
+	Packages       []string `json:"packages,omitempty"`
 }
 
 type MutationAction string
@@ -167,6 +173,9 @@ func (s *Service) SubmitCreate(ctx context.Context, input CreateInput) (domain.I
 	defer release()
 	lifetime, err := applyCreateDefaults(&input)
 	if err != nil {
+		return domain.Instance{}, domain.Operation{}, err
+	}
+	if err := validateCreatePackages(input.Packages); err != nil {
 		return domain.Instance{}, domain.Operation{}, err
 	}
 	requestHash, err := hashCreateInput(input)
@@ -239,7 +248,7 @@ func (s *Service) SubmitCreate(ctx context.Context, input CreateInput) (domain.I
 		return domain.Instance{}, domain.Operation{}, err
 	}
 	operation := s.operation("instance.create", instance, input.IdempotencyKey, requestHash)
-	operation.PayloadJSON, err = json.Marshal(createRecoveryPayload{OwnerPublicKey: input.OwnerPublicKey})
+	operation.PayloadJSON, err = json.Marshal(createRecoveryPayload{OwnerPublicKey: input.OwnerPublicKey, Packages: input.Packages})
 	if err != nil {
 		return domain.Instance{}, domain.Operation{}, fmt.Errorf("encode create recovery payload: %w", err)
 	}
@@ -327,8 +336,8 @@ func (s *Service) CancelOperation(ctx context.Context, ownerID domain.OwnerID, i
 	return s.repo.CancelPendingOperation(ctx, ownerID, id, s.now().UTC())
 }
 
-// SetProtection marks or clears Devbox base protection. Protected bases cannot
-// be deleted until protection is explicitly removed.
+// SetProtection marks or clears VPS base protection. Protected bases cannot
+// be deleted until protection is explicitly removed. Sandboxes cannot be protected.
 func (s *Service) SetProtection(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID, protected bool) (domain.Instance, error) {
 	release, err := s.acquireMutation(ctx)
 	if err != nil {
@@ -467,6 +476,9 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 	if err != nil {
 		return domain.Instance{}, err
 	}
+	if err := validateCreatePackages(input.Packages); err != nil {
+		return domain.Instance{}, err
+	}
 	requestHash, err := hashCreateInput(input)
 	if err != nil {
 		return domain.Instance{}, err
@@ -545,7 +557,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 		return domain.Instance{}, err
 	}
 	operation := s.operation("instance.create", instance, input.IdempotencyKey, requestHash)
-	payload, err := json.Marshal(createRecoveryPayload{OwnerPublicKey: input.OwnerPublicKey})
+	payload, err := json.Marshal(createRecoveryPayload{OwnerPublicKey: input.OwnerPublicKey, Packages: input.Packages})
 	if err != nil {
 		return domain.Instance{}, fmt.Errorf("encode create recovery payload: %w", err)
 	}
@@ -628,6 +640,9 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 		return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, err)
 	}
 	if err := s.repo.CompleteOperation(ctx, input.OwnerID, operation.ID, s.now()); err != nil {
+		return domain.Instance{}, err
+	}
+	if err := s.installCreatePackages(ctx, result, input.Packages); err != nil {
 		return domain.Instance{}, err
 	}
 	return result, nil
@@ -739,7 +754,14 @@ func (s *Service) recoverCreate(ctx context.Context, operation domain.Operation)
 	if _, err := s.Refresh(ctx, instance.OwnerID, instance.ID); err != nil {
 		return err
 	}
-	return s.repo.CompleteOperation(ctx, instance.OwnerID, operation.ID, s.now())
+	if err := s.repo.CompleteOperation(ctx, instance.OwnerID, operation.ID, s.now()); err != nil {
+		return err
+	}
+	refreshed, err := s.repo.GetInstance(ctx, instance.OwnerID, instance.ID)
+	if err != nil {
+		return err
+	}
+	return s.installCreatePackages(ctx, refreshed, payload.Packages)
 }
 
 func authorizedKeys(owner, gateway string) string {
@@ -1297,6 +1319,99 @@ func observedState(state runtimeapi.InstanceState) (domain.ObservedState, error)
 func runtimeReference(id domain.InstanceID) string {
 	sum := sha256.Sum256([]byte(id))
 	return "obx-" + hex.EncodeToString(sum[:12])
+}
+
+// ListSoftware returns catalog install state for an instance.
+func (s *Service) ListSoftware(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID) ([]domain.InstanceSoftware, error) {
+	if _, err := s.repo.GetInstance(ctx, ownerID, id); err != nil {
+		return nil, err
+	}
+	return s.repo.ListInstanceSoftware(ctx, ownerID, id)
+}
+
+// InstallSoftware installs a catalog package into a running instance.
+func (s *Service) InstallSoftware(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID, packageID string) (domain.InstanceSoftware, error) {
+	release, err := s.acquireMutation(ctx)
+	if err != nil {
+		return domain.InstanceSoftware{}, err
+	}
+	defer release()
+	instance, err := s.repo.GetInstance(ctx, ownerID, id)
+	if err != nil {
+		return domain.InstanceSoftware{}, err
+	}
+	if instance.ObservedState != domain.ObservedRunning || instance.RuntimeRef == "" {
+		return domain.InstanceSoftware{}, &domain.Error{Code: domain.CodeConflict, Field: "observed_state"}
+	}
+	return s.installPackage(ctx, instance, packageID)
+}
+
+func (s *Service) installCreatePackages(ctx context.Context, instance domain.Instance, packageIDs []string) error {
+	for _, packageID := range packageIDs {
+		if _, err := s.installPackage(ctx, instance, packageID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) installPackage(ctx context.Context, instance domain.Instance, packageID string) (domain.InstanceSoftware, error) {
+	pkg, ok := software.DefaultCatalog().Get(packageID)
+	if !ok {
+		return domain.InstanceSoftware{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "package_id"}
+	}
+	now := s.now().UTC()
+	row := domain.InstanceSoftware{
+		InstanceID: instance.ID,
+		OwnerID:    instance.OwnerID,
+		PackageID:  packageID,
+		Status:     domain.SoftwarePending,
+		UpdatedAt:  now,
+	}
+	if err := s.repo.UpsertInstanceSoftware(ctx, row); err != nil {
+		return domain.InstanceSoftware{}, err
+	}
+	if err := software.Install(ctx, s.runtime, instance.RuntimeRef, pkg); err != nil {
+		row.Status = domain.SoftwareFailed
+		row.Error = err.Error()
+		row.UpdatedAt = s.now().UTC()
+		_ = s.repo.UpsertInstanceSoftware(ctx, row)
+		return row, err
+	}
+	version := ""
+	for _, pin := range pkg.Pins {
+		if pin.Manager == "npm" {
+			version = pin.Version
+			break
+		}
+	}
+	row.Status = domain.SoftwareInstalled
+	row.Version = version
+	row.Error = ""
+	row.UpdatedAt = s.now().UTC()
+	if err := s.repo.UpsertInstanceSoftware(ctx, row); err != nil {
+		return domain.InstanceSoftware{}, err
+	}
+	return row, nil
+}
+
+func validateCreatePackages(packageIDs []string) error {
+	seen := map[string]bool{}
+	catalog := software.DefaultCatalog()
+	for _, id := range packageIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return &domain.Error{Code: domain.CodeInvalidArgument, Field: "packages"}
+		}
+		if seen[id] {
+			return &domain.Error{Code: domain.CodeInvalidArgument, Field: "packages"}
+		}
+		seen[id] = true
+		if _, ok := catalog.Get(id); !ok {
+			return &domain.Error{Code: domain.CodeInvalidArgument, Field: "packages"}
+		}
+	}
+	return nil
 }
 
 func hashCreateInput(input CreateInput) (string, error) {

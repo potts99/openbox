@@ -583,6 +583,63 @@ func newTestServiceWithIDs(t *testing.T, runtime ContainerRuntime, ids func() st
 	return service, base, store
 }
 
+func TestCreateWithPiPackageInstallsViaExec(t *testing.T) {
+	service, runtime, store := newTestService(t, nil)
+	ctx := context.Background()
+	input := createInput()
+	input.Packages = []string{"pi"}
+	created, err := service.Create(ctx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := store.ListInstanceSoftware(ctx, created.OwnerID, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].PackageID != "pi" || rows[0].Status != domain.SoftwareInstalled {
+		t.Fatalf("software=%+v", rows)
+	}
+	calls := runtime.Calls()
+	foundExec := false
+	for _, call := range calls {
+		if call == "instance.exec" {
+			foundExec = true
+			break
+		}
+	}
+	if !foundExec {
+		t.Fatalf("expected guest exec for install, calls=%v", calls)
+	}
+}
+
+func TestInstallSoftwareOnRunningInstance(t *testing.T) {
+	service, _, store := newTestService(t, nil)
+	ctx := context.Background()
+	created, err := service.Create(ctx, createInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := service.InstallSoftware(ctx, created.OwnerID, created.ID, "pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Status != domain.SoftwareInstalled || row.PackageID != "pi" {
+		t.Fatalf("row=%+v", row)
+	}
+	got, err := store.GetInstanceSoftware(ctx, created.OwnerID, created.ID, "pi")
+	if err != nil || got.Status != domain.SoftwareInstalled {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+}
+
+func TestCreateRejectsUnknownPackage(t *testing.T) {
+	service, _, _ := newTestService(t, nil)
+	input := createInput()
+	input.Packages = []string{"not-a-package"}
+	_, err := service.Create(context.Background(), input)
+	assertDomainCode(t, err, domain.CodeInvalidArgument)
+}
+
 func createInput() CreateInput {
 	return CreateInput{OwnerID: "owner-1", Name: "project", Kind: domain.KindVPS, Image: "ubuntu", RequestedIsolation: domain.IsolationStandard,
 		Resources: domain.Resources{VCPUs: 2, MemoryBytes: 1024, DiskBytes: 2048}, OwnerPublicKey: "ssh-ed25519 owner", IdempotencyKey: "create-key"}
