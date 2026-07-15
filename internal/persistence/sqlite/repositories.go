@@ -111,13 +111,16 @@ func (s *Store) CreateInstance(ctx context.Context, instance domain.Instance, op
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO instances(
 		id,owner_id,name,kind,image_id,requested_isolation,actual_isolation,desired_state,observed_state,
-		vcpus,memory_bytes,disk_bytes,expires_at,protected,runtime_ref,error_code,error_stage,error_retryable,created_at,updated_at,deleted_at
-	) VALUES(?,?,?,?,NULLIF(?,''),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		vcpus,memory_bytes,disk_bytes,expires_at,protected,runtime_ref,
+		clone_source_instance_id,clone_source_snapshot_id,clone_source_image_id,
+		error_code,error_stage,error_retryable,created_at,updated_at,deleted_at
+	) VALUES(?,?,?,?,NULLIF(?,''),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		instance.ID, instance.OwnerID, instance.Name, instance.Kind, instance.ImageID,
 		instance.RequestedIsolation, instance.ActualIsolation, instance.DesiredState, instance.ObservedState,
 		instance.Resources.VCPUs, instance.Resources.MemoryBytes, instance.Resources.DiskBytes,
-		nullableTime(instance.ExpiresAt), instance.Protected, instance.RuntimeRef, instance.ErrorCode,
-		instance.ErrorStage, instance.ErrorRetryable, formatTime(instance.CreatedAt), formatTime(instance.UpdatedAt), nullableTime(instance.DeletedAt))
+		nullableTime(instance.ExpiresAt), instance.Protected, instance.RuntimeRef,
+		instance.CloneSourceInstanceID, instance.CloneSourceSnapshotID, instance.CloneSourceImageID,
+		instance.ErrorCode, instance.ErrorStage, instance.ErrorRetryable, formatTime(instance.CreatedAt), formatTime(instance.UpdatedAt), nullableTime(instance.DeletedAt))
 	if err != nil {
 		return domain.Operation{}, false, mapWriteError(err)
 	}
@@ -127,18 +130,19 @@ func (s *Store) CreateInstance(ctx context.Context, instance domain.Instance, op
 	return operation, false, nil
 }
 
+const instanceColumns = `id,owner_id,name,kind,COALESCE(image_id,''),requested_isolation,actual_isolation,
+		desired_state,observed_state,vcpus,memory_bytes,disk_bytes,expires_at,protected,runtime_ref,
+		COALESCE(clone_source_instance_id,''),COALESCE(clone_source_snapshot_id,''),COALESCE(clone_source_image_id,''),
+		error_code,error_stage,error_retryable,created_at,updated_at,deleted_at`
+
 func (s *Store) GetInstance(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID) (domain.Instance, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id,owner_id,name,kind,COALESCE(image_id,''),requested_isolation,actual_isolation,
-		desired_state,observed_state,vcpus,memory_bytes,disk_bytes,expires_at,protected,runtime_ref,error_code,error_stage,
-		error_retryable,created_at,updated_at,deleted_at FROM instances WHERE owner_id=? AND id=?`, ownerID, id)
+	row := s.db.QueryRowContext(ctx, `SELECT `+instanceColumns+` FROM instances WHERE owner_id=? AND id=?`, ownerID, id)
 	return scanInstance(row)
 }
 
 // ListInstances returns all non-tombstoned durable instances for reconciliation.
 func (s *Store) ListInstances(ctx context.Context) ([]domain.Instance, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,owner_id,name,kind,COALESCE(image_id,''),requested_isolation,actual_isolation,
-		desired_state,observed_state,vcpus,memory_bytes,disk_bytes,expires_at,protected,runtime_ref,error_code,error_stage,
-		error_retryable,created_at,updated_at,deleted_at FROM instances WHERE deleted_at IS NULL ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+instanceColumns+` FROM instances WHERE deleted_at IS NULL ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list instances: %w", err)
 	}
@@ -163,9 +167,7 @@ func (s *Store) ListInstancesByOwner(ctx context.Context, ownerID domain.OwnerID
 	if ownerID == "" || limit <= 0 || limit > 1000 {
 		return nil, &domain.Error{Code: domain.CodeInvalidArgument, Field: "limit"}
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,owner_id,name,kind,COALESCE(image_id,''),requested_isolation,actual_isolation,
-		desired_state,observed_state,vcpus,memory_bytes,disk_bytes,expires_at,protected,runtime_ref,error_code,error_stage,
-		error_retryable,created_at,updated_at,deleted_at FROM instances WHERE owner_id=? AND deleted_at IS NULL ORDER BY id LIMIT ?`, ownerID, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+instanceColumns+` FROM instances WHERE owner_id=? AND deleted_at IS NULL ORDER BY id LIMIT ?`, ownerID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list owner instances: %w", err)
 	}
@@ -552,7 +554,8 @@ func scanInstance(row rowScanner) (domain.Instance, error) {
 	var created, updated string
 	err := row.Scan(&i.ID, &i.OwnerID, &i.Name, &i.Kind, &i.ImageID, &i.RequestedIsolation, &i.ActualIsolation,
 		&i.DesiredState, &i.ObservedState, &i.Resources.VCPUs, &i.Resources.MemoryBytes, &i.Resources.DiskBytes, &expires,
-		&i.Protected, &i.RuntimeRef, &i.ErrorCode, &i.ErrorStage, &i.ErrorRetryable, &created, &updated, &deleted)
+		&i.Protected, &i.RuntimeRef, &i.CloneSourceInstanceID, &i.CloneSourceSnapshotID, &i.CloneSourceImageID,
+		&i.ErrorCode, &i.ErrorStage, &i.ErrorRetryable, &created, &updated, &deleted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Instance{}, &domain.Error{Code: domain.CodeNotFound, Field: "instance"}
 	}
@@ -578,7 +581,7 @@ func scanInstance(row rowScanner) (domain.Instance, error) {
 }
 
 func getInstanceTx(ctx context.Context, tx *sql.Tx, ownerID domain.OwnerID, id domain.InstanceID) (domain.Instance, error) {
-	return scanInstance(tx.QueryRowContext(ctx, `SELECT id,owner_id,name,kind,COALESCE(image_id,''),requested_isolation,actual_isolation,desired_state,observed_state,vcpus,memory_bytes,disk_bytes,expires_at,protected,runtime_ref,error_code,error_stage,error_retryable,created_at,updated_at,deleted_at FROM instances WHERE owner_id=? AND id=?`, ownerID, id))
+	return scanInstance(tx.QueryRowContext(ctx, `SELECT `+instanceColumns+` FROM instances WHERE owner_id=? AND id=?`, ownerID, id))
 }
 
 func findOperationByIdempotency(ctx context.Context, tx *sql.Tx, ownerID domain.OwnerID, key string) (domain.Operation, bool, error) {

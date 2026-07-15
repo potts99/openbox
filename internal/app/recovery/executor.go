@@ -21,9 +21,14 @@ type SnapshotRecoverer interface {
 	RecoverOperation(context.Context, domain.Operation) error
 }
 
+type CloneRecoverer interface {
+	RecoverOperation(context.Context, domain.Operation) error
+}
+
 type Executor struct {
 	Instances InstanceRecoverer
 	Snapshots SnapshotRecoverer
+	Clones    CloneRecoverer
 }
 
 func (e Executor) Execute(ctx context.Context, operation domain.Operation) error {
@@ -34,6 +39,11 @@ func (e Executor) Execute(ctx context.Context, operation domain.Operation) error
 			return &domain.Error{Code: domain.CodeInvalidArgument, Field: "operation.type"}
 		}
 		err = e.Snapshots.RecoverOperation(ctx, operation)
+	case operation.Type == "instance.copy":
+		if e.Clones == nil {
+			return &domain.Error{Code: domain.CodeInvalidArgument, Field: "operation.type"}
+		}
+		err = e.Clones.RecoverOperation(ctx, operation)
 	default:
 		if e.Instances == nil {
 			return &domain.Error{Code: domain.CodeInvalidArgument, Field: "operation.type"}
