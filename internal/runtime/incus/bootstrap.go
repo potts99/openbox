@@ -201,14 +201,21 @@ func requiredDrift(existing, desired resource) []string {
 			}
 		}
 	}
-	if !reflect.DeepEqual(existing.Ingress, desired.Ingress) {
+	if !aclRulesEqual(existing.Ingress, desired.Ingress) {
 		fields = append(fields, "ingress")
 	}
-	if !reflect.DeepEqual(existing.Egress, desired.Egress) {
+	if !aclRulesEqual(existing.Egress, desired.Egress) {
 		fields = append(fields, "egress")
 	}
 	sort.Strings(fields)
 	return fields
+}
+
+func aclRulesEqual(existing, desired []networkACLRule) bool {
+	if len(existing) == 0 && len(desired) == 0 {
+		return true
+	}
+	return reflect.DeepEqual(existing, desired)
 }
 
 func networkResource(config BootstrapConfig) resource {

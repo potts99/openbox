@@ -38,6 +38,13 @@ type networkACLRule struct {
 	Protocol        string `json:"protocol,omitempty"`
 	DestinationPort string `json:"destination_port,omitempty"`
 	Description     string `json:"description,omitempty"`
+	// State is required by Incus 7+ (enabled|disabled|logged).
+	State string `json:"state,omitempty"`
+}
+
+func enabledACLRule(rule networkACLRule) networkACLRule {
+	rule.State = "enabled"
+	return rule
 }
 
 func networkACLResource() resource {
@@ -46,24 +53,24 @@ func networkACLResource() resource {
 		Description: "OpenBox default-deny instance network policy",
 		Config:      managedConfig("network-acl", nil),
 		Egress: []networkACLRule{
-			{
+			enabledACLRule(networkACLRule{
 				Action: "allow", Destination: ManagedBridgeGatewayHost, Protocol: "udp", DestinationPort: "53",
 				Description: "allow DNS UDP to managed bridge gateway",
-			},
-			{
+			}),
+			enabledACLRule(networkACLRule{
 				Action: "allow", Destination: ManagedBridgeGatewayHost, Protocol: "tcp", DestinationPort: "53",
 				Description: "allow DNS TCP to managed bridge gateway",
-			},
-			{
+			}),
+			enabledACLRule(networkACLRule{
 				Action: "allow", Destination: ManagedBridgeGatewayHost, Protocol: "tcp", DestinationPort: LLMGatewayPort,
 				Description: "allow LLM Gateway management placeholder",
-			},
+			}),
 		},
 		Ingress: []networkACLRule{
-			{
+			enabledACLRule(networkACLRule{
 				Action: "allow", Source: ManagedBridgeGatewayHost, Protocol: "tcp", DestinationPort: "22",
 				Description: "allow OpenBox SSH gateway access",
-			},
+			}),
 		},
 	}
 }
@@ -71,21 +78,22 @@ func networkACLResource() resource {
 func standardEgressACLResource() resource {
 	egress := make([]networkACLRule, 0, len(managedBridgePeerCIDRs())+1)
 	for _, peerCIDR := range managedBridgePeerCIDRs() {
-		egress = append(egress, networkACLRule{
+		egress = append(egress, enabledACLRule(networkACLRule{
 			Action: "reject", Destination: peerCIDR,
 			Description: "deny peer instances on managed bridge",
-		})
+		}))
 	}
-	egress = append(egress, networkACLRule{
+	egress = append(egress, enabledACLRule(networkACLRule{
 		Action: "allow", Destination: "0.0.0.0/0",
 		Description: "allow public internet egress",
-	})
+	}))
 
 	return resource{
 		Name:        StandardEgressACLName,
 		Description: "OpenBox standard instance egress policy",
 		Config:      managedConfig("network-acl", nil),
 		Egress:      egress,
+		Ingress:     []networkACLRule{},
 	}
 }
 
@@ -108,16 +116,17 @@ func managedBridgePeerCIDRs() []string {
 func RestrictedACL(name string, destinations []string) resource {
 	rules := make([]networkACLRule, 0, len(destinations))
 	for _, destination := range destinations {
-		rules = append(rules, networkACLRule{
+		rules = append(rules, enabledACLRule(networkACLRule{
 			Action: "allow", Destination: destination,
 			Description: "allow administrator-approved destination",
-		})
+		}))
 	}
 	return resource{
 		Name:        name,
 		Description: "OpenBox restricted instance egress policy",
 		Config:      managedConfig("network-acl", nil),
 		Egress:      rules,
+		Ingress:     []networkACLRule{},
 	}
 }
 
