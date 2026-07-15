@@ -127,6 +127,7 @@ type Service struct {
 	networkPolicy            NetworkPolicy
 	mutationGate             chan struct{}
 	execGate                 *sandbox.ExecGate
+	installSoftwareFn        func(context.Context, software.GuestExecer, string, software.Package, software.InstallOptions) error
 }
 
 func New(runtime InstanceRuntime, repo Repository, options Options) (*Service, error) {
@@ -1508,7 +1509,27 @@ func (s *Service) installPackage(ctx context.Context, instance domain.Instance, 
 	if err := s.repo.UpsertInstanceSoftware(ctx, row); err != nil {
 		return domain.InstanceSoftware{}, err
 	}
-	if err := software.Install(ctx, s.runtime, instance.RuntimeRef, pkg, software.InstallOptions{}); err != nil {
+	caps, err := s.runtime.DiscoverCapabilities(ctx)
+	if err != nil {
+		row.Status = domain.SoftwareFailed
+		row.Error = err.Error()
+		row.UpdatedAt = s.now().UTC()
+		_ = s.repo.UpsertInstanceSoftware(ctx, row)
+		return row, err
+	}
+	if caps.Architecture == "" {
+		err := fmt.Errorf("software install: runtime architecture is unavailable")
+		row.Status = domain.SoftwareFailed
+		row.Error = err.Error()
+		row.UpdatedAt = s.now().UTC()
+		_ = s.repo.UpsertInstanceSoftware(ctx, row)
+		return row, err
+	}
+	installFn := s.installSoftwareFn
+	if installFn == nil {
+		installFn = software.Install
+	}
+	if err := installFn(ctx, s.runtime, instance.RuntimeRef, pkg, software.InstallOptions{Architecture: caps.Architecture}); err != nil {
 		row.Status = domain.SoftwareFailed
 		row.Error = err.Error()
 		row.UpdatedAt = s.now().UTC()
@@ -1517,9 +1538,17 @@ func (s *Service) installPackage(ctx context.Context, instance domain.Instance, 
 	}
 	version := ""
 	for _, pin := range pkg.Pins {
-		if pin.Manager == "npm" {
+		if pin.Manager == "github-release" {
 			version = pin.Version
 			break
+		}
+	}
+	if version == "" {
+		for _, pin := range pkg.Pins {
+			if pin.Manager == "npm" {
+				version = pin.Version
+				break
+			}
 		}
 	}
 	row.Status = domain.SoftwareInstalled
