@@ -1,6 +1,6 @@
 {
 	# OpenBox HTTPS gateway base config.
-	# On-demand TLS "ask" authorization is supplied by openboxd (later task).
+	# on_demand_tls ask http://127.0.0.1:8443/v1/certificates/allow
 	# admin off
 }
 

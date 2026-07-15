@@ -17,13 +17,17 @@ import (
 type principalKey struct{}
 
 func isPublicAuthRoute(segments []string, method string) bool {
-	if len(segments) != 2 {
-		return false
+	if len(segments) == 2 {
+		if segments[1] == "health" || segments[1] == "bootstrap" {
+			return true
+		}
+		return segments[1] == "sessions" && method == http.MethodPost
 	}
-	if segments[1] == "health" || segments[1] == "bootstrap" {
+	// Caddy on-demand TLS ask — no owner credentials; loopback/API bind is the trust boundary.
+	if len(segments) == 3 && segments[1] == "certificates" && segments[2] == "allow" && method == http.MethodGet {
 		return true
 	}
-	return segments[1] == "sessions" && method == http.MethodPost
+	return false
 }
 
 func (h *Handler) authenticate(r *http.Request) (*http.Request, error) {

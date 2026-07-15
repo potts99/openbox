@@ -67,6 +67,20 @@ func (s *Store) DeleteRoute(ctx context.Context, ownerID domain.OwnerID, id doma
 	return nil
 }
 
+func (s *Store) FindRouteByHostname(ctx context.Context, hostname string) (domain.Route, bool, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT id,owner_id,instance_id,hostname,target_port,visibility,tls_state,created_at,updated_at
+		FROM routes WHERE lower(hostname)=lower(?) LIMIT 1`, hostname)
+	route, err := scanRoute(row)
+	if err != nil {
+		var domainErr *domain.Error
+		if errors.As(err, &domainErr) && domainErr.Code == domain.CodeNotFound {
+			return domain.Route{}, false, nil
+		}
+		return domain.Route{}, false, err
+	}
+	return route, true, nil
+}
+
 type routeScanner interface {
 	Scan(dest ...any) error
 }

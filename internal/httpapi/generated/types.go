@@ -457,6 +457,15 @@ type GetCapabilitiesParams struct {
 	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
 }
 
+// AllowCertificateParams defines parameters for AllowCertificate.
+type AllowCertificateParams struct {
+	// Domain Hostname requested for on-demand TLS certificate issuance.
+	Domain string `form:"domain" json:"domain"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
 // GetHealthParams defines parameters for GetHealth.
 type GetHealthParams struct {
 	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
