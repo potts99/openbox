@@ -35,6 +35,12 @@ type InstanceProxy interface {
 	Open(context.Context, InstanceTarget) (RemoteSession, error)
 }
 
+// InstancePortDialer opens a TCP connection to a port on a managed instance.
+// Used for SSH Direct-TCPIP (`openbox forward`) without exposing host dialing.
+type InstancePortDialer interface {
+	DialPort(context.Context, domain.OwnerID, string, uint32) (net.Conn, error)
+}
+
 type RemoteSession interface {
 	Stdin() io.WriteCloser
 	Stdout() io.Reader
@@ -68,6 +74,9 @@ type Config struct {
 	Keys                  KeyAuthorizer
 	Commands              CommandDispatcher
 	Instances             InstanceProxy
+	// Ports enables Direct-TCPIP to managed instance ports for `openbox forward`.
+	// When nil, TCP forwarding remains refused.
+	Ports                 InstancePortDialer
 	Audit                 Auditor
 	ReadyTimeout          time.Duration
 	AuthTimeout           time.Duration

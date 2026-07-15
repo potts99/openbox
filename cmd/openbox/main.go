@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -35,6 +36,7 @@ Commands:
   restart ID             Restart an instance
   rm ID                  Delete an instance
   route                  Manage HTTPS routes
+  forward INSTANCE PORT  SSH-tunnel an instance port to localhost
   operation watch ID     Stream operation progress
   ssh-config print       Print optional OpenSSH aliases
   ssh-config install     Install aliases without replacing existing entries
@@ -74,6 +76,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if commandArgs[0] == "ssh-config" {
 		return runSSHConfig(commandArgs[1:], stdout, stderr)
+	}
+	if commandArgs[0] == "forward" {
+		return runForward(commandArgs[1:], stdout, stderr, exec.LookPath, func(cmd *exec.Cmd) error { return cmd.Run() })
 	}
 	httpClient := &http.Client{Timeout: options.timeout}
 	api, err := openbox.New(openbox.Options{BaseURL: options.server, HTTPClient: httpClient, UserAgent: "openbox-cli/" + version.Version, Token: options.token})

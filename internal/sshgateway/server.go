@@ -231,7 +231,13 @@ func (s *Server) handleConnection(parent context.Context, raw net.Conn) {
 	go s.rejectGlobalRequests(ctx, requests, connectionEvent)
 	connectionSessions := make(chan struct{}, s.config.SessionsPerConnection)
 	for channel := range channels {
-		if channel.ChannelType() != "session" {
+		switch channel.ChannelType() {
+		case "session":
+			// handled below
+		case "direct-tcpip":
+			s.handleDirectTCPIP(ctx, connection, channel, connectionEvent)
+			continue
+		default:
 			event := connectionEvent
 			event.Command = channel.ChannelType()
 			event.Outcome = "refused"
@@ -275,6 +281,73 @@ func (s *Server) rejectGlobalRequests(ctx context.Context, requests <-chan *ssh.
 			_ = request.Reply(false, nil)
 		}
 	}
+}
+
+func (s *Server) handleDirectTCPIP(ctx context.Context, connection *ssh.ServerConn, newChannel ssh.NewChannel, base AuditEvent) {
+	event := base
+	event.Command = "direct-tcpip"
+	kind, instanceName, err := parseUsername(connection.User())
+	if err != nil || kind != sessionInstance || s.config.Ports == nil {
+		event.Outcome = "refused"
+		s.record(ctx, event)
+		_ = newChannel.Reject(ssh.Prohibited, "TCP forwarding is not allowed")
+		return
+	}
+	var payload struct {
+		Host string
+		Port uint32
+		Orig string
+		OPort uint32
+	}
+	if err := ssh.Unmarshal(newChannel.ExtraData(), &payload); err != nil {
+		event.Outcome = "refused"
+		s.record(ctx, event)
+		_ = newChannel.Reject(ssh.ConnectionFailed, "invalid forward request")
+		return
+	}
+	if payload.Port < 1 || payload.Port > 65535 {
+		event.Outcome = "refused"
+		s.record(ctx, event)
+		_ = newChannel.Reject(ssh.Prohibited, "invalid forward port")
+		return
+	}
+	// Clients typically ask for 127.0.0.1:PORT meaning "on the instance".
+	// Reject other destinations to prevent proxy-based host/SSRF access.
+	host := strings.ToLower(strings.TrimSpace(payload.Host))
+	if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+		event.Outcome = "refused"
+		s.record(ctx, event)
+		_ = newChannel.Reject(ssh.Prohibited, "only instance loopback forwards are allowed")
+		return
+	}
+	owner := domain.OwnerID(connection.Permissions.Extensions["openbox-owner"])
+	event.Target = instanceName
+	dialCtx, cancel := context.WithTimeout(ctx, s.config.OpenTimeout)
+	upstream, err := s.config.Ports.DialPort(dialCtx, owner, instanceName, payload.Port)
+	cancel()
+	if err != nil {
+		event.Outcome = "proxy_failed"
+		s.record(ctx, event)
+		_ = newChannel.Reject(ssh.ConnectionFailed, "forward target unavailable")
+		return
+	}
+	channel, requests, err := newChannel.Accept()
+	if err != nil {
+		_ = upstream.Close()
+		return
+	}
+	go ssh.DiscardRequests(requests)
+	event.Outcome = "ok"
+	s.record(ctx, event)
+	go func() {
+		defer channel.Close()
+		defer upstream.Close()
+		var wait sync.WaitGroup
+		wait.Add(2)
+		go func() { defer wait.Done(); _, _ = io.Copy(upstream, channel) }()
+		go func() { defer wait.Done(); _, _ = io.Copy(channel, upstream) }()
+		wait.Wait()
+	}()
 }
 
 func (s *Server) handleSession(ctx context.Context, connection *ssh.ServerConn, channel ssh.Channel, requests <-chan *ssh.Request) {
