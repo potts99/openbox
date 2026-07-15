@@ -103,7 +103,7 @@ func TestContainerLifecycle(t *testing.T) {
 }
 
 func TestImageAliasChangesAffectFutureCreatesOnly(t *testing.T) {
-	service, runtime, _ := newTestService(t, nil)
+	service, runtime, store := newTestService(t, nil)
 	first, err := service.Create(context.Background(), createInput())
 	if err != nil {
 		t.Fatal(err)
@@ -123,6 +123,14 @@ func TestImageAliasChangesAffectFutureCreatesOnly(t *testing.T) {
 	requests := runtime.CreateRequests()
 	if len(requests) != 2 || requests[0].Image != "sha256:ubuntu" || requests[1].Image != "sha256:new-ubuntu" {
 		t.Fatalf("requests=%+v", requests)
+	}
+	// Existing instance metadata stays pinned even after the alias moves.
+	reloaded, err := store.GetInstance(context.Background(), first.OwnerID, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.ImageID != "sha256:ubuntu" {
+		t.Fatalf("pinned image drifted to %q after alias update", reloaded.ImageID)
 	}
 }
 
