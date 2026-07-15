@@ -101,6 +101,7 @@ type Service struct {
 	mode                     *operations.Mode
 	instanceGatewayPublicKey string
 	mutationGate             chan struct{}
+	execGate                 *sandbox.ExecGate
 }
 
 func New(runtime InstanceRuntime, repo Repository, options Options) (*Service, error) {
@@ -116,7 +117,7 @@ func New(runtime InstanceRuntime, repo Repository, options Options) (*Service, e
 	if options.Mode == nil {
 		options.Mode = &operations.Mode{}
 	}
-	service := &Service{runtime: runtime, repo: repo, now: options.Now, newID: options.NewID, mode: options.Mode, instanceGatewayPublicKey: strings.TrimSpace(options.InstanceGatewayPublicKey), mutationGate: make(chan struct{}, 1)}
+	service := &Service{runtime: runtime, repo: repo, now: options.Now, newID: options.NewID, mode: options.Mode, instanceGatewayPublicKey: strings.TrimSpace(options.InstanceGatewayPublicKey), mutationGate: make(chan struct{}, 1), execGate: sandbox.NewExecGate(sandbox.DefaultMaxConcurrentExecsPerInstance)}
 	service.mutationGate <- struct{}{}
 	return service, nil
 }
@@ -401,6 +402,11 @@ func (s *Service) Exec(ctx context.Context, ownerID domain.OwnerID, id domain.In
 	if sink == nil {
 		return &domain.Error{Code: domain.CodeInvalidArgument, Field: "exec"}
 	}
+	release, err := s.execGate.Acquire(string(id))
+	if err != nil {
+		return err
+	}
+	defer release()
 	instance, err := s.repo.GetInstance(ctx, ownerID, id)
 	if err != nil {
 		return err
@@ -411,7 +417,8 @@ func (s *Service) Exec(ctx context.Context, ownerID domain.OwnerID, id domain.In
 	if instance.ObservedState != domain.ObservedRunning {
 		return &domain.Error{Code: domain.CodeInvalidTransition, Field: "observed_state"}
 	}
-	return sandbox.Run(ctx, s.runtime, instance.RuntimeRef, req, sink)
+	limited := sandbox.NewRateLimitedSink(sink, sandbox.DefaultMaxOutputBytesPerWindow, sandbox.DefaultOutputRateWindow, s.now)
+	return sandbox.Run(ctx, s.runtime, instance.RuntimeRef, req, limited)
 }
 
 func (s *Service) Capabilities(ctx context.Context) (runtimeapi.Capabilities, error) {

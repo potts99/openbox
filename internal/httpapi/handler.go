@@ -529,6 +529,10 @@ func classifyError(err error) (int, string, string) {
 			return http.StatusConflict, string(domainError.Code), domainError.Field
 		case domain.CodeUnavailable:
 			return http.StatusServiceUnavailable, string(domainError.Code), domainError.Field
+		case domain.CodeBusy:
+			return http.StatusConflict, string(domainError.Code), domainError.Field
+		case domain.CodeRateLimited:
+			return http.StatusTooManyRequests, string(domainError.Code), domainError.Field
 		default:
 			return http.StatusInternalServerError, string(domainError.Code), domainError.Field
 		}

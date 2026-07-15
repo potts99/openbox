@@ -79,7 +79,7 @@ func TestInspectHuman(t *testing.T) {
 	defer server.Close()
 
 	stdout, stderr, code := runCLI(t, server.URL, "inspect", "box-1")
-	if code != 0 || !strings.Contains(stdout, "Isolation: virtual_machine") || !strings.Contains(stdout, "Memory: 8.0 GiB") {
+	if code != 0 || !strings.Contains(stdout, "Isolation: virtual_machine") || !strings.Contains(stdout, "Memory: 8.0 GiB") || !strings.Contains(stdout, "Egress: default") || !strings.Contains(stdout, "Observed: stopped") {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 }

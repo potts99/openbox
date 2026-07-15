@@ -163,6 +163,37 @@ func (c *Client) DeleteInstance(ctx context.Context, id, idempotencyKey string) 
 	return c.mutateOperation(ctx, http.MethodDelete, resourcePath("/v1/instances", id), idempotencyKey)
 }
 
+func (c *Client) ExtendInstance(ctx context.Context, id string, durationSeconds int) (Instance, error) {
+	var instance Instance
+	_, err := c.do(ctx, http.MethodPost, resourcePath("/v1/instances", id, "extend"), "", ExtendInstanceRequest{DurationSeconds: durationSeconds}, &instance)
+	if err != nil {
+		return Instance{}, err
+	}
+	return instance, instance.validate()
+}
+
+// ExecInstance streams NDJSON exec frames. The returned ReadCloser must be
+// closed by the caller. Frames are never buffered server-side into SQLite.
+func (c *Client) ExecInstance(ctx context.Context, id string, request ExecInstanceRequest) (io.ReadCloser, error) {
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("encode exec request: %w", err)
+	}
+	httpRequest, err := c.request(ctx, http.MethodPost, resourcePath("/v1/instances", id, "exec"), "", encoded)
+	if err != nil {
+		return nil, err
+	}
+	response, err := c.streamHTTP.Do(httpRequest)
+	if err != nil {
+		return nil, fmt.Errorf("OpenBox exec request: %w", err)
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		defer response.Body.Close()
+		return nil, decodeAPIError(response)
+	}
+	return response.Body, nil
+}
+
 func (c *Client) CancelOperation(ctx context.Context, id string) (Operation, error) {
 	var operation Operation
 	_, err := c.do(ctx, http.MethodPost, resourcePath("/v1/operations", id, "cancel"), "", nil, &operation)
