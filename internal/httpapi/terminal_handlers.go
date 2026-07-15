@@ -103,6 +103,7 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 		h.closeTerminalLimit(ctx, conn, err)
 		return
 	}
+	sessionName := strings.TrimSpace(open.SessionName)
 
 	session, err := h.console.OpenConsole(ctx, runtimeapi.ConsoleRequest{
 		Ref:     target.RuntimeRef,
@@ -116,12 +117,20 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 		_ = conn.Close(websocket.StatusNormalClosure, "")
 		return
 	}
-	defer session.Close()
+	// Named detach leaves the console open for reconnect (task 7). Ephemeral
+	// sessions and explicit terminate always Close.
+	closeConsole := true
+	defer func() {
+		if closeConsole {
+			_ = session.Close()
+		}
+	}()
 
 	ack, err := terminal.Encode(terminal.OpenFrame{
-		InstanceID: string(target.InstanceID),
-		Cols:       open.Cols,
-		Rows:       open.Rows,
+		InstanceID:  string(target.InstanceID),
+		Cols:        open.Cols,
+		Rows:        open.Rows,
+		SessionName: sessionName,
 	})
 	if err != nil {
 		_ = conn.Close(websocket.StatusInternalError, "encode")
@@ -150,7 +159,7 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 		errCh <- pipeConsoleOutput(sessionCtx, conn, session.Stdout(), idle, budget, limits.MaxTotalBufferBytes)
 	}()
 	go func() {
-		errCh <- pumpTerminalInput(sessionCtx, conn, session, rate, idle, budget, limits.MaxFrameBytes)
+		errCh <- pumpTerminalInput(sessionCtx, conn, session, sessionName, rate, idle, budget, limits.MaxFrameBytes)
 	}()
 
 	select {
@@ -161,6 +170,13 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 	case <-sessionCtx.Done():
 	case err := <-errCh:
 		cancel()
+		if errors.Is(err, errTerminalDetached) {
+			// Named persistent session: close the WebSocket only. Console stays
+			// open; full reconnect/tmux ownership is task 7.
+			closeConsole = false
+			_ = conn.Close(websocket.StatusNormalClosure, "detached")
+			return
+		}
 		if err != nil && isTerminalLimitError(err) {
 			h.closeTerminalLimit(ctx, conn, err)
 			return
@@ -184,6 +200,10 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 	defer writeCancel()
 	_ = conn.Write(writeCtx, websocket.MessageText, payload)
 }
+
+// errTerminalDetached is returned by the input pump when the client detaches a
+// named session. The bridge must close the WebSocket without terminating the console.
+var errTerminalDetached = errors.New("terminal detached")
 
 func (h *Handler) readTerminalOpen(
 	ctx context.Context,
@@ -306,6 +326,7 @@ func pumpTerminalInput(
 	ctx context.Context,
 	conn *websocket.Conn,
 	session runtimeapi.ConsoleSession,
+	sessionName string,
 	rate *terminal.InboundLimiter,
 	idle *terminal.IdleWatch,
 	budget *terminal.BufferBudget,
@@ -346,11 +367,16 @@ func pumpTerminalInput(
 				return err
 			}
 		case terminal.DetachFrame:
+			// Named sessions survive detach for reconnect (task 7). Ephemeral
+			// sessions have no reconnect target yet, so detach terminates.
+			if sessionName != "" {
+				return errTerminalDetached
+			}
 			_ = session.Close()
 			return nil
 		case terminal.SignalFrame:
-			// Signal delivery is deepened in a later task; closing stdin is enough
-			// for the fake echo console to finish cleanly on TERM-like intent.
+			// Explicit terminate cancels the console; exit status is propagated
+			// by the bridge after Wait returns.
 			if strings.EqualFold(f.Signal, "TERM") || strings.EqualFold(f.Signal, "KILL") {
 				_ = session.Close()
 				return nil

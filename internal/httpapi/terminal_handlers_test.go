@@ -637,6 +637,155 @@ func TestTerminalEnforcesTotalBufferLimit(t *testing.T) {
 	}
 }
 
+func TestTerminalResizePropagatesToConsole(t *testing.T) {
+	rt := newRunningFakeRuntime(t, "incus-owned-ref")
+	_, conn, ctx := dialOpenTerminal(t, rt, terminal.DefaultLimits())
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	payload, err := terminal.Encode(terminal.ResizeFrame{Cols: 132, Rows: 43})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, payload); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		cols, rows := rt.LastConsoleSize("incus-owned-ref")
+		if cols == 132 && rows == 43 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("console size=%dx%d, want 132x43", cols, rows)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestTerminalPropagatesExitStatusOnTerminate(t *testing.T) {
+	rt := newRunningFakeRuntime(t, "incus-owned-ref")
+	rt.SetConsoleExitCode(42)
+	_, conn, ctx := dialOpenTerminal(t, rt, terminal.DefaultLimits())
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	payload, err := terminal.Encode(terminal.SignalFrame{Signal: "TERM"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, payload); err != nil {
+		t.Fatal(err)
+	}
+
+	frame := readTerminalFrameUntil(t, conn, ctx, func(f terminal.Frame) bool {
+		_, ok := f.(terminal.ExitFrame)
+		return ok
+	})
+	exit, ok := frame.(terminal.ExitFrame)
+	if !ok {
+		t.Fatalf("frame type %T, want ExitFrame", frame)
+	}
+	if exit.Code != 42 {
+		t.Fatalf("exit code=%d want 42", exit.Code)
+	}
+	if !rt.ConsoleClosed("incus-owned-ref") {
+		t.Fatal("expected console session closed after TERM")
+	}
+}
+
+func TestTerminalTerminateCancelsConsole(t *testing.T) {
+	rt := newRunningFakeRuntime(t, "incus-owned-ref")
+	_, conn, ctx := dialOpenTerminal(t, rt, terminal.DefaultLimits())
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	payload, err := terminal.Encode(terminal.SignalFrame{Signal: "KILL"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, payload); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = readTerminalFrameUntil(t, conn, ctx, func(f terminal.Frame) bool {
+		_, ok := f.(terminal.ExitFrame)
+		return ok
+	})
+	if !rt.ConsoleClosed("incus-owned-ref") {
+		t.Fatal("KILL must cancel/close the console session")
+	}
+}
+
+func TestTerminalDetachDoesNotTerminateNamedSession(t *testing.T) {
+	rt := newRunningFakeRuntime(t, "incus-owned-ref")
+	_, conn, ctx := dialOpenTerminalWithOpen(t, rt, terminal.DefaultLimits(), terminal.OpenFrame{
+		InstanceID:  "inst-owned",
+		Cols:        80,
+		Rows:        24,
+		SessionName: "main",
+	})
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	payload, err := terminal.Encode(terminal.DetachFrame{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, payload); err != nil {
+		t.Fatal(err)
+	}
+
+	// Detach closes the WebSocket without an exit frame (session stays alive for reconnect/task 7).
+	readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	for {
+		_, data, err := conn.Read(readCtx)
+		if err != nil {
+			break
+		}
+		frame, decErr := terminal.Decode(data)
+		if decErr != nil {
+			continue
+		}
+		if _, ok := frame.(terminal.ExitFrame); ok {
+			t.Fatal("named detach must not send exit (console still running)")
+		}
+	}
+
+	// Give the bridge a moment to finish; named detach must leave the console open.
+	time.Sleep(50 * time.Millisecond)
+	if rt.ConsoleClosed("incus-owned-ref") {
+		t.Fatal("named detach must not Close the console session")
+	}
+	t.Cleanup(func() {
+		if s := rt.ActiveConsole("incus-owned-ref"); s != nil {
+			_ = s.Close()
+		}
+	})
+}
+
+func TestTerminalDetachTerminatesEphemeralSession(t *testing.T) {
+	// Without session_name there is no reconnect target yet (task 7), so detach
+	// is treated as terminate: close console and propagate exit.
+	rt := newRunningFakeRuntime(t, "incus-owned-ref")
+	_, conn, ctx := dialOpenTerminal(t, rt, terminal.DefaultLimits())
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	payload, err := terminal.Encode(terminal.DetachFrame{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, payload); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = readTerminalFrameUntil(t, conn, ctx, func(f terminal.Frame) bool {
+		_, ok := f.(terminal.ExitFrame)
+		return ok
+	})
+	if !rt.ConsoleClosed("incus-owned-ref") {
+		t.Fatal("ephemeral detach must terminate the console")
+	}
+}
+
 func TestTerminalClientDisconnectDoesNotEmitInvalidFrame(t *testing.T) {
 	rt := newRunningFakeRuntime(t, "incus-owned-ref")
 	_, conn, ctx := dialOpenTerminal(t, rt, terminal.DefaultLimits())
@@ -686,6 +835,18 @@ func newRunningFakeRuntime(t *testing.T, ref string) *fake.Runtime {
 
 func dialOpenTerminal(t *testing.T, rt *fake.Runtime, limits terminal.Limits) (*Handler, *websocket.Conn, context.Context) {
 	t.Helper()
+	return dialOpenTerminalWithOpen(t, rt, limits, terminal.OpenFrame{
+		InstanceID: "inst-owned", Cols: 80, Rows: 24,
+	})
+}
+
+func dialOpenTerminalWithOpen(
+	t *testing.T,
+	rt *fake.Runtime,
+	limits terminal.Limits,
+	open terminal.OpenFrame,
+) (*Handler, *websocket.Conn, context.Context) {
+	t.Helper()
 	h, m, bootstrap := newAuthHandlerWithOptions(t, Options{Console: rt, TerminalLimits: limits})
 	session, cookie, err := m.Bootstrap(context.Background(), "loopback", bootstrap, "a sufficiently long password")
 	if err != nil {
@@ -714,7 +875,7 @@ func dialOpenTerminal(t *testing.T, rt *fake.Runtime, limits terminal.Limits) (*
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	t.Cleanup(cancel)
 
-	openPayload, err := terminal.Encode(terminal.OpenFrame{InstanceID: "inst-owned", Cols: 80, Rows: 24})
+	openPayload, err := terminal.Encode(open)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -725,4 +886,26 @@ func dialOpenTerminal(t *testing.T, rt *fake.Runtime, limits terminal.Limits) (*
 		t.Fatalf("open ack: %v", err)
 	}
 	return h, conn, ctx
+}
+
+func readTerminalFrameUntil(
+	t *testing.T,
+	conn *websocket.Conn,
+	ctx context.Context,
+	match func(terminal.Frame) bool,
+) terminal.Frame {
+	t.Helper()
+	for {
+		_, data, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("read frame: %v", err)
+		}
+		frame, err := terminal.Decode(data)
+		if err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if match(frame) {
+			return frame
+		}
+	}
 }

@@ -14,16 +14,18 @@ import (
 )
 
 type Runtime struct {
-	mu             sync.Mutex
-	capabilities   runtimeapi.Capabilities
-	images         map[string]runtimeapi.Image
-	instances      map[string]runtimeapi.Instance
-	execResults    map[string]runtimeapi.ExecResult
-	failures       map[string][]error
-	calls          []string
-	createRequests []runtimeapi.CreateRequest
-	lastConsoleRef string
-	consoleSizes   map[string]consoleSize
+	mu              sync.Mutex
+	capabilities    runtimeapi.Capabilities
+	images          map[string]runtimeapi.Image
+	instances       map[string]runtimeapi.Instance
+	execResults     map[string]runtimeapi.ExecResult
+	failures        map[string][]error
+	calls           []string
+	createRequests  []runtimeapi.CreateRequest
+	lastConsoleRef  string
+	consoleSizes    map[string]consoleSize
+	activeConsoles  map[string]*consoleSession
+	consoleExitCode int
 }
 
 type consoleSize struct {
@@ -32,12 +34,13 @@ type consoleSize struct {
 
 func New(capabilities runtimeapi.Capabilities) *Runtime {
 	return &Runtime{
-		capabilities: capabilities,
-		images:       map[string]runtimeapi.Image{},
-		instances:    map[string]runtimeapi.Instance{},
-		execResults:  map[string]runtimeapi.ExecResult{},
-		failures:     map[string][]error{},
-		consoleSizes: map[string]consoleSize{},
+		capabilities:   capabilities,
+		images:         map[string]runtimeapi.Image{},
+		instances:      map[string]runtimeapi.Instance{},
+		execResults:    map[string]runtimeapi.ExecResult{},
+		failures:       map[string][]error{},
+		consoleSizes:   map[string]consoleSize{},
+		activeConsoles: map[string]*consoleSession{},
 	}
 }
 
@@ -221,6 +224,37 @@ func (r *Runtime) LastConsoleSize(ref string) (cols, rows uint16) {
 	return size.cols, size.rows
 }
 
+// SetConsoleExitCode sets the exit code returned by Wait after Close for the next
+// (and subsequent) console sessions. Zero is the default.
+func (r *Runtime) SetConsoleExitCode(code int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.consoleExitCode = code
+}
+
+// ActiveConsole returns the most recent console session for ref, if any.
+func (r *Runtime) ActiveConsole(ref string) runtimeapi.ConsoleSession {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if s := r.activeConsoles[ref]; s != nil {
+		return s
+	}
+	return nil
+}
+
+// ConsoleClosed reports whether the active console for ref has been Close()'d.
+func (r *Runtime) ConsoleClosed(ref string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.activeConsoles[ref]
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
+}
+
 func (r *Runtime) OpenConsole(ctx context.Context, request runtimeapi.ConsoleRequest) (runtimeapi.ConsoleSession, error) {
 	if runtimeapi.IsHostConsoleTarget(request.Ref) {
 		return nil, runtimeapi.ErrHostTarget
@@ -254,11 +288,15 @@ func (r *Runtime) OpenConsole(ctx context.Context, request runtimeapi.ConsoleReq
 		stdout:  stdoutR,
 		done:    make(chan struct{}),
 	}
+	r.activeConsoles[request.Ref] = session
 	go func() {
 		defer stdoutW.Close()
 		defer stdinR.Close()
 		_, _ = io.Copy(stdoutW, stdinR)
-		session.finish(0, nil)
+		r.mu.Lock()
+		code := r.consoleExitCode
+		r.mu.Unlock()
+		session.finish(code, nil)
 	}()
 	return session, nil
 }
@@ -302,7 +340,10 @@ func (s *consoleSession) Close() error {
 	s.closed = true
 	s.mu.Unlock()
 	_ = s.stdin.Close()
-	s.finish(0, nil)
+	s.runtime.mu.Lock()
+	code := s.runtime.consoleExitCode
+	s.runtime.mu.Unlock()
+	s.finish(code, nil)
 	return nil
 }
 
