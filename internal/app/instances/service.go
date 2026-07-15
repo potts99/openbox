@@ -204,7 +204,7 @@ func (s *Service) SubmitCreate(ctx context.Context, input CreateInput) (domain.I
 		if getErr != nil && previous.ErrorCode == domain.CodeOperationCanceled {
 			return domain.Instance{}, previous, nil
 		}
-		return instance, previous, getErr
+		return s.withNetworkPolicyStatus(instance), previous, getErr
 	}
 	if s.mode.Degraded() {
 		return domain.Instance{}, domain.Operation{}, &domain.Error{Code: domain.CodeUnavailable, Field: "runtime"}
@@ -269,9 +269,12 @@ func (s *Service) SubmitCreate(ctx context.Context, input CreateInput) (domain.I
 	}
 	if replay {
 		instance, err = s.repo.GetInstance(ctx, input.OwnerID, domain.InstanceID(original.TargetID))
-		return instance, original, err
+		if err != nil {
+			return domain.Instance{}, domain.Operation{}, err
+		}
+		return s.withNetworkPolicyStatus(instance), original, nil
 	}
-	return instance, operation, nil
+	return s.withNetworkPolicyStatus(instance), operation, nil
 }
 
 // SubmitAction records desired state and a pending operation atomically. It
@@ -368,7 +371,11 @@ func (s *Service) SetProtection(ctx context.Context, ownerID domain.OwnerID, id 
 	if err := s.repo.UpdateInstanceProtection(ctx, ownerID, id, protected, s.now().UTC()); err != nil {
 		return domain.Instance{}, err
 	}
-	return s.repo.GetInstance(ctx, ownerID, id)
+	refreshed, err := s.repo.GetInstance(ctx, ownerID, id)
+	if err != nil {
+		return domain.Instance{}, err
+	}
+	return s.withNetworkPolicyStatus(refreshed), nil
 }
 
 // MarkExpired records desired deleted for an expired Sandbox without removing
@@ -413,7 +420,11 @@ func (s *Service) ExtendExpiry(ctx context.Context, ownerID domain.OwnerID, id d
 	if err := s.repo.UpdateInstanceExpiry(ctx, ownerID, id, *extended.ExpiresAt, extended.UpdatedAt); err != nil {
 		return domain.Instance{}, err
 	}
-	return s.repo.GetInstance(ctx, ownerID, id)
+	refreshed, err := s.repo.GetInstance(ctx, ownerID, id)
+	if err != nil {
+		return domain.Instance{}, err
+	}
+	return s.withNetworkPolicyStatus(refreshed), nil
 }
 
 // Exec runs an argv command inside a managed instance and streams framed
@@ -510,7 +521,11 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 		if previous.Type != "instance.create" || previous.RequestHash != requestHash {
 			return domain.Instance{}, &domain.Error{Code: domain.CodeIdempotencyConflict, Field: "idempotency_key"}
 		}
-		return s.repo.GetInstance(ctx, input.OwnerID, domain.InstanceID(previous.TargetID))
+		instance, err := s.repo.GetInstance(ctx, input.OwnerID, domain.InstanceID(previous.TargetID))
+		if err != nil {
+			return domain.Instance{}, err
+		}
+		return s.withNetworkPolicyStatus(instance), nil
 	}
 	capabilities, err := s.runtime.DiscoverCapabilities(ctx)
 	if err != nil {
@@ -587,7 +602,11 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 		return domain.Instance{}, err
 	}
 	if replay {
-		return s.repo.GetInstance(ctx, input.OwnerID, domain.InstanceID(original.TargetID))
+		instance, err := s.repo.GetInstance(ctx, input.OwnerID, domain.InstanceID(original.TargetID))
+		if err != nil {
+			return domain.Instance{}, err
+		}
+		return s.withNetworkPolicyStatus(instance), nil
 	}
 	if err := s.repo.UpdateInstanceObservation(ctx, input.OwnerID, instance.ID, runtimeRef, actualIsolation, domain.ObservedCreating, "", s.now()); err != nil {
 		return domain.Instance{}, err
