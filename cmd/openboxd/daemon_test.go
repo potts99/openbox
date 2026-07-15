@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -86,6 +87,34 @@ func TestDaemonRunsAndGracefullyStopsAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitCall(t, api.stopped)
+}
+
+func TestDaemonWaitsForSSHBeforeClosingPersistence(t *testing.T) {
+	sshDone := make(chan struct{})
+	closer := &orderedCloser{sshDone: sshDone}
+	factory := factoryFunc(func(context.Context, daemonConfig) (daemonComponents, error) {
+		return daemonComponents{operations: &countingOperations{called: make(chan struct{}, 4)}, reconciler: &countingReconciler{called: make(chan struct{}, 4)}, closer: closer, ssh: waitingSSH{done: sshDone}}, nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runDaemon(ctx, testDaemonConfig(), factory) }()
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if closer.closedBeforeSSH.Load() {
+		t.Fatal("persistence closed before SSH transport stopped")
+	}
+}
+
+func TestDaemonTreatsUnexpectedSSHStopAsFatal(t *testing.T) {
+	factory := factoryFunc(func(context.Context, daemonConfig) (daemonComponents, error) {
+		return daemonComponents{operations: &countingOperations{called: make(chan struct{}, 4)}, reconciler: &countingReconciler{called: make(chan struct{}, 4)}, closer: &countingCloser{}, ssh: immediateSSH{}}, nil
+	})
+	err := runDaemon(context.Background(), testDaemonConfig(), factory)
+	if err == nil || !strings.Contains(err.Error(), "stopped unexpectedly") {
+		t.Fatalf("unexpected SSH stop error=%v", err)
+	}
 }
 
 func TestDaemonRestartRecoversWithoutDuplicateCreateOrStatusLoss(t *testing.T) {
@@ -174,6 +203,32 @@ type countingCloser struct{ calls atomic.Int32 }
 
 func (c *countingCloser) Close() error { c.calls.Add(1); return nil }
 
+type waitingSSH struct{ done chan struct{} }
+
+func (s waitingSSH) ListenAndServe(ctx context.Context) error {
+	<-ctx.Done()
+	close(s.done)
+	return nil
+}
+
+type immediateSSH struct{}
+
+func (immediateSSH) ListenAndServe(context.Context) error { return nil }
+
+type orderedCloser struct {
+	sshDone         chan struct{}
+	closedBeforeSSH atomic.Bool
+}
+
+func (c *orderedCloser) Close() error {
+	select {
+	case <-c.sshDone:
+	default:
+		c.closedBeforeSSH.Store(true)
+	}
+	return nil
+}
+
 type countingAPI struct {
 	started chan struct{}
 	stopped chan struct{}
@@ -247,7 +302,7 @@ func (noopReconciler) RunOnce(context.Context) (reconcile.Report, error) {
 }
 
 func testDaemonConfig() daemonConfig {
-	return daemonConfig{DatabasePath: "/tmp/openbox-test.db", IncusSocket: "/tmp/incus.sock", APIAddress: "127.0.0.1:8443", OwnerID: "owner-local", OwnerName: "Local owner", WorkerConcurrency: 1, OperationInterval: time.Hour, ReconcileInterval: time.Hour, Lease: time.Minute}
+	return daemonConfig{DatabasePath: "/tmp/openbox-test.db", IncusSocket: "/tmp/incus.sock", APIAddress: "127.0.0.1:8443", SSHAddress: ":2222", SSHHostKeyPath: "/tmp/openbox-test-host", SSHInstanceKeyPath: "/tmp/openbox-test-instance", SSHKnownHostsPath: "/tmp/openbox-test-known", OwnerID: "owner-local", OwnerName: "Local owner", WorkerConcurrency: 1, OperationInterval: time.Hour, ReconcileInterval: time.Hour, Lease: time.Minute}
 }
 
 func waitCall(t *testing.T, called <-chan struct{}) {

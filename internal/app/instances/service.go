@@ -83,18 +83,20 @@ func (e *IdentityConflictError) Error() string {
 }
 
 type Options struct {
-	Now   func() time.Time
-	NewID func() string
-	Mode  *operations.Mode
+	Now                      func() time.Time
+	NewID                    func() string
+	Mode                     *operations.Mode
+	InstanceGatewayPublicKey string
 }
 
 type Service struct {
-	runtime      InstanceRuntime
-	repo         Repository
-	now          func() time.Time
-	newID        func() string
-	mode         *operations.Mode
-	mutationGate chan struct{}
+	runtime                  InstanceRuntime
+	repo                     Repository
+	now                      func() time.Time
+	newID                    func() string
+	mode                     *operations.Mode
+	instanceGatewayPublicKey string
+	mutationGate             chan struct{}
 }
 
 func New(runtime InstanceRuntime, repo Repository, options Options) (*Service, error) {
@@ -110,7 +112,7 @@ func New(runtime InstanceRuntime, repo Repository, options Options) (*Service, e
 	if options.Mode == nil {
 		options.Mode = &operations.Mode{}
 	}
-	service := &Service{runtime: runtime, repo: repo, now: options.Now, newID: options.NewID, mode: options.Mode, mutationGate: make(chan struct{}, 1)}
+	service := &Service{runtime: runtime, repo: repo, now: options.Now, newID: options.NewID, mode: options.Mode, instanceGatewayPublicKey: strings.TrimSpace(options.InstanceGatewayPublicKey), mutationGate: make(chan struct{}, 1)}
 	service.mutationGate <- struct{}{}
 	return service, nil
 }
@@ -472,7 +474,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 			createdByOperation = true
 		}
 		created, createErr := s.runtime.CreateInstance(ctx, runtimeapi.CreateRequest{
-			Ref: runtimeRef, Image: image.Fingerprint, VM: actualIsolation == domain.IsolationVM, Unprivileged: actualIsolation == domain.IsolationContainer, OwnerPublicKey: input.OwnerPublicKey,
+			Ref: runtimeRef, Image: image.Fingerprint, VM: actualIsolation == domain.IsolationVM, Unprivileged: actualIsolation == domain.IsolationContainer, OwnerPublicKey: authorizedKeys(input.OwnerPublicKey, s.instanceGatewayPublicKey),
 			Resources: runtimeapi.Resources{VCPUs: input.Resources.VCPUs, MemoryBytes: input.Resources.MemoryBytes, DiskBytes: input.Resources.DiskBytes},
 			Metadata:  managedMetadata(input.OwnerID, instance.ID),
 		})
@@ -585,7 +587,7 @@ func (s *Service) recoverCreate(ctx context.Context, operation domain.Operation)
 		}
 		runtimeInstance, err = s.runtime.CreateInstance(ctx, runtimeapi.CreateRequest{
 			Ref: instance.RuntimeRef, Image: string(instance.ImageID), VM: instance.ActualIsolation == domain.IsolationVM,
-			Unprivileged: instance.ActualIsolation == domain.IsolationContainer, OwnerPublicKey: payload.OwnerPublicKey,
+			Unprivileged: instance.ActualIsolation == domain.IsolationContainer, OwnerPublicKey: authorizedKeys(payload.OwnerPublicKey, s.instanceGatewayPublicKey),
 			Resources: runtimeapi.Resources{VCPUs: instance.Resources.VCPUs, MemoryBytes: instance.Resources.MemoryBytes, DiskBytes: instance.Resources.DiskBytes},
 			Metadata:  managedMetadata(instance.OwnerID, instance.ID),
 		})
@@ -637,6 +639,17 @@ func (s *Service) recoverCreate(ctx context.Context, operation domain.Operation)
 		return err
 	}
 	return s.repo.CompleteOperation(ctx, instance.OwnerID, operation.ID, s.now())
+}
+
+func authorizedKeys(owner, gateway string) string {
+	owner, gateway = strings.TrimSpace(owner), strings.TrimSpace(gateway)
+	if gateway == "" || gateway == owner {
+		return owner
+	}
+	if owner == "" {
+		return gateway
+	}
+	return owner + "\n" + gateway
 }
 
 func (s *Service) Inspect(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID) (domain.Instance, error) {

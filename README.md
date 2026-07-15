@@ -35,6 +35,12 @@ requires TLS. See the [private API operator guide](docs/operators/private-api.md
 [API v1 behavior](docs/api/v1.md), and
 [owner-authentication security model](docs/security/owner-authentication.md).
 
+The SSH-native management and instance gateway listens on the separate,
+configurable port 2222 and never changes host SSH. See the
+[SSH gateway operator guide](docs/operators/ssh-gateway.md) for owner-key
+registration, management commands, direct instance sessions, optional local
+aliases, denied forwarding modes, and recovery behavior.
+
 ## Security
 
 Do not report vulnerabilities in a public issue. See [SECURITY.md](SECURITY.md) for private reporting instructions.

@@ -75,3 +75,27 @@ func TestConcurrentBootstrapConsumeCreatesExactlyOneCredential(t *testing.T) {
 		t.Fatalf("repeat consume error=%v", err)
 	}
 }
+
+func TestAuthorizeSSHKeyResolvesOnlyRegisteredFingerprint(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, t.TempDir()+"/ssh-auth.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	if err := store.CreateOwner(ctx, domain.Owner{ID: "owner-local", Name: "Owner", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateSSHKey(ctx, auth.SSHKey{ID: "key-1", Fingerprint: "SHA256:registered", PublicKey: "ssh-ed25519 AAAA", Label: "laptop", CreatedAt: now}, "owner-local"); err != nil {
+		t.Fatal(err)
+	}
+	owner, allowed, err := store.AuthorizeSSHKey(ctx, "SHA256:registered")
+	if err != nil || !allowed || owner != "owner-local" {
+		t.Fatalf("owner=%q allowed=%v err=%v", owner, allowed, err)
+	}
+	owner, allowed, err = store.AuthorizeSSHKey(ctx, "SHA256:unknown")
+	if err != nil || allowed || owner != "" {
+		t.Fatalf("unknown owner=%q allowed=%v err=%v", owner, allowed, err)
+	}
+}

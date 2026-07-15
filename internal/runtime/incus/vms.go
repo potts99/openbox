@@ -182,18 +182,74 @@ func (a *Adapter) vmAddress(ctx context.Context, ref string) (string, bool, erro
 	if err != nil {
 		return "", false, err
 	}
+	address, found := selectInstanceAddress(state, false)
+	return address, found, nil
+}
+
+func selectInstanceAddress(state instanceStateRecord, privateOnly bool) (string, bool) {
+	var fallback string
 	for name, network := range state.Network {
 		if name == "lo" {
 			continue
 		}
 		for _, address := range network.Addresses {
-			if address.Address == "" || address.Scope == "link" || strings.HasPrefix(address.Address, "127.") || address.Address == "::1" {
+			ip := net.ParseIP(address.Address)
+			if ip == nil || ip.IsUnspecified() || ip.IsLoopback() || ip.IsMulticast() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || address.Scope == "link" {
 				continue
 			}
-			return address.Address, true, nil
+			if ip.IsPrivate() {
+				return address.Address, true
+			}
+			if !privateOnly && fallback == "" {
+				fallback = address.Address
+			}
 		}
 	}
-	return "", false, nil
+	return fallback, fallback != ""
+}
+
+// InstanceSSHAddress returns a managed instance's private address for host-side
+// gateway access. The same Incus state endpoint works for containers and VMs.
+func (a *Adapter) InstanceSSHAddress(ctx context.Context, ref string) (string, error) {
+	var managed resource
+	if err := a.request(ctx, http.MethodGet, "/1.0/networks/"+url.PathEscape(a.network), url.Values{"project": {a.project}}, nil, &managed); err != nil {
+		return "", fmt.Errorf("inspect managed instance network: %w", err)
+	}
+	_, subnet, err := net.ParseCIDR(managed.Config["ipv4.address"])
+	if err != nil || subnet == nil || !subnet.IP.IsPrivate() {
+		return "", errors.New("managed instance network has no private IPv4 subnet")
+	}
+	var state instanceStateRecord
+	err = a.request(ctx, http.MethodGet, "/1.0/instances/"+url.PathEscape(ref)+"/state", url.Values{"project": {a.project}}, nil, &state)
+	if isNotFound(err) {
+		return "", runtimeapi.ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	address, found := selectInstanceAddressInNetwork(state, subnet)
+	if !found {
+		return "", errors.New("instance has no managed private SSH address")
+	}
+	return address, nil
+}
+
+func selectInstanceAddressInNetwork(state instanceStateRecord, subnet *net.IPNet) (string, bool) {
+	if subnet == nil {
+		return "", false
+	}
+	for name, network := range state.Network {
+		if name == "lo" {
+			continue
+		}
+		for _, address := range network.Addresses {
+			ip := net.ParseIP(address.Address)
+			if ip != nil && ip.IsPrivate() && !ip.IsUnspecified() && !ip.IsLoopback() && !ip.IsMulticast() && !ip.IsLinkLocalUnicast() && address.Scope != "link" && subnet.Contains(ip) {
+				return address.Address, true
+			}
+		}
+	}
+	return "", false
 }
 
 func (a *Adapter) probeSSH(ctx context.Context, address string) (bool, error) {

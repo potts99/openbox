@@ -13,11 +13,23 @@ func OwnerKey(publicKey string) (string, error) {
 	if strings.TrimSpace(publicKey) == "" {
 		return "", errors.New("owner public key is required")
 	}
-	// A JSON string is also a valid YAML scalar, preventing a key comment or
-	// newline from changing the cloud-config document structure.
-	quoted, err := json.Marshal(publicKey)
-	if err != nil {
-		return "", err
+	// Each newline-delimited key becomes its own JSON-quoted YAML scalar. This
+	// lets OpenBox add its separate internal gateway key without exposing the
+	// corresponding private key or allowing key comments to alter YAML.
+	var body strings.Builder
+	body.WriteString("#cloud-config\nusers:\n  - name: root\n    ssh_authorized_keys:\n")
+	for _, value := range strings.Split(publicKey, "\n") {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		quoted, err := json.Marshal(value)
+		if err != nil {
+			return "", err
+		}
+		body.WriteString("      - ")
+		body.Write(quoted)
+		body.WriteByte('\n')
 	}
-	return "#cloud-config\nusers:\n  - name: root\n    ssh_authorized_keys:\n      - " + string(quoted) + "\n", nil
+	return body.String(), nil
 }

@@ -263,6 +263,23 @@ func (s *Store) ListSSHKeys(ctx context.Context, o domain.OwnerID) ([]auth.SSHKe
 	}
 	return out, rows.Err()
 }
+
+// AuthorizeSSHKey resolves the single owner for an exact OpenSSH fingerprint.
+// It deliberately returns no public-key material to the SSH transport.
+func (s *Store) AuthorizeSSHKey(ctx context.Context, fingerprint string) (domain.OwnerID, bool, error) {
+	if fingerprint == "" {
+		return "", false, nil
+	}
+	var owner domain.OwnerID
+	err := s.db.QueryRowContext(ctx, `SELECT owner_id FROM ssh_keys WHERE fingerprint=?`, fingerprint).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return owner, true, nil
+}
 func (s *Store) UpdateSSHKey(ctx context.Context, owner domain.OwnerID, id, label string, updated time.Time) (auth.SSHKey, error) {
 	result, err := s.db.ExecContext(ctx, `UPDATE ssh_keys SET label=?,updated_at=? WHERE owner_id=? AND id=?`, label, formatTime(updated), owner, id)
 	if err != nil {

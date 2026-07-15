@@ -35,6 +35,8 @@ Commands:
   restart ID             Restart an instance
   rm ID                  Delete an instance
   operation watch ID     Stream operation progress
+  ssh-config print       Print optional OpenSSH aliases
+  ssh-config install     Install aliases without replacing existing entries
 
 Global options:
   --server URL            OpenBox API URL (default http://127.0.0.1:8443)
@@ -68,6 +70,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if len(commandArgs) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
+	}
+	if commandArgs[0] == "ssh-config" {
+		return runSSHConfig(commandArgs[1:], stdout, stderr)
 	}
 	httpClient := &http.Client{Timeout: options.timeout}
 	api, err := openbox.New(openbox.Options{BaseURL: options.server, HTTPClient: httpClient, UserAgent: "openbox-cli/" + version.Version, Token: options.token})

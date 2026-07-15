@@ -16,6 +16,15 @@ import (
 	"github.com/openbox-dev/openbox/internal/runtime/fake"
 )
 
+func TestAuthorizedKeysIncludesSeparateGatewayCredential(t *testing.T) {
+	if got := authorizedKeys("ssh-ed25519 owner", "ssh-ed25519 gateway"); got != "ssh-ed25519 owner\nssh-ed25519 gateway" {
+		t.Fatalf("authorized keys=%q", got)
+	}
+	if got := authorizedKeys("ssh-ed25519 gateway", "ssh-ed25519 gateway"); got != "ssh-ed25519 gateway" {
+		t.Fatalf("duplicate key not removed: %q", got)
+	}
+}
+
 func TestContainerLifecycle(t *testing.T) {
 	service, runtime, store := newTestService(t, nil)
 	ctx := context.Background()

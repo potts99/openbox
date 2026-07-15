@@ -4,6 +4,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -11,11 +14,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/openbox-dev/openbox/internal/app/instances"
 	"github.com/openbox-dev/openbox/internal/app/recovery"
+	"github.com/openbox-dev/openbox/internal/app/sshcommands"
 	"github.com/openbox-dev/openbox/internal/auth"
 	"github.com/openbox-dev/openbox/internal/domain"
 	"github.com/openbox-dev/openbox/internal/httpapi"
@@ -23,11 +28,15 @@ import (
 	"github.com/openbox-dev/openbox/internal/persistence/sqlite"
 	"github.com/openbox-dev/openbox/internal/reconcile"
 	"github.com/openbox-dev/openbox/internal/runtime/incus"
+	"github.com/openbox-dev/openbox/internal/sshgateway"
+	sshproxy "github.com/openbox-dev/openbox/internal/sshgateway/proxy"
+	"golang.org/x/crypto/ssh"
 )
 
 type daemonConfig struct {
 	DatabasePath, IncusSocket, Project, ContainerProfile, VMProfile, StoragePool string
 	APIAddress, APITLSCertificate, APITLSKey                                     string
+	SSHAddress, SSHHostKeyPath, SSHInstanceKeyPath, SSHKnownHostsPath            string
 	OwnerID, OwnerName                                                           string
 	WorkerConcurrency                                                            int
 	OperationInterval, ReconcileInterval, Lease                                  time.Duration
@@ -42,6 +51,12 @@ func (c daemonConfig) validate() error {
 	}
 	if c.APIAddress == "" || c.OwnerID == "" || c.OwnerName == "" {
 		return errors.New("API address and local owner identity are required")
+	}
+	if c.SSHAddress == "" || c.SSHHostKeyPath == "" || c.SSHInstanceKeyPath == "" || c.SSHKnownHostsPath == "" {
+		return errors.New("SSH address, gateway host key, internal instance key, and known-hosts paths are required")
+	}
+	if _, _, err := net.SplitHostPort(c.SSHAddress); err != nil {
+		return fmt.Errorf("invalid SSH address: %w", err)
 	}
 	host, _, err := net.SplitHostPort(c.APIAddress)
 	if err != nil {
@@ -68,12 +83,14 @@ type apiRunner interface {
 	Run() error
 	Shutdown(context.Context) error
 }
+type sshRunner interface{ ListenAndServe(context.Context) error }
 
 type daemonComponents struct {
 	operations operationRunner
 	reconciler reconciliationRunner
 	closer     daemonCloser
 	api        apiRunner
+	ssh        sshRunner
 }
 
 type componentFactory interface {
@@ -110,8 +127,13 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
+	instanceSigner, err := sshgateway.LoadOrCreateHostKey(config.SSHInstanceKeyPath)
+	if err != nil {
+		return fail(fmt.Errorf("load internal instance SSH key: %w", err))
+	}
+	instancePublicKey := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(instanceSigner.PublicKey())))
 	mode := &operations.Mode{}
-	service, err := instances.New(runtime, store, instances.Options{Mode: mode})
+	service, err := instances.New(runtime, store, instances.Options{Mode: mode, InstanceGatewayPublicKey: instancePublicKey})
 	if err != nil {
 		return fail(err)
 	}
@@ -128,7 +150,23 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 		return fail(err)
 	}
 	api := &daemonAPIServer{server: httpapi.NewServer(config.APIAddress, rootHandler(handler)), certificate: config.APITLSCertificate, key: config.APITLSKey}
-	return daemonComponents{operations: worker, reconciler: reconciler, closer: store, api: api}, nil
+	dispatcher, err := sshcommands.New(service, instancePublicKey, nil)
+	if err != nil {
+		return fail(err)
+	}
+	knownHosts, err := sshproxy.NewTOFUHostKeys(config.SSHKnownHostsPath)
+	if err != nil {
+		return fail(err)
+	}
+	instanceProxy, err := sshproxy.New(service, runtime, instanceSigner, sshproxy.Options{HostKey: knownHosts.Callback})
+	if err != nil {
+		return fail(err)
+	}
+	sshServer, err := sshgateway.New(sshgateway.Config{Address: config.SSHAddress, HostKeyPath: config.SSHHostKeyPath, Keys: store, Commands: dispatcher, Instances: instanceProxy, Audit: durableSSHAuditor{store: store, fallbackOwner: domain.OwnerID(config.OwnerID)}})
+	if err != nil {
+		return fail(err)
+	}
+	return daemonComponents{operations: worker, reconciler: reconciler, closer: store, api: api, ssh: sshServer}, nil
 }
 
 type daemonAPIServer struct {
@@ -161,11 +199,31 @@ func runDaemon(ctx context.Context, config daemonConfig, factory componentFactor
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	apiErrors := make(chan error, 1)
+	serviceErrors := make(chan error, 2)
+	var serviceWG sync.WaitGroup
 	if components.api != nil {
+		serviceWG.Add(1)
 		go func() {
-			if err := components.api.Run(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				apiErrors <- err
+			defer serviceWG.Done()
+			err := components.api.Run()
+			if err == nil && runCtx.Err() == nil {
+				err = errors.New("API server stopped unexpectedly")
+			}
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				serviceErrors <- err
+			}
+		}()
+	}
+	if components.ssh != nil {
+		serviceWG.Add(1)
+		go func() {
+			defer serviceWG.Done()
+			err := components.ssh.ListenAndServe(runCtx)
+			if err == nil && runCtx.Err() == nil {
+				err = errors.New("SSH gateway stopped unexpectedly")
+			}
+			if err != nil && !errors.Is(err, context.Canceled) {
+				serviceErrors <- err
 			}
 		}()
 	}
@@ -184,7 +242,7 @@ func runDaemon(ctx context.Context, config daemonConfig, factory componentFactor
 	var runErr error
 	select {
 	case <-ctx.Done():
-	case runErr = <-apiErrors:
+	case runErr = <-serviceErrors:
 		cancel()
 	}
 	cancel()
@@ -197,10 +255,49 @@ func runDaemon(ctx context.Context, config daemonConfig, factory componentFactor
 			runErr = errors.Join(runErr, fmt.Errorf("shut down API: %w", shutdownErr))
 		}
 	}
+	// The API shutdown drains handlers, while SSH stops from runCtx. Wait for
+	// both transports before closing persistence they may still be using.
+	serviceWG.Wait()
 	if err := components.closer.Close(); err != nil {
 		runErr = errors.Join(runErr, fmt.Errorf("close metadata store: %w", err))
 	}
 	return runErr
+}
+
+type sshAuditWriter interface {
+	CreateAuditEvent(context.Context, domain.AuditEvent) error
+}
+
+type durableSSHAuditor struct {
+	store         sshAuditWriter
+	fallbackOwner domain.OwnerID
+}
+
+func (a durableSSHAuditor) Record(ctx context.Context, event sshgateway.AuditEvent) error {
+	owner := event.OwnerID
+	if owner == "" {
+		owner = a.fallbackOwner
+	}
+	actor := event.Fingerprint
+	if actor == "" {
+		actor = "unauthenticated"
+	}
+	metadata, err := json.Marshal(struct {
+		RemoteIP string `json:"remote_ip,omitempty"`
+		Command  string `json:"command,omitempty"`
+	}{RemoteIP: event.RemoteIP, Command: event.Command})
+	if err != nil {
+		return err
+	}
+	targetType, targetID := "gateway", "openbox"
+	if event.Target != "" {
+		targetType, targetID = "instance", event.Target
+	}
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
+		return err
+	}
+	return a.store.CreateAuditEvent(ctx, domain.AuditEvent{ID: domain.AuditEventID("audit-" + hex.EncodeToString(raw)), OwnerID: owner, Actor: actor, Action: "ssh.session", TargetType: targetType, TargetID: targetID, Outcome: event.Outcome, MetadataJSON: metadata, CreatedAt: event.At.UTC()})
 }
 
 func periodic(ctx context.Context, wg *sync.WaitGroup, interval time.Duration, immediate bool, name string, run func(context.Context) error) {

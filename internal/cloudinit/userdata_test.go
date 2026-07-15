@@ -34,3 +34,13 @@ func TestOwnerKeyQuotesUntrustedTextAndRejectsEmpty(t *testing.T) {
 		t.Fatal("empty key accepted")
 	}
 }
+
+func TestOwnerKeyEmitsSeparateOwnerAndGatewayKeys(t *testing.T) {
+	data, err := cloudinit.OwnerKey("ssh-ed25519 AAAA owner\nssh-ed25519 BBBB gateway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(data, "      - ") != 2 || !strings.Contains(data, `"ssh-ed25519 BBBB gateway"`) {
+		t.Fatalf("separate keys missing: %q", data)
+	}
+}

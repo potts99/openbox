@@ -74,6 +74,21 @@ func TestVMHTTPLifecycleUsesPinnedImageAndStructuredDevices(t *testing.T) {
 	}
 }
 
+func TestInstanceSSHAddressRequiresManagedPrivateSubnet(t *testing.T) {
+	api := &vmAPI{address: "10.42.0.12", networkAddress: "10.42.0.1/24"}
+	adapter := newVMTestAdapter(t, api, time.Second)
+	address, err := adapter.InstanceSSHAddress(context.Background(), "obx-instance")
+	if err != nil || address != "10.42.0.12" {
+		t.Fatalf("address=%q err=%v", address, err)
+	}
+	api.mu.Lock()
+	api.address = "10.99.0.12"
+	api.mu.Unlock()
+	if _, err := adapter.InstanceSSHAddress(context.Background(), "obx-instance"); err == nil {
+		t.Fatal("private address outside managed subnet accepted")
+	}
+}
+
 func TestVMCreateRejectsMutableOrIncompatibleImageBeforePOST(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -293,12 +308,19 @@ type vmAPI struct {
 	address         string
 	imageType       string
 	imageProperties map[string]string
+	networkAddress  string
 }
 
 func (a *vmAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	switch {
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/1.0/networks/"):
+		address := a.networkAddress
+		if address == "" {
+			address = "10.42.0.1/24"
+		}
+		writeSync(w, resource{Name: "openbox0", Config: map[string]string{"ipv4.address": address}})
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/1.0/images/"):
 		imageType := a.imageType
 		if imageType == "" {
