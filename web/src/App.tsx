@@ -1,10 +1,85 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-export function App() {
+import { useEffect, useState } from "react";
+import { createHttpApi } from "./api/client";
+import type { BootstrapStatus, OpenBoxApi, Session } from "./api/client";
+import { AuthScreen } from "./auth/AuthScreen";
+import { ConsolePage } from "./pages/ConsolePage";
+
+const defaultApi = createHttpApi();
+
+type EntryState =
+  | { status: "loading" }
+  | { status: "ready"; bootstrap: BootstrapStatus; session: Session }
+  | { status: "error"; message: string };
+
+function messageFrom(error: unknown): string {
+  return error instanceof Error ? error.message : "OpenBox could not be reached";
+}
+
+export function App({ api = defaultApi }: { api?: OpenBoxApi }) {
+  const [entry, setEntry] = useState<EntryState>({ status: "loading" });
+
+  useEffect(() => {
+    let active = true;
+    void Promise.all([api.getBootstrapStatus(), api.getSession()])
+      .then(([bootstrap, session]) => {
+        if (active) setEntry({ status: "ready", bootstrap, session });
+      })
+      .catch((error: unknown) => {
+        if (active) setEntry({ status: "error", message: messageFrom(error) });
+      });
+    return () => { active = false; };
+  }, [api]);
+
+  if (entry.status === "loading") {
+    return <LoadingScreen />;
+  }
+
+  if (entry.status === "error") {
+    return (
+      <main className="system-message" id="main-content">
+        <p className="eyebrow">Connection fault</p>
+        <h1>Console unavailable</h1>
+        <p role="alert">{entry.message}</p>
+        <button type="button" onClick={() => window.location.reload()}>Retry connection</button>
+      </main>
+    );
+  }
+
+  if (entry.bootstrap.required || !entry.session.authenticated) {
+    return (
+      <AuthScreen
+        mode={entry.bootstrap.required ? "setup" : "login"}
+        api={api}
+        onAuthenticated={(session) => setEntry({
+          status: "ready",
+          bootstrap: { required: false },
+          session,
+        })}
+      />
+    );
+  }
+
   return (
-    <main>
+    <ConsolePage
+      api={api}
+      session={entry.session}
+      onLoggedOut={() => setEntry({
+        status: "ready",
+        bootstrap: { required: false },
+        session: { authenticated: false },
+      })}
+    />
+  );
+}
+
+function LoadingScreen() {
+  return (
+    <main className="system-message" id="main-content" aria-busy="true">
+      <p className="eyebrow">Local control plane</p>
       <h1>OpenBox</h1>
-      <p>Your self-hosted compute workspace.</p>
+      <p role="status">Reading system state…</p>
     </main>
   );
 }

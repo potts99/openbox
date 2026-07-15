@@ -24,6 +24,7 @@ type Options struct {
 	BaseURL    string
 	HTTPClient *http.Client
 	UserAgent  string
+	Token      string
 	MaxRetries int
 	RetryWait  time.Duration
 }
@@ -32,6 +33,7 @@ type Client struct {
 	baseURL    *url.URL
 	http       *http.Client
 	userAgent  string
+	token      string
 	maxRetries int
 	retryWait  time.Duration
 
@@ -59,7 +61,7 @@ func New(options Options) (*Client, error) {
 	if options.RetryWait <= 0 {
 		options.RetryWait = 100 * time.Millisecond
 	}
-	return &Client{baseURL: baseURL, http: options.HTTPClient, userAgent: options.UserAgent, maxRetries: options.MaxRetries, retryWait: options.RetryWait}, nil
+	return &Client{baseURL: baseURL, http: options.HTTPClient, userAgent: options.UserAgent, token: strings.TrimSpace(options.Token), maxRetries: options.MaxRetries, retryWait: options.RetryWait}, nil
 }
 
 func (c *Client) ServerVersion() string {
@@ -274,6 +276,9 @@ func (c *Client) request(ctx context.Context, method, requestPath, idempotencyKe
 	}
 	if c.userAgent != "" {
 		request.Header.Set("User-Agent", c.userAgent)
+	}
+	if c.token != "" {
+		request.Header.Set("Authorization", "Bearer "+c.token)
 	}
 	return request, nil
 }

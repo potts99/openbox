@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+const (
+	BearerAuthScopes = "bearerAuth.Scopes"
+	CookieAuthScopes = "cookieAuth.Scopes"
+)
+
 // Defines values for CreateInstanceRequestKind.
 const (
 	CreateInstanceRequestKindDevbox  CreateInstanceRequestKind = "devbox"
@@ -21,6 +26,16 @@ const (
 	CreateInstanceRequestRequestedIsolationBestAvailable CreateInstanceRequestRequestedIsolation = "best_available"
 	CreateInstanceRequestRequestedIsolationStandard      CreateInstanceRequestRequestedIsolation = "standard"
 	CreateInstanceRequestRequestedIsolationStrong        CreateInstanceRequestRequestedIsolation = "strong"
+)
+
+// Defines values for CreateTokenRequestScopes.
+const (
+	CreateTokenRequestScopesOwner CreateTokenRequestScopes = "owner"
+)
+
+// Defines values for CreatedTokenScopes.
+const (
+	CreatedTokenScopesOwner CreatedTokenScopes = "owner"
 )
 
 // Defines values for HealthApiVersion.
@@ -89,10 +104,27 @@ const (
 	OperationEventStatusSucceeded OperationEventStatus = "succeeded"
 )
 
+// Defines values for TokenMetadataScopes.
+const (
+	Owner TokenMetadataScopes = "owner"
+)
+
 // Defines values for APIVersion.
 const (
 	APIVersionV1 APIVersion = "v1"
 )
+
+// BootstrapRequest defines model for BootstrapRequest.
+type BootstrapRequest struct {
+	Password *string `json:"password,omitempty"`
+	Secret   *string `json:"secret,omitempty"`
+}
+
+// BootstrapStatus defines model for BootstrapStatus.
+type BootstrapStatus struct {
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Required  bool       `json:"required"`
+}
 
 // Capabilities defines model for Capabilities.
 type Capabilities struct {
@@ -130,6 +162,37 @@ type CreateInstanceResult struct {
 	Instance  *Instance `json:"instance"`
 	Operation Operation `json:"operation"`
 }
+
+// CreateSSHKeyRequest defines model for CreateSSHKeyRequest.
+type CreateSSHKeyRequest struct {
+	Label     string `json:"label"`
+	PublicKey string `json:"public_key"`
+}
+
+// CreateTokenRequest defines model for CreateTokenRequest.
+type CreateTokenRequest struct {
+	ExpiresAt *time.Time                  `json:"expires_at,omitempty"`
+	Name      string                      `json:"name"`
+	Scopes    *[]CreateTokenRequestScopes `json:"scopes,omitempty"`
+}
+
+// CreateTokenRequestScopes defines model for CreateTokenRequest.Scopes.
+type CreateTokenRequestScopes string
+
+// CreatedToken defines model for CreatedToken.
+type CreatedToken struct {
+	CreatedAt  time.Time            `json:"created_at"`
+	ExpiresAt  *time.Time           `json:"expires_at,omitempty"`
+	Id         string               `json:"id"`
+	LastUsedAt *time.Time           `json:"last_used_at,omitempty"`
+	Name       string               `json:"name"`
+	RevokedAt  *time.Time           `json:"revoked_at,omitempty"`
+	Scopes     []CreatedTokenScopes `json:"scopes"`
+	Secret     *string              `json:"secret,omitempty"`
+}
+
+// CreatedTokenScopes defines model for CreatedToken.Scopes.
+type CreatedTokenScopes string
 
 // ErrorEnvelope defines model for ErrorEnvelope.
 type ErrorEnvelope struct {
@@ -217,6 +280,21 @@ type ListOperationsResponse struct {
 	Items []Operation `json:"items"`
 }
 
+// ListSSHKeysResponse defines model for ListSSHKeysResponse.
+type ListSSHKeysResponse struct {
+	Items []SSHKey `json:"items"`
+}
+
+// ListTokensResponse defines model for ListTokensResponse.
+type ListTokensResponse struct {
+	Items []TokenMetadata `json:"items"`
+}
+
+// LoginRequest defines model for LoginRequest.
+type LoginRequest struct {
+	Password *string `json:"password,omitempty"`
+}
+
 // Operation defines model for Operation.
 type Operation struct {
 	Attempts      int             `json:"attempts"`
@@ -261,8 +339,46 @@ type Resources struct {
 	Vcpus       int   `json:"vcpus"`
 }
 
+// SSHKey defines model for SSHKey.
+type SSHKey struct {
+	CreatedAt   time.Time `json:"created_at"`
+	Fingerprint string    `json:"fingerprint"`
+	Id          string    `json:"id"`
+	Label       string    `json:"label"`
+	PublicKey   string    `json:"public_key"`
+}
+
+// Session defines model for Session.
+type Session struct {
+	CsrfToken *string   `json:"csrf_token,omitempty"`
+	ExpiresAt time.Time `json:"expires_at"`
+	OwnerId   string    `json:"owner_id"`
+}
+
+// TokenMetadata defines model for TokenMetadata.
+type TokenMetadata struct {
+	CreatedAt  time.Time             `json:"created_at"`
+	ExpiresAt  *time.Time            `json:"expires_at,omitempty"`
+	Id         string                `json:"id"`
+	LastUsedAt *time.Time            `json:"last_used_at,omitempty"`
+	Name       string                `json:"name"`
+	RevokedAt  *time.Time            `json:"revoked_at,omitempty"`
+	Scopes     []TokenMetadataScopes `json:"scopes"`
+}
+
+// TokenMetadataScopes defines model for TokenMetadata.Scopes.
+type TokenMetadataScopes string
+
+// UpdateSSHKeyRequest defines model for UpdateSSHKeyRequest.
+type UpdateSSHKeyRequest struct {
+	Label string `json:"label"`
+}
+
 // APIVersion defines model for APIVersion.
 type APIVersion string
+
+// CSRFToken defines model for CSRFToken.
+type CSRFToken = string
 
 // IdempotencyKey defines model for IdempotencyKey.
 type IdempotencyKey = string
@@ -275,6 +391,18 @@ type OperationID = string
 
 // Error defines model for Error.
 type Error = ErrorEnvelope
+
+// GetBootstrapStatusParams defines parameters for GetBootstrapStatus.
+type GetBootstrapStatusParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// ConsumeBootstrapParams defines parameters for ConsumeBootstrap.
+type ConsumeBootstrapParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
 
 // GetCapabilitiesParams defines parameters for GetCapabilities.
 type GetCapabilitiesParams struct {
@@ -304,6 +432,9 @@ type ListInstancesParams struct {
 type CreateInstanceParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
 	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
 	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
 }
@@ -311,6 +442,9 @@ type CreateInstanceParams struct {
 // DeleteInstanceParams defines parameters for DeleteInstance.
 type DeleteInstanceParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
 
 	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
 	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
@@ -327,6 +461,9 @@ type MutateInstanceParams struct {
 	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
 	XOpenBoxAPIVersion *APIVersion    `json:"X-OpenBox-API-Version,omitempty"`
 	IdempotencyKey     IdempotencyKey `json:"Idempotency-Key"`
+
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
 }
 
 // ListOperationsParams defines parameters for ListOperations.
@@ -343,6 +480,9 @@ type GetOperationParams struct {
 
 // CancelOperationParams defines parameters for CancelOperation.
 type CancelOperationParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
 	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
 	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
 }
@@ -356,5 +496,98 @@ type WatchOperationParams struct {
 	LastEventID *int `json:"Last-Event-ID,omitempty"`
 }
 
+// DeleteSessionParams defines parameters for DeleteSession.
+type DeleteSessionParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// GetSessionParams defines parameters for GetSession.
+type GetSessionParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// CreateSessionParams defines parameters for CreateSession.
+type CreateSessionParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// ListSSHKeysParams defines parameters for ListSSHKeys.
+type ListSSHKeysParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// CreateSSHKeyParams defines parameters for CreateSSHKey.
+type CreateSSHKeyParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// DeleteSSHKeyParams defines parameters for DeleteSSHKey.
+type DeleteSSHKeyParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// UpdateSSHKeyParams defines parameters for UpdateSSHKey.
+type UpdateSSHKeyParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// ListTokensParams defines parameters for ListTokens.
+type ListTokensParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// CreateTokenParams defines parameters for CreateToken.
+type CreateTokenParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// RevokeTokenParams defines parameters for RevokeToken.
+type RevokeTokenParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// ConsumeBootstrapJSONRequestBody defines body for ConsumeBootstrap for application/json ContentType.
+type ConsumeBootstrapJSONRequestBody = BootstrapRequest
+
 // CreateInstanceJSONRequestBody defines body for CreateInstance for application/json ContentType.
 type CreateInstanceJSONRequestBody = CreateInstanceRequest
+
+// CreateSessionJSONRequestBody defines body for CreateSession for application/json ContentType.
+type CreateSessionJSONRequestBody = LoginRequest
+
+// CreateSSHKeyJSONRequestBody defines body for CreateSSHKey for application/json ContentType.
+type CreateSSHKeyJSONRequestBody = CreateSSHKeyRequest
+
+// UpdateSSHKeyJSONRequestBody defines body for UpdateSSHKey for application/json ContentType.
+type UpdateSSHKeyJSONRequestBody = UpdateSSHKeyRequest
+
+// CreateTokenJSONRequestBody defines body for CreateToken for application/json ContentType.
+type CreateTokenJSONRequestBody = CreateTokenRequest

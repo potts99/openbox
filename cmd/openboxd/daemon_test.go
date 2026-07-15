@@ -53,11 +53,17 @@ func TestDaemonAndClientDefaultsAddressSamePrivateAPI(t *testing.T) {
 	}
 }
 
-func TestDaemonRejectsPublicPreAuthenticationAPIAndPartialTLS(t *testing.T) {
-	public := testDaemonConfig()
-	public.APIAddress = "0.0.0.0:8443"
-	if err := public.validate(); err == nil {
-		t.Fatal("public API address accepted before authentication")
+func TestDaemonPublicListenerRequiresCompleteTLS(t *testing.T) {
+	publicPlaintext := testDaemonConfig()
+	publicPlaintext.APIAddress = "0.0.0.0:8443"
+	if err := publicPlaintext.validate(); err == nil {
+		t.Fatal("public plaintext API address accepted")
+	}
+	publicTLS := publicPlaintext
+	publicTLS.APITLSCertificate = "/cert.pem"
+	publicTLS.APITLSKey = "/key.pem"
+	if err := publicTLS.validate(); err != nil {
+		t.Fatalf("public API with complete TLS rejected: %v", err)
 	}
 	partialTLS := testDaemonConfig()
 	partialTLS.APITLSCertificate = "/cert.pem"

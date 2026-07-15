@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/openbox-dev/openbox/internal/app/instances"
+	"github.com/openbox-dev/openbox/internal/auth"
 	"github.com/openbox-dev/openbox/internal/domain"
 	"github.com/openbox-dev/openbox/internal/httpapi/generated"
 	"github.com/openbox-dev/openbox/internal/images"
@@ -61,6 +62,7 @@ type Service interface {
 
 type Options struct {
 	OwnerID           domain.OwnerID
+	Auth              *auth.Manager
 	PollInterval      time.Duration
 	HeartbeatInterval time.Duration
 	MaxBodyBytes      int64
@@ -69,7 +71,8 @@ type Options struct {
 
 type Handler struct {
 	service           Service
-	ownerID           domain.OwnerID
+	fixedOwnerID      domain.OwnerID
+	auth              *auth.Manager
 	pollInterval      time.Duration
 	heartbeatInterval time.Duration
 	maxBodyBytes      int64
@@ -80,7 +83,7 @@ func New(service Service, options Options) (*Handler, error) {
 	if service == nil {
 		return nil, errors.New("HTTP API service is required")
 	}
-	if options.OwnerID == "" {
+	if options.OwnerID == "" && options.Auth == nil {
 		return nil, errors.New("HTTP API owner is required")
 	}
 	if options.PollInterval <= 0 {
@@ -96,7 +99,7 @@ func New(service Service, options Options) (*Handler, error) {
 		options.EventBatchSize = defaultEventLimit
 	}
 	return &Handler{
-		service: service, ownerID: options.OwnerID, pollInterval: options.PollInterval,
+		service: service, fixedOwnerID: options.OwnerID, auth: options.Auth, pollInterval: options.PollInterval,
 		heartbeatInterval: options.HeartbeatInterval, maxBodyBytes: options.MaxBodyBytes,
 		eventBatchSize: options.EventBatchSize,
 	}, nil
@@ -132,11 +135,43 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		h.writeError(response, requestID, http.StatusNotFound, string(domain.CodeNotFound), "path")
 		return
 	}
+	if h.auth != nil && !isPublicAuthRoute(segments, request.Method) {
+		var err error
+		request, err = h.authenticate(request)
+		if err != nil {
+			status, code := http.StatusUnauthorized, "unauthenticated"
+			if errors.Is(err, auth.ErrForbidden) {
+				status, code = http.StatusForbidden, "forbidden"
+			}
+			h.writeError(response, requestID, status, code, "authorization")
+			return
+		}
+	}
 
 	switch segments[1] {
 	case "health":
 		if len(segments) == 2 && h.requireMethod(response, request, requestID, http.MethodGet) {
 			h.health(response, request, requestID)
+			return
+		}
+	case "bootstrap":
+		if len(segments) == 2 && h.routeBootstrap(response, request, requestID) {
+			return
+		}
+	case "sessions":
+		if len(segments) == 2 && h.routeSessions(response, request, requestID) {
+			return
+		}
+	case "session":
+		if h.routeSession(response, request, requestID, segments[2:]) {
+			return
+		}
+	case "tokens":
+		if h.routeTokens(response, request, requestID, segments[2:]) {
+			return
+		}
+	case "ssh-keys":
+		if h.routeSSHKeys(response, request, requestID, segments[2:]) {
 			return
 		}
 	case "capabilities":
@@ -245,7 +280,7 @@ func (h *Handler) capabilities(response http.ResponseWriter, request *http.Reque
 }
 
 func (h *Handler) listImages(response http.ResponseWriter, request *http.Request, requestID string) {
-	values, err := h.service.ListImages(request.Context(), h.ownerID)
+	values, err := h.service.ListImages(request.Context(), h.requestOwner(request))
 	if err != nil {
 		h.writeServiceError(response, requestID, err)
 		return
@@ -258,7 +293,7 @@ func (h *Handler) listImages(response http.ResponseWriter, request *http.Request
 }
 
 func (h *Handler) listInstances(response http.ResponseWriter, request *http.Request, requestID string) {
-	values, err := h.service.ListInstances(request.Context(), h.ownerID)
+	values, err := h.service.ListInstances(request.Context(), h.requestOwner(request))
 	if err != nil {
 		h.writeServiceError(response, requestID, err)
 		return
@@ -271,7 +306,7 @@ func (h *Handler) listInstances(response http.ResponseWriter, request *http.Requ
 }
 
 func (h *Handler) getInstance(response http.ResponseWriter, request *http.Request, requestID, rawID string) {
-	value, err := h.service.GetInstance(request.Context(), h.ownerID, domain.InstanceID(rawID))
+	value, err := h.service.GetInstance(request.Context(), h.requestOwner(request), domain.InstanceID(rawID))
 	if err != nil {
 		h.writeServiceError(response, requestID, err)
 		return
@@ -303,7 +338,7 @@ func (h *Handler) createInstance(response http.ResponseWriter, request *http.Req
 		resources = domain.Resources{VCPUs: input.Resources.Vcpus, MemoryBytes: input.Resources.MemoryBytes, DiskBytes: input.Resources.DiskBytes}
 	}
 	instance, operation, err := h.service.SubmitCreate(request.Context(), instances.CreateInput{
-		OwnerID: h.ownerID, Name: input.Name, Kind: kind, Image: input.Image,
+		OwnerID: h.requestOwner(request), Name: input.Name, Kind: kind, Image: input.Image,
 		RequestedIsolation: isolation,
 		Resources:          resources,
 		OwnerPublicKey:     input.OwnerPublicKey, IdempotencyKey: key,
@@ -326,7 +361,7 @@ func (h *Handler) submitAction(response http.ResponseWriter, request *http.Reque
 		h.writeError(response, requestID, http.StatusBadRequest, string(domain.CodeInvalidArgument), HeaderIdempotencyKey)
 		return
 	}
-	operation, err := h.service.SubmitAction(request.Context(), h.ownerID, domain.InstanceID(rawID), action, key)
+	operation, err := h.service.SubmitAction(request.Context(), h.requestOwner(request), domain.InstanceID(rawID), action, key)
 	if err != nil {
 		h.writeServiceError(response, requestID, err)
 		return
@@ -335,7 +370,7 @@ func (h *Handler) submitAction(response http.ResponseWriter, request *http.Reque
 }
 
 func (h *Handler) listOperations(response http.ResponseWriter, request *http.Request, requestID string) {
-	values, err := h.service.ListOperations(request.Context(), h.ownerID)
+	values, err := h.service.ListOperations(request.Context(), h.requestOwner(request))
 	if err != nil {
 		h.writeServiceError(response, requestID, err)
 		return
@@ -348,7 +383,7 @@ func (h *Handler) listOperations(response http.ResponseWriter, request *http.Req
 }
 
 func (h *Handler) getOperation(response http.ResponseWriter, request *http.Request, requestID, rawID string) {
-	value, err := h.service.GetOperation(request.Context(), h.ownerID, domain.OperationID(rawID))
+	value, err := h.service.GetOperation(request.Context(), h.requestOwner(request), domain.OperationID(rawID))
 	if err != nil {
 		h.writeServiceError(response, requestID, err)
 		return
@@ -357,7 +392,7 @@ func (h *Handler) getOperation(response http.ResponseWriter, request *http.Reque
 }
 
 func (h *Handler) cancelOperation(response http.ResponseWriter, request *http.Request, requestID, rawID string) {
-	value, err := h.service.CancelOperation(request.Context(), h.ownerID, domain.OperationID(rawID))
+	value, err := h.service.CancelOperation(request.Context(), h.requestOwner(request), domain.OperationID(rawID))
 	if err != nil {
 		h.writeServiceError(response, requestID, err)
 		return

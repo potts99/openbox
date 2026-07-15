@@ -34,6 +34,24 @@ func TestNegotiatesV1AndSendsVersionHeader(t *testing.T) {
 	}
 }
 
+func TestSendsConfiguredBearerToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer owner-token" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		_, _ = w.Write([]byte(`{"status":"ok","server_version":"v0.1.0","api_version":"v1"}`))
+	}))
+	defer server.Close()
+
+	c, err := New(Options{BaseURL: server.URL, Token: "owner-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Health(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNegotiationRejectsUnsupportedServer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"status":"ok","api_version":"v2"}`))

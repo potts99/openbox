@@ -16,6 +16,7 @@ import (
 
 	"github.com/openbox-dev/openbox/internal/app/instances"
 	"github.com/openbox-dev/openbox/internal/app/recovery"
+	"github.com/openbox-dev/openbox/internal/auth"
 	"github.com/openbox-dev/openbox/internal/domain"
 	"github.com/openbox-dev/openbox/internal/httpapi"
 	"github.com/openbox-dev/openbox/internal/operations"
@@ -48,8 +49,8 @@ func (c daemonConfig) validate() error {
 	}
 	if host != "localhost" {
 		ip := net.ParseIP(host)
-		if ip == nil || !ip.IsLoopback() {
-			return errors.New("API must remain loopback-only until owner authentication is enabled")
+		if (ip == nil || !ip.IsLoopback()) && c.APITLSCertificate == "" {
+			return errors.New("a non-loopback API listener requires TLS")
 		}
 	}
 	if (c.APITLSCertificate == "") != (c.APITLSKey == "") {
@@ -94,6 +95,17 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err := store.EnsureOwner(ctx, domain.Owner{ID: domain.OwnerID(config.OwnerID), Name: config.OwnerName, CreatedAt: now, UpdatedAt: now}); err != nil {
 		return fail(err)
 	}
+	authManager, err := auth.New(store)
+	if err != nil {
+		return fail(err)
+	}
+	bootstrapSecret, err := authManager.EnsureBootstrap(ctx)
+	if err != nil {
+		return fail(err)
+	}
+	if bootstrapSecret != "" {
+		log.Printf("openboxd: one-time owner bootstrap secret (expires in %s): %s", auth.DefaultBootstrapTTL, bootstrapSecret)
+	}
 	runtime, err := incus.New(incus.Options{SocketPath: config.IncusSocket, Project: config.Project, ContainerProfile: config.ContainerProfile, VMProfile: config.VMProfile, StoragePool: config.StoragePool})
 	if err != nil {
 		return fail(err)
@@ -111,11 +123,11 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
-	handler, err := httpapi.New(service, httpapi.Options{OwnerID: domain.OwnerID(config.OwnerID)})
+	handler, err := httpapi.New(service, httpapi.Options{Auth: authManager})
 	if err != nil {
 		return fail(err)
 	}
-	api := &daemonAPIServer{server: httpapi.NewServer(config.APIAddress, handler), certificate: config.APITLSCertificate, key: config.APITLSKey}
+	api := &daemonAPIServer{server: httpapi.NewServer(config.APIAddress, rootHandler(handler)), certificate: config.APITLSCertificate, key: config.APITLSKey}
 	return daemonComponents{operations: worker, reconciler: reconciler, closer: store, api: api}, nil
 }
 

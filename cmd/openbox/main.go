@@ -38,6 +38,7 @@ Commands:
 
 Global options:
   --server URL            OpenBox API URL (default http://127.0.0.1:8443)
+  --token TOKEN           Owner API token (or OPENBOX_TOKEN)
   --timeout DURATION      Request timeout (default 30s)
   --json                  Machine-readable output
   --version               Print the CLI version
@@ -49,6 +50,7 @@ func main() {
 
 type commonOptions struct {
 	server  string
+	token   string
 	timeout time.Duration
 	json    bool
 }
@@ -68,7 +70,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	httpClient := &http.Client{Timeout: options.timeout}
-	api, err := openbox.New(openbox.Options{BaseURL: options.server, HTTPClient: httpClient, UserAgent: "openbox-cli/" + version.Version})
+	api, err := openbox.New(openbox.Options{BaseURL: options.server, HTTPClient: httpClient, UserAgent: "openbox-cli/" + version.Version, Token: options.token})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
@@ -100,20 +102,22 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 func parseCommon(args []string) (commonOptions, []string, error) {
-	options := commonOptions{server: envOr("OPENBOX_SERVER", openbox.DefaultBaseURL), timeout: 30 * time.Second}
+	options := commonOptions{server: envOr("OPENBOX_SERVER", openbox.DefaultBaseURL), token: os.Getenv("OPENBOX_TOKEN"), timeout: 30 * time.Second}
 	remaining := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		argument := args[i]
 		switch {
 		case argument == "--json":
 			options.json = true
-		case argument == "--server" || argument == "--timeout":
+		case argument == "--server" || argument == "--token" || argument == "--timeout":
 			if i+1 >= len(args) {
 				return options, nil, fmt.Errorf("%s requires a value", argument)
 			}
 			i++
 			if argument == "--server" {
 				options.server = args[i]
+			} else if argument == "--token" {
+				options.token = args[i]
 			} else {
 				duration, err := time.ParseDuration(args[i])
 				if err != nil || duration <= 0 {
@@ -123,6 +127,8 @@ func parseCommon(args []string) (commonOptions, []string, error) {
 			}
 		case strings.HasPrefix(argument, "--server="):
 			options.server = strings.TrimPrefix(argument, "--server=")
+		case strings.HasPrefix(argument, "--token="):
+			options.token = strings.TrimPrefix(argument, "--token=")
 		case strings.HasPrefix(argument, "--timeout="):
 			duration, err := time.ParseDuration(strings.TrimPrefix(argument, "--timeout="))
 			if err != nil || duration <= 0 {

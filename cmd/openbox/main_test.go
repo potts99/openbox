@@ -56,6 +56,22 @@ func TestListHumanAndJSON(t *testing.T) {
 	}
 }
 
+func TestUsesBearerTokenFromFlag(t *testing.T) {
+	server := commandServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer owner-token" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		_, _ = fmt.Fprint(w, `{"items":[]}`)
+	})
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"ls", "--server", server.URL, "--token", "owner-token"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+	}
+}
+
 func TestInspectHuman(t *testing.T) {
 	server := commandServer(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, `{"id":"box-1","name":"my-box","kind":"vps","image_id":"ubuntu","requested_isolation":"strong","desired_state":"stopped","observed_state":"stopped","actual_isolation":"virtual_machine","resources":{"vcpus":2,"memory_bytes":8589934592,"disk_bytes":10737418240}}`)

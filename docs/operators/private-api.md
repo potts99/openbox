@@ -1,10 +1,10 @@
 # Private API and CLI operation
 
-OpenBox v0.1 currently exposes its control API only on a loopback address. This
-is a deliberate safety boundary while owner tokens and browser sessions remain
-scheduled for the next implementation slice.
+OpenBox v0.1 serves its owner console and control API on the same listener. The
+default remains loopback-only. Browser sessions and owner-scoped API tokens
+protect the control plane after one-time setup.
 
-## Starting the daemon
+## Starting and claiming the daemon
 
 The relevant defaults are:
 
@@ -15,29 +15,39 @@ openboxd \
   --owner-name "Local owner"
 ```
 
-`openboxd` refuses a non-loopback API address. It creates the configured local
-owner on first start and refuses to silently rename an existing owner ID.
+On first start, `openboxd` creates the configured owner record and prints a
+one-time bootstrap secret. Open the dashboard at the listener address and use
+that secret within 20 minutes to install the owner password. Only a digest of
+the secret is stored, and the database transaction can succeed only once.
+Restart the daemon to issue a replacement after an unused challenge expires.
 
-The loopback listener uses HTTP by default. It is intended for same-host use or
-a trusted SSH tunnel. To serve HTTPS on loopback, provide both
-`--api-tls-cert` and `--api-tls-key`; configuring only one is an error. The
-daemon requires TLS 1.3 when these options are used. The certificate must be
-trusted by the CLI host (or supplied through a custom HTTP client when using
-the Go client package).
+The loopback listener uses HTTP by default. Password setup and login over HTTP
+are accepted only from a direct loopback peer, including the server end of a
+trusted SSH tunnel. To serve HTTPS, provide both `--api-tls-cert` and
+`--api-tls-key`; configuring only one is an error. The daemon requires TLS 1.3
+and refuses a non-loopback listener without TLS. The certificate must be
+trusted by the browser and CLI host.
 
-Do not publish or reverse-proxy this pre-authentication API to an untrusted
-network. Public and multi-session access belongs to the owner-authentication
-slice.
+Forwarding headers do not make an insecure remote request trusted. Terminate a
+trusted tunnel on loopback or connect directly with TLS. Keep the listener
+behind host firewall policy even though health, bootstrap, and login are the
+only unauthenticated routes.
 
 ## Using the CLI
 
-The CLI defaults to `http://127.0.0.1:8443`. Override it per command or through
-the environment:
+The CLI defaults to `http://127.0.0.1:8443` and requires an owner API token for
+control-plane commands. Create an owner-scoped token in an authenticated owner
+session; its secret is shown once. Prefer `OPENBOX_TOKEN` so the secret does not
+appear directly in shell history:
 
 ```text
-openbox ls --server http://127.0.0.1:8443
-OPENBOX_SERVER=https://127.0.0.1:8443 openbox doctor
+OPENBOX_TOKEN="$OPENBOX_TOKEN" openbox ls
+OPENBOX_SERVER=https://openbox.example OPENBOX_TOKEN="$OPENBOX_TOKEN" openbox doctor
 ```
+
+`--token` is available for controlled automation environments. Token listings
+contain only identifiers, names, scopes, timestamps, and revocation state.
+Revoking a token takes effect on its next request.
 
 `openbox new` accepts an SSH public key with `--ssh-key`. The value may be a
 public-key string or file path. If omitted, the CLI checks

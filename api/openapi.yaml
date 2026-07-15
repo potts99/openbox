@@ -10,12 +10,15 @@ servers:
     description: Loopback-only default for local v0.1 deployments.
   - url: https://127.0.0.1:8443
     description: Optional TLS listener when an operator supplies a certificate and key.
-security: []
+security:
+  - cookieAuth: []
+  - bearerAuth: []
 paths:
   /v1/health:
     parameters:
       - { $ref: "#/components/parameters/APIVersion" }
     get:
+      security: []
       operationId: getHealth
       responses:
         "200":
@@ -24,6 +27,122 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Health" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/bootstrap:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+    get:
+      security: []
+      operationId: getBootstrapStatus
+      responses:
+        "200":
+          description: Whether one-time owner setup is available.
+          content: { application/json: { schema: { $ref: "#/components/schemas/BootstrapStatus" } } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      security: []
+      operationId: consumeBootstrap
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/BootstrapRequest" } } }
+      responses:
+        "201":
+          description: Owner credential and browser session created atomically.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/sessions:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+    post:
+      security: []
+      operationId: createSession
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/LoginRequest" } } }
+      responses:
+        "201":
+          description: New browser session with a rotated, server-generated identifier.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } }
+        "429": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/session:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+    get:
+      security: [{ cookieAuth: [] }]
+      operationId: getSession
+      responses:
+        "200": { description: Current owner session with rotated cookie and CSRF token for reload continuity., content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } } }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      security: [{ cookieAuth: [] }]
+      operationId: deleteSession
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Session revoked. }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/tokens:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+    get:
+      operationId: listTokens
+      responses:
+        "200": { description: Token metadata without secrets or hashes., content: { application/json: { schema: { $ref: "#/components/schemas/ListTokensResponse" } } } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createToken
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CreateTokenRequest" } } }
+      responses:
+        "201": { description: Token secret, returned once., content: { application/json: { schema: { $ref: "#/components/schemas/CreatedToken" } } } }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/tokens/{token_id}:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { name: token_id, in: path, required: true, schema: { type: string } }
+    delete:
+      operationId: revokeToken
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Token revoked immediately. }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/ssh-keys:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+    get:
+      operationId: listSSHKeys
+      responses:
+        "200": { description: Authorized SSH keys., content: { application/json: { schema: { $ref: "#/components/schemas/ListSSHKeysResponse" } } } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createSSHKey
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CreateSSHKeyRequest" } } }
+      responses:
+        "201": { description: Normalized SSH key., content: { application/json: { schema: { $ref: "#/components/schemas/SSHKey" } } } }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/ssh-keys/{key_id}:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { name: key_id, in: path, required: true, schema: { type: string } }
+    patch:
+      operationId: updateSSHKey
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/UpdateSSHKeyRequest" } } }
+      responses:
+        "200": { description: SSH key label updated without changing key material., content: { application/json: { schema: { $ref: "#/components/schemas/SSHKey" } } } }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteSSHKey
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: SSH key deleted. }
         default: { $ref: "#/components/responses/Error" }
   /v1/capabilities:
     parameters:
@@ -68,6 +187,7 @@ paths:
       operationId: createInstance
       parameters:
         - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/CSRFToken" }
       requestBody:
         required: true
         content:
@@ -99,6 +219,7 @@ paths:
       operationId: deleteInstance
       parameters:
         - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/CSRFToken" }
       responses:
         "202":
           description: Deletion was accepted as a durable operation.
@@ -118,6 +239,7 @@ paths:
           type: string
           enum: [start, stop, restart]
       - { $ref: "#/components/parameters/IdempotencyKey" }
+      - { $ref: "#/components/parameters/CSRFToken" }
     post:
       operationId: mutateInstance
       responses:
@@ -161,6 +283,7 @@ paths:
       - { $ref: "#/components/parameters/OperationID" }
     post:
       operationId: cancelOperation
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
       responses:
         "200":
           description: Operation cancellation was accepted at a safe stage.
@@ -189,6 +312,16 @@ paths:
               schema: { type: string }
         default: { $ref: "#/components/responses/Error" }
 components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: openbox_session
+      description: HttpOnly SameSite browser session. Unsafe requests also require X-CSRF-Token.
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: OpenBox token
   headers:
     APIVersion:
       description: API contract version used for this response.
@@ -215,6 +348,12 @@ components:
       in: path
       required: true
       schema: { type: string, minLength: 1 }
+    CSRFToken:
+      name: X-CSRF-Token
+      in: header
+      required: false
+      description: Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+      schema: { type: string, minLength: 20 }
   responses:
     Error:
       description: Stable error envelope.
@@ -223,6 +362,86 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   schemas:
+    BootstrapStatus:
+      type: object
+      required: [required]
+      properties:
+        required: { type: boolean }
+        expires_at: { type: string, format: date-time }
+    BootstrapRequest:
+      type: object
+      additionalProperties: false
+      required: [secret, password]
+      properties:
+        secret: { type: string, minLength: 20, writeOnly: true }
+        password: { type: string, minLength: 12, maxLength: 1024, writeOnly: true }
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [password]
+      properties:
+        password: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
+    Session:
+      type: object
+      required: [owner_id, expires_at, csrf_token]
+      properties:
+        owner_id: { type: string }
+        expires_at: { type: string, format: date-time }
+        csrf_token: { type: string, readOnly: true }
+    TokenMetadata:
+      type: object
+      required: [id, name, scopes, created_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        scopes: { type: array, items: { type: string, enum: [owner] } }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
+    CreatedToken:
+      allOf:
+        - { $ref: "#/components/schemas/TokenMetadata" }
+        - type: object
+          required: [secret]
+          properties: { secret: { type: string, readOnly: true } }
+    CreateTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        scopes: { type: array, items: { type: string, enum: [owner] } }
+        expires_at: { type: string, format: date-time }
+    ListTokensResponse:
+      type: object
+      required: [items]
+      properties: { items: { type: array, items: { $ref: "#/components/schemas/TokenMetadata" } } }
+    SSHKey:
+      type: object
+      required: [id, label, fingerprint, public_key, created_at]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        fingerprint: { type: string }
+        public_key: { type: string }
+        created_at: { type: string, format: date-time }
+    CreateSSHKeyRequest:
+      type: object
+      additionalProperties: false
+      required: [label, public_key]
+      properties:
+        label: { type: string, minLength: 1, maxLength: 100 }
+        public_key: { type: string, minLength: 1, maxLength: 16384 }
+    UpdateSSHKeyRequest:
+      type: object
+      additionalProperties: false
+      required: [label]
+      properties: { label: { type: string, minLength: 1, maxLength: 100 } }
+    ListSSHKeysResponse:
+      type: object
+      required: [items]
+      properties: { items: { type: array, items: { $ref: "#/components/schemas/SSHKey" } } }
     Health:
       type: object
       required: [status, api_version, server_version]

@@ -20,7 +20,7 @@ func (h *Handler) streamOperationEvents(response http.ResponseWriter, request *h
 		return
 	}
 	operationID := domain.OperationID(rawID)
-	operation, err := h.service.GetOperation(request.Context(), h.ownerID, operationID)
+	operation, err := h.service.GetOperation(request.Context(), h.requestOwner(request), operationID)
 	if err != nil {
 		h.writeServiceError(response, requestID, err)
 		return
@@ -42,7 +42,7 @@ func (h *Handler) streamOperationEvents(response http.ResponseWriter, request *h
 	defer heartbeat.Stop()
 
 	for {
-		events, listErr := h.service.ListOperationEventsAfter(request.Context(), h.ownerID, operationID, after, h.eventBatchSize)
+		events, listErr := h.service.ListOperationEventsAfter(request.Context(), h.requestOwner(request), operationID, after, h.eventBatchSize)
 		if listErr != nil {
 			writeSSEError(response, requestID)
 			flusher.Flush()
@@ -79,7 +79,7 @@ func (h *Handler) streamOperationEvents(response http.ResponseWriter, request *h
 			}
 			flusher.Flush()
 		case <-poll.C:
-			operation, err = h.service.GetOperation(request.Context(), h.ownerID, operationID)
+			operation, err = h.service.GetOperation(request.Context(), h.requestOwner(request), operationID)
 			if err != nil {
 				writeSSEError(response, requestID)
 				flusher.Flush()
