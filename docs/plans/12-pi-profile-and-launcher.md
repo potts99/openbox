@@ -1,6 +1,6 @@
 ---
 title: "Slice 12 — Shared Pi profile and browser-TUI launcher"
-status: planned
+status: implemented
 milestone: "M3 Devbox and Pi"
 depends_on: ["09-browser-terminal", "11-images-snapshots-and-devbox-cloning"]
 spec: "../specs/2026-07-14-openbox-design.md"

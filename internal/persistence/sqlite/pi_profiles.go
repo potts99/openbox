@@ -12,6 +12,24 @@ import (
 	pi "github.com/openbox-dev/openbox/internal/profiles/pi"
 )
 
+func (s *Store) ListPiProfiles(ctx context.Context, ownerID domain.OwnerID) ([]domain.PiProfile, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id,owner_id,name,version,settings_json,created_at,updated_at
+		FROM pi_profiles WHERE owner_id=? ORDER BY name, id`, ownerID)
+	if err != nil {
+		return nil, fmt.Errorf("list pi profiles: %w", err)
+	}
+	defer rows.Close()
+	out := make([]domain.PiProfile, 0)
+	for rows.Next() {
+		profile, scanErr := scanPiProfile(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		out = append(out, profile)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) CreatePiProfile(ctx context.Context, profile domain.PiProfile) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO pi_profiles(id,owner_id,name,version,settings_json,created_at,updated_at)
 		VALUES(?,?,?,?,?,?,?)`,
