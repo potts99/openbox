@@ -120,7 +120,8 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 			return
 		}
 		if sessionID != "" {
-			h.persistentConsoles.remove(sessionID)
+			h.persistentConsoles.purgeAndClose(sessionID)
+			return
 		}
 		_ = session.Close()
 	}()
@@ -324,7 +325,9 @@ func (h *Handler) openPersistentConsole(
 		console:     session,
 		attached:    true,
 	}
-	entry.startStdoutPump()
+	entry.startStdoutPump(func() {
+		h.persistentConsoles.purgeAndClose(sessionID)
+	})
 	h.persistentConsoles.put(entry)
 	return session, sessionName, sessionID, cols, rows, entry, nil
 }

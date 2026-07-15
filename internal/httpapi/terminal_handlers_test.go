@@ -919,6 +919,64 @@ func TestTerminalOpenSameSessionNameReattaches(t *testing.T) {
 	})
 }
 
+func TestTerminalNamedSessionReopensAfterGuestExit(t *testing.T) {
+	rt := newRunningFakeRuntime(t, "incus-owned-ref")
+	env := newTerminalTestEnv(t, rt, terminal.DefaultLimits())
+	conn, ctx, ack := env.dialOpen(t, terminal.OpenFrame{
+		InstanceID:  "inst-owned",
+		Cols:        80,
+		Rows:        24,
+		SessionName: "main",
+	})
+	if err := conn.Write(ctx, websocket.MessageText, mustEncodeTerminal(t, terminal.DetachFrame{})); err != nil {
+		t.Fatal(err)
+	}
+	waitTerminalClosed(t, conn)
+	time.Sleep(50 * time.Millisecond)
+	opensAfterDetach := countFakeCalls(rt, "console.open")
+
+	if s := rt.ActiveConsole("incus-owned-ref"); s != nil {
+		_ = s.Close()
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if countFakeCalls(rt, "console.open") == opensAfterDetach && rt.ConsoleClosed("incus-owned-ref") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !rt.ConsoleClosed("incus-owned-ref") {
+		t.Fatal("guest exit must close the console")
+	}
+
+	conn2, ctx2, reack := env.dialOpen(t, terminal.OpenFrame{
+		InstanceID:  "inst-owned",
+		Cols:        80,
+		Rows:        24,
+		SessionName: "main",
+	})
+	defer conn2.Close(websocket.StatusNormalClosure, "")
+	if countFakeCalls(rt, "console.open") != opensAfterDetach+1 {
+		t.Fatal("session_name reopen after guest exit must OpenConsole fresh tmux -A")
+	}
+	if reack.SessionID == ack.SessionID {
+		t.Fatalf("reopen after guest exit must issue new session_id, got %q", reack.SessionID)
+	}
+	if err := conn2.Write(ctx2, websocket.MessageText, mustEncodeTerminal(t, terminal.InputFrame{Data: []byte("fresh")})); err != nil {
+		t.Fatal(err)
+	}
+	_ = readTerminalFrameUntil(t, conn2, ctx2, func(f terminal.Frame) bool {
+		out, ok := f.(terminal.OutputFrame)
+		return ok && string(out.Data) == "fresh"
+	})
+
+	t.Cleanup(func() {
+		if s := rt.ActiveConsole("incus-owned-ref"); s != nil {
+			_ = s.Close()
+		}
+	})
+}
+
 func TestTerminalRejectsInvalidSessionName(t *testing.T) {
 	rt := newRunningFakeRuntime(t, "incus-owned-ref")
 	h, m, bootstrap := newAuthHandlerWithOptions(t, Options{Console: rt, TerminalLimits: terminal.DefaultLimits()})

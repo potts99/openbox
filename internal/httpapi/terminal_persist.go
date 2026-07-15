@@ -30,7 +30,7 @@ type persistentConsole struct {
 	outW  *io.PipeWriter
 }
 
-func (p *persistentConsole) startStdoutPump() {
+func (p *persistentConsole) startStdoutPump(onExit func()) {
 	go func() {
 		buf := make([]byte, 32<<10)
 		for {
@@ -47,6 +47,9 @@ func (p *persistentConsole) startStdoutPump() {
 			}
 			if err != nil {
 				p.detachOutput()
+				if onExit != nil {
+					onExit()
+				}
 				return
 			}
 		}
@@ -154,4 +157,21 @@ func (s *persistentConsoleStore) remove(id string) *persistentConsole {
 	delete(s.byName, persistentNameKey(entry.ownerID, entry.instanceID, entry.sessionName))
 	entry.detachOutput()
 	return entry
+}
+
+// purgeAndClose drops a persistent entry and closes its console. Invoked when the
+// guest PTY ends (stdout EOF) so reconnect by session_name opens a fresh console.
+func (s *persistentConsoleStore) purgeAndClose(id string) {
+	s.mu.Lock()
+	entry := s.byID[id]
+	if entry == nil {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.byID, id)
+	delete(s.byName, persistentNameKey(entry.ownerID, entry.instanceID, entry.sessionName))
+	entry.detachOutput()
+	console := entry.console
+	s.mu.Unlock()
+	_ = console.Close()
 }
