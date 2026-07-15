@@ -186,8 +186,8 @@ type fakeRepo struct {
 }
 
 type storedRouteToken struct {
-	token  routes.RouteToken
-	digest []byte
+	token   routes.RouteToken
+	digest  []byte
 	revoked *time.Time
 }
 

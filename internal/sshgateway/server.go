@@ -294,9 +294,9 @@ func (s *Server) handleDirectTCPIP(ctx context.Context, connection *ssh.ServerCo
 		return
 	}
 	var payload struct {
-		Host string
-		Port uint32
-		Orig string
+		Host  string
+		Port  uint32
+		Orig  string
 		OPort uint32
 	}
 	if err := ssh.Unmarshal(newChannel.ExtraData(), &payload); err != nil {

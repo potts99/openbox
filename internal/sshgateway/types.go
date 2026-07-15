@@ -69,11 +69,11 @@ type Auditor interface {
 }
 
 type Config struct {
-	Address               string
-	HostKeyPath           string
-	Keys                  KeyAuthorizer
-	Commands              CommandDispatcher
-	Instances             InstanceProxy
+	Address     string
+	HostKeyPath string
+	Keys        KeyAuthorizer
+	Commands    CommandDispatcher
+	Instances   InstanceProxy
 	// Ports enables Direct-TCPIP to managed instance ports for `openbox forward`.
 	// When nil, TCP forwarding remains refused.
 	Ports                 InstancePortDialer
