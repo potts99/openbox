@@ -612,6 +612,15 @@ type PublishRouteParams struct {
 	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
 }
 
+// ValidateRouteDNSParams defines parameters for ValidateRouteDNS.
+type ValidateRouteDNSParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
 // DeleteSessionParams defines parameters for DeleteSession.
 type DeleteSessionParams struct {
 	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
