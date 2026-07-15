@@ -12,10 +12,16 @@ import (
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 )
 
-// GuestExecer runs argv commands inside a managed guest instance.
-type GuestExecer interface {
+// Guest runs argv commands and writes files inside a managed guest instance.
+// File content must go through WriteFile (not Exec Stdin).
+type Guest interface {
 	Exec(context.Context, runtimeapi.ExecRequest) (runtimeapi.ExecResult, error)
+	WriteFile(context.Context, runtimeapi.WriteFileRequest) error
 }
+
+// GuestExecer runs argv commands inside a managed guest instance.
+// Deprecated: prefer Guest; kept as a name alias for call sites that only Exec.
+type GuestExecer = Guest
 
 // InstallOptions configures host-side release fetch and guest architecture.
 type InstallOptions struct {
@@ -25,10 +31,10 @@ type InstallOptions struct {
 
 // Install runs a catalog package's install recipe then verify steps via guest
 // Exec. github-release packages are fetched on the host, digest-verified, and
-// written into the guest through Exec Stdin. Other packages use argv-only steps.
-func Install(ctx context.Context, execer GuestExecer, runtimeRef string, pkg Package, opts InstallOptions) error {
-	if execer == nil {
-		return fmt.Errorf("software install: execer is required")
+// written into the guest through WriteFile. Other packages use argv-only steps.
+func Install(ctx context.Context, guest Guest, runtimeRef string, pkg Package, opts InstallOptions) error {
+	if guest == nil {
+		return fmt.Errorf("software install: guest is required")
 	}
 	if runtimeRef == "" {
 		return fmt.Errorf("software install: runtime ref is required")
@@ -40,7 +46,7 @@ func Install(ctx context.Context, execer GuestExecer, runtimeRef string, pkg Pac
 		"DEBIAN_FRONTEND": "noninteractive",
 		"PATH":            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 	}
-	run := func(phase string, steps [][]string, stdin []byte) error {
+	run := func(phase string, steps [][]string) error {
 		for i, step := range steps {
 			req := runtimeapi.ExecRequest{
 				Ref:        runtimeRef,
@@ -48,10 +54,7 @@ func Install(ctx context.Context, execer GuestExecer, runtimeRef string, pkg Pac
 				WorkingDir: "/",
 				Env:        env,
 			}
-			if i == 0 && stdin != nil {
-				req.Stdin = bytes.NewReader(stdin)
-			}
-			result, err := execer.Exec(ctx, req)
+			result, err := guest.Exec(ctx, req)
 			if err != nil {
 				return fmt.Errorf("software %s %q step %d (%s): %w", phase, pkg.ID, i, strings.Join(step, " "), err)
 			}
@@ -91,19 +94,24 @@ func Install(ctx context.Context, execer GuestExecer, runtimeRef string, pkg Pac
 		}
 		dest := path.Join("/usr/local/bin", pkg.ID)
 		tmp := dest + ".openbox-tmp"
-		steps := [][]string{
-			{"tee", tmp},
-			{"chmod", "0755", tmp},
-			{"mv", tmp, dest},
+		if err := guest.WriteFile(ctx, runtimeapi.WriteFileRequest{
+			Ref:  runtimeRef,
+			Path: tmp,
+			Body: bytes.NewReader(body),
+			Mode: 0o755,
+			UID:  0,
+			GID:  0,
+		}); err != nil {
+			return fmt.Errorf("software install %q write %s: %w", pkg.ID, tmp, err)
 		}
-		if err := run("install", steps, body); err != nil {
+		if err := run("install", [][]string{{"mv", tmp, dest}}); err != nil {
 			return err
 		}
-		return run("verify", pkg.Verify, nil)
+		return run("verify", pkg.Verify)
 	}
 
-	if err := run("install", pkg.Install, nil); err != nil {
+	if err := run("install", pkg.Install); err != nil {
 		return err
 	}
-	return run("verify", pkg.Verify, nil)
+	return run("verify", pkg.Verify)
 }

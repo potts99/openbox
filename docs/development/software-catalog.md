@@ -8,7 +8,7 @@ Curated guest packages live in `internal/software/`.
 | `pi.go` | Pi + tmux pins from the Devbox definition |
 | `herdr.go` | Herdr github-release pins (version + per-arch sha256) |
 | `release.go` | Release URL, fetch, digest verify |
-| `install.go` | Guest Exec recipes; host-fetch path for github-release |
+| `install.go` | Guest Exec recipes; host-fetch + WriteFile for github-release |
 
 ## Adding or bumping Herdr
 
@@ -19,8 +19,15 @@ Curated guest packages live in `internal/software/`.
 3. Keep `Verify` as `herdr --version`.
 4. Never add `curl`/`wget`/raw `https` argv steps; release install is host-side.
 
+## Guest writes (default)
+
+Guest file content uses `runtime.WriteFile` (Incus `/instances/{ref}/files`).
+Do not route binaries or config bodies through `Exec` Stdin — that path
+base64-wraps argv and hits Incus's 1 MiB non-large request limit.
+
 ## Install path (github-release)
 
 `software.Install` with `InstallOptions.Architecture` selects the asset,
-fetches on the host, verifies sha256, then guest-execs `tee` → `chmod 0755` →
-`mv` into `/usr/local/bin/<package-id>` and runs verify steps.
+fetches on the host, verifies sha256, `WriteFile`s to
+`/usr/local/bin/<id>.openbox-tmp` (mode `0755`), `mv`s into place, then runs
+verify steps.

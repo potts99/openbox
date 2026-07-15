@@ -19,8 +19,10 @@ import (
 // later without changing the OpenBox Runtime contract.
 //
 // Non-empty stdin is delivered by wrapping the command in a POSIX sh pipeline
-// that base64-decodes argv-carried bytes into the child stdin. That keeps apply
-// and sandbox exec working without Incus exec websockets.
+// that base64-decodes argv-carried bytes into the child stdin. That keeps small
+// sandbox/apply payloads working without Incus exec websockets. Do not use this
+// for file content — use WriteFile (Incus files API) as the default guest write
+// path; argv wrapping is capped well below typical binary sizes.
 func (a *Adapter) Exec(ctx context.Context, request runtimeapi.ExecRequest) (runtimeapi.ExecResult, error) {
 	if err := ctx.Err(); err != nil {
 		return runtimeapi.ExecResult{}, err

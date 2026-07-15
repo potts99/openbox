@@ -15,14 +15,16 @@ import (
 	"github.com/openbox-dev/openbox/internal/software"
 )
 
-type recordingExecer struct {
+type recordingGuest struct {
 	commands [][]string
 	stdins   [][]byte
+	writes   []runtimeapi.WriteFileRequest
+	bodies   [][]byte
 	results  map[string]runtimeapi.ExecResult
 	errFor   map[string]error
 }
 
-func (e *recordingExecer) Exec(_ context.Context, req runtimeapi.ExecRequest) (runtimeapi.ExecResult, error) {
+func (e *recordingGuest) Exec(_ context.Context, req runtimeapi.ExecRequest) (runtimeapi.ExecResult, error) {
 	e.commands = append(e.commands, append([]string{}, req.Command...))
 	if req.Stdin != nil {
 		b, _ := io.ReadAll(req.Stdin)
@@ -38,6 +40,17 @@ func (e *recordingExecer) Exec(_ context.Context, req runtimeapi.ExecRequest) (r
 		return res, nil
 	}
 	return runtimeapi.ExecResult{ExitCode: 0}, nil
+}
+
+func (e *recordingGuest) WriteFile(_ context.Context, req runtimeapi.WriteFileRequest) error {
+	e.writes = append(e.writes, req)
+	if req.Body != nil {
+		b, _ := io.ReadAll(req.Body)
+		e.bodies = append(e.bodies, b)
+	} else {
+		e.bodies = append(e.bodies, nil)
+	}
+	return nil
 }
 
 type mapFetcher map[string][]byte
@@ -56,7 +69,7 @@ func TestInstallRunsPinsThenVerify(t *testing.T) {
 	if !ok {
 		t.Fatal("missing pi")
 	}
-	execer := &recordingExecer{}
+	execer := &recordingGuest{}
 	if err := software.Install(context.Background(), execer, "ref-1", pkg, software.InstallOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +94,7 @@ func TestInstallFailsOnVerify(t *testing.T) {
 		Install: [][]string{{"true"}},
 		Verify:  [][]string{{"pi", "--version"}},
 	}
-	execer := &recordingExecer{
+	execer := &recordingGuest{
 		results: map[string]runtimeapi.ExecResult{
 			"pi --version": {ExitCode: 1, Stderr: []byte("not found")},
 		},
@@ -103,7 +116,7 @@ func TestInstallFailsOnInstallStep(t *testing.T) {
 		Install: [][]string{{"apt-get", "update"}},
 		Verify:  [][]string{{"true"}},
 	}
-	execer := &recordingExecer{
+	execer := &recordingGuest{
 		results: map[string]runtimeapi.ExecResult{
 			"apt-get update": {ExitCode: 100, Stderr: []byte("fail")},
 		},
@@ -138,31 +151,34 @@ func TestInstallGitHubReleaseWritesBinaryAndVerifies(t *testing.T) {
 	digest := hex.EncodeToString(sum[:])
 	pkg := testReleasePackage(digest, strings.Repeat("b", 64))
 	url := software.ReleaseURL("ogulcancelik/herdr", "0.7.4", "herdr-linux-x86_64")
-	execer := &recordingExecer{}
-	err := software.Install(context.Background(), execer, "ref-1", pkg, software.InstallOptions{
+	guest := &recordingGuest{}
+	err := software.Install(context.Background(), guest, "ref-1", pkg, software.InstallOptions{
 		Architecture: "x86_64",
 		Fetcher:      mapFetcher{url: body},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(execer.commands) < 4 {
-		t.Fatalf("commands=%v", execer.commands)
+	if len(guest.writes) != 1 {
+		t.Fatalf("writes=%d, want 1", len(guest.writes))
 	}
-	if strings.Join(execer.commands[0], " ") != "tee /usr/local/bin/herdr.openbox-tmp" {
-		t.Fatalf("tee=%v", execer.commands[0])
+	if guest.writes[0].Ref != "ref-1" || guest.writes[0].Path != "/usr/local/bin/herdr.openbox-tmp" {
+		t.Fatalf("write=%#v", guest.writes[0])
 	}
-	if string(execer.stdins[0]) != "herdr-bytes" {
-		t.Fatalf("stdin=%q", execer.stdins[0])
+	if guest.writes[0].Mode != 0o755 {
+		t.Fatalf("mode=%o", guest.writes[0].Mode)
 	}
-	if strings.Join(execer.commands[1], " ") != "chmod 0755 /usr/local/bin/herdr.openbox-tmp" {
-		t.Fatalf("chmod=%v", execer.commands[1])
+	if string(guest.bodies[0]) != "herdr-bytes" {
+		t.Fatalf("body=%q", guest.bodies[0])
 	}
-	if strings.Join(execer.commands[2], " ") != "mv /usr/local/bin/herdr.openbox-tmp /usr/local/bin/herdr" {
-		t.Fatalf("mv=%v", execer.commands[2])
+	if len(guest.commands) != 2 {
+		t.Fatalf("commands=%v", guest.commands)
 	}
-	if strings.Join(execer.commands[3], " ") != "herdr --version" {
-		t.Fatalf("verify=%v", execer.commands[3])
+	if strings.Join(guest.commands[0], " ") != "mv /usr/local/bin/herdr.openbox-tmp /usr/local/bin/herdr" {
+		t.Fatalf("mv=%v", guest.commands[0])
+	}
+	if strings.Join(guest.commands[1], " ") != "herdr --version" {
+		t.Fatalf("verify=%v", guest.commands[1])
 	}
 }
 
@@ -170,7 +186,7 @@ func TestInstallGitHubReleaseRejectsDigestMismatch(t *testing.T) {
 	t.Parallel()
 	pkg := testReleasePackage(strings.Repeat("a", 64), strings.Repeat("b", 64))
 	url := software.ReleaseURL("ogulcancelik/herdr", "0.7.4", "herdr-linux-x86_64")
-	err := software.Install(context.Background(), &recordingExecer{}, "ref-1", pkg, software.InstallOptions{
+	err := software.Install(context.Background(), &recordingGuest{}, "ref-1", pkg, software.InstallOptions{
 		Architecture: "x86_64",
 		Fetcher:      mapFetcher{url: []byte("herdr-bytes")},
 	})
@@ -182,7 +198,7 @@ func TestInstallGitHubReleaseRejectsDigestMismatch(t *testing.T) {
 func TestInstallGitHubReleaseRejectsUnsupportedArch(t *testing.T) {
 	t.Parallel()
 	pkg := testReleasePackage(strings.Repeat("a", 64), strings.Repeat("b", 64))
-	err := software.Install(context.Background(), &recordingExecer{}, "ref-1", pkg, software.InstallOptions{
+	err := software.Install(context.Background(), &recordingGuest{}, "ref-1", pkg, software.InstallOptions{
 		Architecture: "riscv64",
 	})
 	if err == nil || !strings.Contains(err.Error(), "architecture") {

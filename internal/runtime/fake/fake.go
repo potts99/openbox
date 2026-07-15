@@ -251,6 +251,29 @@ func (r *Runtime) Exec(ctx context.Context, request runtimeapi.ExecRequest) (run
 	return cloneExecResult(r.execResults[request.Ref]), nil
 }
 
+func (r *Runtime) WriteFile(ctx context.Context, request runtimeapi.WriteFileRequest) error {
+	if err := r.begin(ctx, "instance.write_file"); err != nil {
+		return err
+	}
+	if runtimeapi.IsHostConsoleTarget(request.Ref) {
+		return runtimeapi.ErrHostTarget
+	}
+	if request.Path == "" || request.Body == nil {
+		return fmt.Errorf("write file: path and body are required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	instance, exists := r.instances[request.Ref]
+	if !exists {
+		return runtimeapi.ErrNotFound
+	}
+	if instance.State != runtimeapi.StateRunning {
+		return fmt.Errorf("write file %s: %w", request.Ref, runtimeapi.ErrUnsupported)
+	}
+	_, _ = io.Copy(io.Discard, request.Body)
+	return nil
+}
+
 func (r *Runtime) LastConsoleRef() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()

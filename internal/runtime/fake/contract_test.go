@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
@@ -40,6 +41,14 @@ func TestRuntimeContract(t *testing.T) {
 	result, err := r.Exec(context.Background(), runtimeapi.ExecRequest{Ref: "dev", Command: []string{"false"}})
 	if err != nil || result.ExitCode != 7 || string(result.Stdout) != "out" || string(result.Stderr) != "err" {
 		t.Fatalf("exec = %#v, %v", result, err)
+	}
+	if err := r.WriteFile(context.Background(), runtimeapi.WriteFileRequest{
+		Ref:  "dev",
+		Path: "/usr/local/bin/tool",
+		Body: strings.NewReader("binary"),
+		Mode: 0o755,
+	}); err != nil {
+		t.Fatal(err)
 	}
 	if err := r.CreateSnapshot(context.Background(), "dev", "ready"); err != nil {
 		t.Fatal(err)
