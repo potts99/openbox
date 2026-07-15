@@ -6,7 +6,7 @@
 
 ## Summary
 
-OpenBox stops treating “plain VPS” vs “Pi Devbox” as separate product lines. Persistent instances are **VPS**. Users select **software from an OpenBox catalog** at create time and anytime after. **Pi** (pinned coding agent + tmux) is the first package. Users run tools from the normal **Terminal**; there is no Launch Pi control. **Sandbox** stays disposable and is out of scope for this change except where kind enums must drop `devbox`.
+OpenBox stops treating “plain VPS” vs “Pi Devbox” as separate product lines. Persistent instances are **VPS**. Users select **software from an OpenBox catalog** at create time and anytime after. **Pi** (pinned coding agent + tmux) is the first package. Users run tools from the normal **Terminal**; there is no Launch Pi control. **Sandbox** stays disposable. There are no production users yet — **hard-cut** `devbox` with no migration shims.
 
 ## Goals
 
@@ -14,7 +14,7 @@ OpenBox stops treating “plain VPS” vs “Pi Devbox” as separate product li
 - Catalog-driven software selection at **create** and **later**.
 - Pi remains a first-class optional package (not a separate kind).
 - Remove Launch Pi UI; terminal-only usage.
-- Migrate existing `devbox` instances to `vps` with Pi recorded when applicable.
+- Drop `devbox` as a kind (no users yet — hard cut, no migration/compat shims).
 - Protect/clone available on VPS (no longer Devbox-only).
 
 ## Non-goals
@@ -67,11 +67,14 @@ package_id, status (absent|pending|installed|failed), version?, updated_at, erro
 - Create with `packages` → after instance ready, drive install to `pending` then `installed`/`failed`.
 - Idempotent: successful verify while already present → `installed`.
 
-### Kind migration
+### Kind cutover
 
-- Stop accepting `kind=devbox` on create (reject with clear error once UI no longer offers it).
-- One-time / startup migration: `devbox` → `vps`; set `pi` to `installed` when prior Devbox image/capability implies Pi (or run verify once and record).
-- Docs and OpenAPI enums updated; `IncludesPi` on image manifests becomes informational or retired in favor of instance software state.
+- Remove `devbox` from create/API enums and domain validation (hard cut; no
+  runtime migration of existing rows — there are no production users yet).
+- Local/dev DBs with leftover `devbox` rows may be wiped or manually updated;
+  do not ship fallback mappers.
+- Docs and OpenAPI enums updated; `IncludesPi` on image manifests becomes
+  informational or retired in favor of instance software state.
 
 ### Protect / clone
 
@@ -114,8 +117,8 @@ Update operators/development docs that describe Devbox-only Pi and Launch Pi vis
 
 1. Persist software state + catalog + install path (with `pi`).
 2. API + UI Software panel; create checkbox.
-3. Remove Launch Pi; stop creating `devbox`.
-4. Migrate existing Devboxes; enable VPS protect/clone.
+3. Remove Launch Pi; stop creating `devbox` (hard cut).
+4. Enable VPS protect/clone; drop Devbox-only gates.
 5. Deprecate Devbox image alias requirement for Pi.
 
 ## Testing
@@ -123,9 +126,8 @@ Update operators/development docs that describe Devbox-only Pi and Launch Pi vis
 - Catalog validation (pins exact; no untrusted remote script steps).
 - Install success / idempotent re-install / verify failure → `failed`.
 - Create with `packages: ["pi"]` after ready.
-- Migration `devbox` → `vps` + software record.
 - UI: no Launch Pi; Software panel install path.
-- Protect/clone allowed on VPS.
+- Protect/clone allowed on VPS; `kind=devbox` rejected.
 
 ## Open follow-ups (explicitly later)
 
