@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 	"time"
 
@@ -105,6 +106,7 @@ func NewAllowlistResolver(config Config) (*AllowlistResolver, error) {
 // Resolve returns the current safe addresses for an allowlisted hostname. An
 // expired cached entry is never returned when its refresh fails.
 func (r *AllowlistResolver) Resolve(ctx context.Context, hostname string) ([]netip.Addr, error) {
+	hostname = strings.ToLower(strings.TrimSuffix(hostname, "."))
 	now := r.clock.Now()
 	r.mu.Lock()
 	entry, ok := r.cache[hostname]
