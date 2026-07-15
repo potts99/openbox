@@ -602,15 +602,30 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 }
 
 /* Terminal */
-.terminal-page { display: grid; grid-template-rows: auto 1fr; min-height: 100vh; background: #111110; color: #e8e6df; }
+.terminal-page {
+  position: relative;
+  display: grid;
+  grid-template-rows: 1fr;
+  height: 100dvh;
+  min-height: 100vh;
+  overflow: hidden;
+  background: #111110;
+  color: #e8e6df;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
 .terminal-toolbar {
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  right: 0;
+  top: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: .75rem 1.25rem;
+  gap: .5rem 1rem;
   align-items: center;
-  padding: .65rem 1rem;
+  padding: .55rem .75rem;
   border-bottom: 1px solid #2a2a27;
-  background: #161614;
+  background: rgba(22, 22, 20, .96);
 }
 .terminal-toolbar h1 {
   margin: 0;
@@ -621,36 +636,30 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .terminal-toolbar button { border-color: #3a3a36; background: transparent; color: inherit; }
 .terminal-toolbar button:hover:not(:disabled) { background: #222220; color: inherit; border-color: #5a5a54; }
 .terminal-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-left: auto; }
-.terminal-session-opts { display: flex; align-items: center; gap: .5rem; margin: 0; padding: 0; border: 0; }
-.terminal-persistent {
-  display: flex;
-  align-items: center;
-  gap: .35rem;
-  margin: 0;
-  color: #9a978c;
-  font-size: .7rem;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  cursor: pointer;
-}
-.terminal-session-name input {
-  width: 8rem;
-  border: 1px solid #3a3a36;
-  padding: .35rem .45rem;
-  background: #111110;
-  color: inherit;
-  font-size: .75rem;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-}
 .terminal-connection {
   margin: 0;
   color: #9a978c;
   font-size: .7rem;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
 }
-.terminal-main { display: grid; grid-template-rows: 1fr auto; min-height: 0; padding: .75rem 1rem 1rem; }
-.terminal-surface { min-height: 20rem; height: 100%; border: 1px solid #2a2a27; background: #0c0c0b; }
-.terminal-surface .xterm { height: 100%; padding: .4rem; }
-.terminal-hint { margin: .55rem 0 0; color: #6b6b66; font-size: .75rem; }
+.terminal-main {
+  min-height: 0;
+  height: 100%;
+  padding: 0;
+}
+.terminal-surface {
+  min-height: 0;
+  height: 100%;
+  border: 0;
+  background: #0c0c0b;
+}
+.terminal-surface .xterm { height: 100%; padding: .35rem .45rem; }
+.terminal-hint {
+  margin: 0;
+  color: #6b6b66;
+  font-size: .7rem;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
 
 @media (max-width: 720px) {
   .console-header { flex-wrap: wrap; padding: .65rem 1rem; gap: .5rem 1rem; }
