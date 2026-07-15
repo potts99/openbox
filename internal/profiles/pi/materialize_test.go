@@ -5,6 +5,7 @@ package pi_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -91,6 +92,52 @@ func TestApplyRequiresManagedRuntimeRefs(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for empty runtime ref")
+	}
+}
+
+func TestFileGuestWriterUsesWriteFileThenRename(t *testing.T) {
+	t.Parallel()
+	var writes []string
+	var calls [][]string
+	write := func(_ context.Context, ref, path string, content []byte, mode os.FileMode) error {
+		if ref != "ref-1" {
+			return fmt.Errorf("unexpected ref %q", ref)
+		}
+		if mode != 0o644 {
+			return fmt.Errorf("mode=%o", mode)
+		}
+		if string(content) != `{"theme":"dark"}` {
+			return fmt.Errorf("content=%q", content)
+		}
+		writes = append(writes, path)
+		return nil
+	}
+	exec := func(_ context.Context, ref string, command []string, stdin []byte) error {
+		if ref != "ref-1" {
+			return fmt.Errorf("unexpected ref %q", ref)
+		}
+		if stdin != nil {
+			return fmt.Errorf("exec must not carry file content")
+		}
+		calls = append(calls, append([]string{}, command...))
+		return nil
+	}
+	w := pi.NewFileGuestWriter(write, exec, "/home/owner")
+	path := filepath.Join("/home/owner", ".pi", "agent", "settings.json")
+	if err := w.WriteAtomic(context.Background(), "ref-1", path, []byte(`{"theme":"dark"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if len(writes) != 1 || !strings.HasSuffix(writes[0], ".tmp") {
+		t.Fatalf("writes=%v", writes)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("calls=%d, want 2 (mkdir, mv); %#v", len(calls), calls)
+	}
+	if calls[0][0] != "mkdir" {
+		t.Fatalf("first call=%v, want mkdir", calls[0])
+	}
+	if calls[1][0] != "mv" {
+		t.Fatalf("second call=%v, want mv", calls[1])
 	}
 }
 

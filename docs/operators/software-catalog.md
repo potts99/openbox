@@ -21,8 +21,8 @@ run `herdr integration install pi` inside the guest for richer agent state.
 
 Herdr uses the `github-release` manager. OpenBox downloads
 `ogulcancelik/herdr` release assets on the **host**, verifies sha256, and
-writes `/usr/local/bin/herdr` into the guest. The guest does not run
-`curl|sh` and does not need GitHub egress for install.
+pushes `/usr/local/bin/herdr` into the guest via the Incus files API. The
+guest does not run `curl|sh` and does not need GitHub egress for install.
 
 Current pin: **0.7.4** (`herdr-linux-x86_64` / `herdr-linux-aarch64`).
 

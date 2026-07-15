@@ -5,6 +5,7 @@ package pi
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -72,15 +73,59 @@ func (a *Applier) Apply(ctx context.Context, ownerID domain.OwnerID, profileID d
 }
 
 // ExecFunc runs a command inside a guest instance, optionally with stdin.
+// Prefer FileWriteFunc for file content; stdin is only for true command input.
 type ExecFunc func(ctx context.Context, runtimeRef string, command []string, stdin []byte) error
 
+// FileWriteFunc writes bytes to an absolute guest path with the given mode.
+type FileWriteFunc func(ctx context.Context, runtimeRef, path string, content []byte, mode os.FileMode) error
+
+// FileGuestWriter materializes files via runtime WriteFile (default), with
+// mkdir/mv via argv-only exec for atomic rename.
+type FileGuestWriter struct {
+	write FileWriteFunc
+	exec  ExecFunc
+	home  string
+}
+
+// NewFileGuestWriter returns the default GuestWriter backed by WriteFile.
+func NewFileGuestWriter(write FileWriteFunc, exec ExecFunc, home string) *FileGuestWriter {
+	return &FileGuestWriter{write: write, exec: exec, home: home}
+}
+
+// HomeDir returns the guest home used for Pi paths.
+func (w *FileGuestWriter) HomeDir() string { return w.home }
+
+// WriteAtomic writes content to path via a sibling .tmp file then rename.
+func (w *FileGuestWriter) WriteAtomic(ctx context.Context, runtimeRef, path string, content []byte) error {
+	if w == nil || w.write == nil || w.exec == nil {
+		return &domain.Error{Code: domain.CodeInvalidArgument, Field: "guest_writer"}
+	}
+	if runtimeRef == "" || path == "" {
+		return &domain.Error{Code: domain.CodeInvalidArgument, Field: "path"}
+	}
+	dir := filepath.Dir(path)
+	tmp := path + ".tmp"
+	if err := w.exec(ctx, runtimeRef, []string{"mkdir", "-p", dir}, nil); err != nil {
+		return err
+	}
+	if err := w.write(ctx, runtimeRef, tmp, content, 0o644); err != nil {
+		return err
+	}
+	if err := w.exec(ctx, runtimeRef, []string{"mv", "-f", tmp, path}, nil); err != nil {
+		return err
+	}
+	return nil
+}
+
 // ExecGuestWriter materializes files with mkdir + temp write + rename via exec.
+// Deprecated: use FileGuestWriter; Exec Stdin is not suitable for large payloads.
 type ExecGuestWriter struct {
 	exec ExecFunc
 	home string
 }
 
-// NewExecGuestWriter returns a GuestWriter backed by guest exec.
+// NewExecGuestWriter returns a GuestWriter backed by guest exec stdin.
+// Deprecated: use NewFileGuestWriter.
 func NewExecGuestWriter(exec ExecFunc, home string) *ExecGuestWriter {
 	return &ExecGuestWriter{exec: exec, home: home}
 }

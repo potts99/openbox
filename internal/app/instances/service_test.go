@@ -655,7 +655,7 @@ func TestInstallSoftwareHerdrRecordsVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	var gotArch string
-	service.installSoftwareFn = func(_ context.Context, _ software.GuestExecer, _ string, pkg software.Package, opts software.InstallOptions) error {
+	service.installSoftwareFn = func(_ context.Context, _ software.Guest, _ string, pkg software.Package, opts software.InstallOptions) error {
 		if pkg.ID != "herdr" {
 			t.Fatalf("pkg=%s", pkg.ID)
 		}
