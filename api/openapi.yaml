@@ -353,6 +353,26 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Route" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/routes/{route_id}/validate-dns:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { $ref: "#/components/parameters/RouteID" }
+    post:
+      operationId: validateRouteDNS
+      summary: Validate custom-domain DNS for a route
+      description: >
+        Looks up the route hostname and sets tls_state to pending (no/missing
+        records or no expected host IPs configured), invalid (resolves but not to
+        the OpenBox host), or active (matches an expected host address).
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200":
+          description: Route with updated tls_state.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Route" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/certificates/allow:
     parameters:
       - { $ref: "#/components/parameters/APIVersion" }

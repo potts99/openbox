@@ -44,6 +44,7 @@ func TestOpenAPIContainsEveryHTTPRoute(t *testing.T) {
 		"/v1/routes:",
 		"/v1/routes/{route_id}:",
 		"/v1/routes/{route_id}/publish:",
+		"/v1/routes/{route_id}/validate-dns:",
 		"/v1/certificates/allow:",
 		"/v1/gateway/auth:",
 		"/v1/operations:",
