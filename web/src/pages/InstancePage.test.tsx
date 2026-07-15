@@ -27,6 +27,7 @@ const detail: InstanceDetail = {
     resolutionState: "idle",
     deniedFlows: 0,
   },
+  software: [],
 };
 
 function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
@@ -37,6 +38,12 @@ function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
     getCapabilities: vi.fn(),
     listInstances: vi.fn(),
     getInstance: vi.fn().mockResolvedValue(detail),
+    listSoftwareCatalog: vi.fn().mockResolvedValue([
+      { id: "pi", name: "Pi coding agent", description: "Installs Pi CLI and tmux" },
+    ]),
+    installSoftware: vi.fn().mockResolvedValue({
+      packageId: "pi", status: "installed", version: "0.80.7", updatedAt: "now",
+    }),
     mutateInstance: vi.fn().mockResolvedValue({
       id: "op-1", action: "instance.stop", status: "pending", target: "box-1", updatedAt: "now",
     }),
@@ -63,7 +70,8 @@ describe("InstancePage", () => {
     expect(screen.getByText("virtual_machine")).toBeInTheDocument();
     expect(screen.getByText("4 GiB")).toBeInTheDocument();
     expect(screen.getByText("standard")).toBeInTheDocument();
-    expect(document.querySelector(".state-pill")?.textContent).toBe("running");
+    const detailSection = document.getElementById("instance-detail-heading")?.closest("section");
+    expect(detailSection?.querySelector(".state-pill")?.textContent).toBe("running");
 
     await user.click(screen.getByRole("button", { name: "Terminal" }));
     expect(onOpenTerminal).toHaveBeenCalledWith({ id: "box-1", name: "demo" });
@@ -96,21 +104,24 @@ describe("InstancePage", () => {
     expect(onBack).toHaveBeenCalled();
   });
 
-  it("hides Launch Pi on plain VPS images", async () => {
-    render(<InstancePage api={createApi()} instanceId="box-1" onBack={() => undefined} onOpenTerminal={() => undefined} />);
+  it("does not show Launch Pi and shows Software Install for VPS", async () => {
+    const user = userEvent.setup();
+    const installSoftware = vi.fn().mockResolvedValue({
+      packageId: "pi", status: "installed", version: "0.80.7", updatedAt: "now",
+    });
+    const getInstance = vi.fn()
+      .mockResolvedValueOnce(detail)
+      .mockResolvedValueOnce({
+        ...detail,
+        software: [{ packageId: "pi", status: "installed", version: "0.80.7", updatedAt: "now" }],
+      });
+    const api = createApi({ installSoftware, getInstance });
+    render(<InstancePage api={api} instanceId="box-1" onBack={() => undefined} onOpenTerminal={() => undefined} />);
     await screen.findByRole("heading", { name: "demo" });
     expect(screen.queryByRole("button", { name: "Launch Pi" })).toBeNull();
-  });
-
-  it("shows Launch Pi for Devboxes", async () => {
-    const user = userEvent.setup();
-    const onOpenTerminal = vi.fn();
-    const api = createApi({
-      getInstance: vi.fn().mockResolvedValue({ ...detail, kind: "devbox" }),
-    });
-    render(<InstancePage api={api} instanceId="box-1" onBack={() => undefined} onOpenTerminal={onOpenTerminal} />);
-    await screen.findByRole("heading", { name: "demo" });
-    await user.click(screen.getByRole("button", { name: "Launch Pi" }));
-    expect(onOpenTerminal).toHaveBeenCalledWith({ id: "box-1", name: "demo", launchPi: true });
+    expect(screen.getByRole("heading", { name: "Software" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Install" }));
+    await waitFor(() => expect(installSoftware).toHaveBeenCalledWith("box-1", "pi"));
+    expect(await screen.findByRole("button", { name: "Installed" })).toBeDisabled();
   });
 });

@@ -13,10 +13,12 @@ function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
     getCsrfToken: vi.fn().mockReturnValue("csrf"),
     getCapabilities: vi.fn(),
     listInstances: vi.fn().mockResolvedValue([
-      { id: "box-1", name: "dev", kind: "devbox", status: "running" },
+      { id: "box-1", name: "dev", kind: "vps", status: "running" },
       { id: "box-2", name: "lab", kind: "sandbox", status: "running" },
     ]),
     getInstance: vi.fn(),
+    listSoftwareCatalog: vi.fn().mockResolvedValue([]),
+    installSoftware: vi.fn(),
     mutateInstance: vi.fn(),
     listOperations: vi.fn(),
     listPiProfiles: vi.fn().mockResolvedValue([

@@ -22,6 +22,8 @@ function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
     }),
     listInstances: vi.fn().mockResolvedValue([]),
     getInstance: vi.fn(),
+    listSoftwareCatalog: vi.fn().mockResolvedValue([]),
+    installSoftware: vi.fn(),
     mutateInstance: vi.fn(),
     listOperations: vi.fn().mockResolvedValue([]),
     listPiProfiles: vi.fn().mockResolvedValue([]),
@@ -166,13 +168,13 @@ describe("App", () => {
   it("offers a uniquely named open-terminal action per instance", async () => {
     const api = createApi({
       listInstances: vi.fn().mockResolvedValue([
-        { id: "box-1", name: "workbench", kind: "devbox", status: "running" },
-        { id: "box-2", name: "staging", kind: "devbox", status: "stopped" },
+        { id: "box-1", name: "workbench", kind: "vps", status: "running" },
+        { id: "box-2", name: "staging", kind: "vps", status: "stopped" },
       ]),
       getInstance: vi.fn().mockImplementation(async (id: string) => ({
         id,
         name: id === "box-1" ? "workbench" : "staging",
-        kind: "devbox",
+        kind: "vps",
         imageId: "img",
         requestedIsolation: "standard",
         actualIsolation: "container",
@@ -184,6 +186,13 @@ describe("App", () => {
         protected: false,
         createdAt: "now",
         updatedAt: "now",
+        networkPolicy: {
+          egressMode: "standard",
+          acls: [],
+          resolutionState: "idle",
+          deniedFlows: 0,
+        },
+        software: [],
       })),
     });
     const user = userEvent.setup();

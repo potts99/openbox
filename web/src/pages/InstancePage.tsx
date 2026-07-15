@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useEffect, useState } from "react";
-import type { InstanceAction, InstanceDetail, OpenBoxApi } from "../api/client";
+import type { InstanceAction, InstanceDetail, OpenBoxApi, SoftwarePackage } from "../api/client";
 import { InstanceMetrics } from "../components/InstanceMetrics";
-import { LaunchPi } from "../components/LaunchPi";
-import { launchPiAvailable } from "../components/launchPiAvailable";
 import { SandboxStatus } from "./Sandbox";
 
 interface InstancePageProps {
@@ -12,13 +10,13 @@ interface InstancePageProps {
   instanceId: string;
   csrfToken?: string;
   onBack(): void;
-  onOpenTerminal(instance: { id: string; name: string; launchPi?: boolean }): void;
+  onOpenTerminal(instance: { id: string; name: string }): void;
 }
 
 type PageData =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; instance: InstanceDetail };
+  | { status: "ready"; instance: InstanceDetail; catalog: SoftwarePackage[] };
 
 function formatBytes(bytes: number): string {
   if (bytes <= 0) return "—";
@@ -46,16 +44,23 @@ function shortenId(id: string): string {
   return `${id.slice(0, 8)}…${id.slice(-6)}`;
 }
 
+function softwareStatus(instance: InstanceDetail, packageId: string): string {
+  const row = instance.software.find((item) => item.packageId === packageId);
+  return row?.status ?? "absent";
+}
+
 export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTerminal }: InstancePageProps) {
   const [data, setData] = useState<PageData>({ status: "loading" });
   const [actionPending, setActionPending] = useState<InstanceAction | null>(null);
   const [actionError, setActionError] = useState("");
+  const [installPending, setInstallPending] = useState<string | null>(null);
+  const [installError, setInstallError] = useState("");
 
   useEffect(() => {
     let active = true;
-    void api.getInstance(instanceId)
-      .then((instance) => {
-        if (active) setData({ status: "ready", instance });
+    void Promise.all([api.getInstance(instanceId), api.listSoftwareCatalog()])
+      .then(([instance, catalog]) => {
+        if (active) setData({ status: "ready", instance, catalog });
       })
       .catch((error: unknown) => {
         if (active) {
@@ -73,8 +78,8 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
     setActionPending(action);
     try {
       await api.mutateInstance(instanceId, action);
-      const instance = await api.getInstance(instanceId);
-      setData({ status: "ready", instance });
+      const [instance, catalog] = await Promise.all([api.getInstance(instanceId), api.listSoftwareCatalog()]);
+      setData({ status: "ready", instance, catalog });
     } catch (error: unknown) {
       setActionError(error instanceof Error ? error.message : "Action failed");
     } finally {
@@ -82,13 +87,28 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
     }
   }
 
+  async function installPackage(packageId: string) {
+    setInstallError("");
+    setInstallPending(packageId);
+    try {
+      await api.installSoftware(instanceId, packageId);
+      const [instance, catalog] = await Promise.all([api.getInstance(instanceId), api.listSoftwareCatalog()]);
+      setData({ status: "ready", instance, catalog });
+    } catch (error: unknown) {
+      setInstallError(error instanceof Error ? error.message : "Install failed");
+    } finally {
+      setInstallPending(null);
+    }
+  }
+
   const instance = data.status === "ready" ? data.instance : null;
+  const catalog = data.status === "ready" ? data.catalog : [];
   const observed = instance?.observedState ?? "";
   const canStart = observed === "stopped" || observed === "error";
   const canStop = observed === "running";
   const canRestart = observed === "running";
   const canOpenTerminal = observed === "running";
-  const showLaunchPi = instance ? launchPiAvailable(instance.kind) : false;
+  const canInstall = observed === "running" && instance?.kind === "vps";
 
   return (
     <div className="console-layout">
@@ -110,16 +130,8 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
               <h1>{instance?.name ?? "Instance"}</h1>
             </div>
             <div className="instance-actions">
-              {showLaunchPi ? (
-                <LaunchPi
-                  disabled={!canOpenTerminal || !instance}
-                  onLaunch={() => {
-                    if (instance) onOpenTerminal({ id: instance.id, name: instance.name, launchPi: true });
-                  }}
-                />
-              ) : null}
               <button
-                className={showLaunchPi ? "btn" : "primary-action"}
+                className="primary-action"
                 type="button"
                 disabled={!canOpenTerminal || !instance}
                 onClick={() => {
@@ -141,6 +153,7 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
           </div>
 
           {actionError ? <p className="data-message is-error" role="alert">{actionError}</p> : null}
+          {installError ? <p className="data-message is-error" role="alert">{installError}</p> : null}
           {data.status === "loading" ? <p className="data-message" role="status">Loading…</p> : null}
           {data.status === "error" ? <p className="data-message is-error" role="alert">{data.message}</p> : null}
 
@@ -152,6 +165,38 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
               memoryBytes={instance.memoryBytes}
               diskBytes={instance.diskBytes}
             />
+          ) : null}
+
+          {instance && instance.kind === "vps" ? (
+            <section className="instance-detail" aria-labelledby="instance-software-heading">
+              <div className="ledger-header">
+                <h2 id="instance-software-heading">Software</h2>
+              </div>
+              <ul className="software-list">
+                {catalog.map((pkg) => {
+                  const status = softwareStatus(instance, pkg.id);
+                  const installed = status === "installed";
+                  const pending = status === "pending" || installPending === pkg.id;
+                  return (
+                    <li key={pkg.id} className="software-row">
+                      <div>
+                        <strong>{pkg.name}</strong>
+                        <p>{pkg.description}</p>
+                        <span className={`state-pill state-${status}`}>{status}</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={!canInstall || pending || installed}
+                        onClick={() => { void installPackage(pkg.id); }}
+                      >
+                        {pending ? "Installing…" : installed ? "Installed" : "Install"}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
           ) : null}
 
           {instance ? (
