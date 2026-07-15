@@ -64,7 +64,7 @@ describe("createHttpApi", () => {
   it("accepts the v1 items envelopes", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{
-        id: "box-1", name: "dev", kind: "devbox", image_id: "ubuntu", requested_isolation: "best_available",
+        id: "box-1", name: "dev", kind: "vps", image_id: "ubuntu", requested_isolation: "best_available",
         actual_isolation: "container", desired_state: "running", observed_state: "running", resources: {}, protected: false,
         created_at: "now", updated_at: "now",
       }] }), {
@@ -78,7 +78,7 @@ describe("createHttpApi", () => {
       }));
     const api = createHttpApi({ fetcher });
 
-    await expect(api.listInstances()).resolves.toEqual([{ id: "box-1", name: "dev", kind: "devbox", status: "running" }]);
+    await expect(api.listInstances()).resolves.toEqual([{ id: "box-1", name: "dev", kind: "vps", status: "running" }]);
     await expect(api.listOperations()).resolves.toEqual([{ id: "op-1", action: "create", target: "box-1", status: "running", updatedAt: "now" }]);
   });
 
