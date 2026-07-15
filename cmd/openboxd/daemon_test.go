@@ -180,7 +180,7 @@ func TestDaemonRestartRecoversWithoutDuplicateCreateOrStatusLoss(t *testing.T) {
 		t.Fatal(err)
 	}
 	ids := []string{"instance-1", "operation-1"}
-	service, _ := instances.New(runtime, store, instances.Options{Now: func() time.Time { return now }, NewID: func() string { id := ids[0]; ids = ids[1:]; return id }})
+	service, _ := instances.New(runtime, store, instances.Options{Now: func() time.Time { return now }, NewID: func() string { id := ids[0]; ids = ids[1:]; return id }, NetworkPolicy: runtime})
 	runtime.FailNext("instance.start", errors.New("simulated daemon crash"))
 	_, err = service.Create(ctx, instances.CreateInput{OwnerID: "owner-1", Name: "box", Kind: domain.KindVPS, Image: "ubuntu", RequestedIsolation: domain.IsolationStandard, OwnerPublicKey: "ssh-ed25519 owner", IdempotencyKey: "create-key"})
 	if err == nil {
@@ -316,7 +316,7 @@ func (f recoveryFactory) Build(ctx context.Context, config daemonConfig) (daemon
 	if err != nil {
 		return daemonComponents{}, err
 	}
-	service, err := instances.New(f.runtime, store, instances.Options{})
+	service, err := instances.New(f.runtime, store, instances.Options{NetworkPolicy: f.runtime})
 	if err != nil {
 		store.Close()
 		return daemonComponents{}, err

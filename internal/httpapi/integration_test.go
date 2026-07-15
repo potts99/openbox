@@ -35,7 +35,7 @@ func TestRealServiceSubmissionLostResponseAndWorkerCompletion(t *testing.T) {
 	runtime := fake.New(runtimeapi.Capabilities{Architecture: "x86_64", Containers: true})
 	runtime.AddImage(runtimeapi.Image{Fingerprint: "sha256:ubuntu", Aliases: []string{"ubuntu"}, Architecture: "x86_64", Type: "container", CloudInit: true})
 	ids := []string{"instance-1", "operation-1"}
-	service, err := instances.New(runtime, store, instances.Options{Now: func() time.Time { return now }, NewID: func() string { value := ids[0]; ids = ids[1:]; return value }})
+	service, err := instances.New(runtime, store, instances.Options{Now: func() time.Time { return now }, NewID: func() string { value := ids[0]; ids = ids[1:]; return value }, NetworkPolicy: runtime})
 	if err != nil {
 		t.Fatal(err)
 	}
