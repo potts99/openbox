@@ -101,7 +101,10 @@ func contentHashed(name string) bool {
 	base := path.Base(name)
 	extension := path.Ext(base)
 	stem := strings.TrimSuffix(base, extension)
-	separator := strings.LastIndexByte(stem, '-')
+	// Vite content hashes sit after the first '-' in the basename stem
+	// (for example index-B-WSRzzm). Use the first separator so hyphenated
+	// hashes still count as content-hashed immutable assets.
+	separator := strings.IndexByte(stem, '-')
 	if separator < 0 || len(stem)-separator-1 < 8 {
 		return false
 	}

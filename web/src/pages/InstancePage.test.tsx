@@ -21,6 +21,12 @@ const detail: InstanceDetail = {
   protected: false,
   createdAt: "2026-07-15T18:37:23.344793254Z",
   updatedAt: "2026-07-15T18:45:20.000000000Z",
+  networkPolicy: {
+    egressMode: "standard",
+    acls: ["openbox-default-deny", "openbox-egress-standard"],
+    resolutionState: "idle",
+    deniedFlows: 0,
+  },
 };
 
 function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
@@ -56,6 +62,7 @@ describe("InstancePage", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "demo" })).toBeInTheDocument();
     expect(screen.getByText("virtual_machine")).toBeInTheDocument();
     expect(screen.getByText("4 GiB")).toBeInTheDocument();
+    expect(screen.getByText("standard")).toBeInTheDocument();
     expect(document.querySelector(".state-pill")?.textContent).toBe("running");
 
     await user.click(screen.getByRole("button", { name: "Terminal" }));

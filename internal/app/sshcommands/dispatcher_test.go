@@ -26,7 +26,7 @@ func TestDispatcherMapsTypedCommandsAndNeverRunsRejectedInput(t *testing.T) {
 		{"ls", "dev"},
 		{"inspect dev", "instance-1"},
 		{"start dev", "operation"},
-		{"new fresh --kind devbox", "fresh"},
+		{"new fresh --kind vps", "fresh"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := dispatcher.Execute(context.Background(), "owner", test.command, nil, &stdout, &stderr); code != 0 || !bytes.Contains(stdout.Bytes(), []byte(test.want)) {
