@@ -119,6 +119,29 @@ func (p *Proxy) EnsureReady(ctx context.Context, owner domain.OwnerID, name stri
 	}
 }
 
+func (p *Proxy) DialPort(ctx context.Context, owner domain.OwnerID, name string, port uint32) (net.Conn, error) {
+	if port < 1 || port > 65535 {
+		return nil, errors.New("invalid forward port")
+	}
+	target, err := p.EnsureReady(ctx, owner, name, io.Discard)
+	if err != nil {
+		return nil, err
+	}
+	if target.Ref == "" {
+		return nil, errors.New("instance runtime identity is required")
+	}
+	address, err := p.addresses.InstanceSSHAddress(ctx, target.Ref)
+	if err != nil {
+		return nil, fmt.Errorf("resolve instance address: %w", err)
+	}
+	dialer := net.Dialer{Timeout: p.dial}
+	connection, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(address, fmt.Sprintf("%d", port)))
+	if err != nil {
+		return nil, fmt.Errorf("dial instance port: %w", err)
+	}
+	return connection, nil
+}
+
 func (p *Proxy) Open(ctx context.Context, target sshgateway.InstanceTarget) (sshgateway.RemoteSession, error) {
 	if target.Ref == "" {
 		return nil, errors.New("instance runtime identity is required")

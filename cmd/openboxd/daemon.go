@@ -180,7 +180,7 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
-	sshServer, err := sshgateway.New(sshgateway.Config{Address: config.SSHAddress, HostKeyPath: config.SSHHostKeyPath, Keys: store, Commands: dispatcher, Instances: instanceProxy, Audit: durableSSHAuditor{store: store, fallbackOwner: domain.OwnerID(config.OwnerID)}})
+	sshServer, err := sshgateway.New(sshgateway.Config{Address: config.SSHAddress, HostKeyPath: config.SSHHostKeyPath, Keys: store, Commands: dispatcher, Instances: instanceProxy, Ports: instanceProxy, Audit: durableSSHAuditor{store: store, fallbackOwner: domain.OwnerID(config.OwnerID)}})
 	if err != nil {
 		return fail(err)
 	}
