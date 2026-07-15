@@ -57,6 +57,9 @@ func TestOpenConsoleInteractiveWebsocketSession(t *testing.T) {
 	if !api.posted.WaitForWebsocket || !api.posted.Interactive || api.posted.Width != 120 || api.posted.Height != 40 {
 		t.Fatalf("exec flags=%#v", api.posted)
 	}
+	if api.posted.Env["TERM"] != "xterm-256color" {
+		t.Fatalf("TERM=%q, want xterm-256color", api.posted.Env["TERM"])
+	}
 
 	if _, err := session.Stdin().Write([]byte("hello")); err != nil {
 		t.Fatal(err)
@@ -113,11 +116,12 @@ type consoleAPI struct {
 }
 
 type consoleExecPost struct {
-	Command          []string `json:"command"`
-	WaitForWebsocket bool     `json:"wait-for-websocket"`
-	Interactive      bool     `json:"interactive"`
-	Width            int      `json:"width"`
-	Height           int      `json:"height"`
+	Command          []string          `json:"command"`
+	WaitForWebsocket bool              `json:"wait-for-websocket"`
+	Interactive      bool              `json:"interactive"`
+	Width            int               `json:"width"`
+	Height           int               `json:"height"`
+	Env              map[string]string `json:"environment"`
 }
 
 func (a *consoleAPI) resizedWidth() string {
