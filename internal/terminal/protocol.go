@@ -43,12 +43,12 @@ type Frame interface {
 
 // OpenFrame starts or confirms a terminal session inside an instance.
 type OpenFrame struct {
-	InstanceID        string `json:"instance_id"`
-	Cols              uint16 `json:"cols"`
-	Rows              uint16 `json:"rows"`
-	SessionName       string `json:"session_name,omitempty"`
-	SessionID         string `json:"session_id,omitempty"`
-	WorkingDirectory  string `json:"working_directory,omitempty"`
+	InstanceID       string `json:"instance_id"`
+	Cols             uint16 `json:"cols"`
+	Rows             uint16 `json:"rows"`
+	SessionName      string `json:"session_name,omitempty"`
+	SessionID        string `json:"session_id,omitempty"`
+	WorkingDirectory string `json:"working_directory,omitempty"`
 }
 
 func (OpenFrame) Type() string { return TypeOpen }
@@ -114,13 +114,13 @@ type envelope struct {
 }
 
 type openWire struct {
-	Type              string `json:"type"`
-	InstanceID        string `json:"instance_id"`
-	Cols              uint16 `json:"cols"`
-	Rows              uint16 `json:"rows"`
-	SessionName       string `json:"session_name,omitempty"`
-	SessionID         string `json:"session_id,omitempty"`
-	WorkingDirectory  string `json:"working_directory,omitempty"`
+	Type             string `json:"type"`
+	InstanceID       string `json:"instance_id"`
+	Cols             uint16 `json:"cols"`
+	Rows             uint16 `json:"rows"`
+	SessionName      string `json:"session_name,omitempty"`
+	SessionID        string `json:"session_id,omitempty"`
+	WorkingDirectory string `json:"working_directory,omitempty"`
 }
 
 type dataWire struct {
