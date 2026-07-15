@@ -5,6 +5,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -120,14 +121,22 @@ func newRouteTestHandler(t *testing.T, repo *routeTestRepo) http.Handler {
 }
 
 type routeTestRepo struct {
-	instances map[domain.InstanceID]domain.Instance
-	routes    map[domain.RouteID]domain.Route
+	instances   map[domain.InstanceID]domain.Instance
+	routes      map[domain.RouteID]domain.Route
+	routeTokens map[string]storedHTTPRouteToken
+}
+
+type storedHTTPRouteToken struct {
+	token   routes.RouteToken
+	digest  []byte
+	revoked *time.Time
 }
 
 func newRouteTestRepo() *routeTestRepo {
 	return &routeTestRepo{
-		instances: map[domain.InstanceID]domain.Instance{},
-		routes:    map[domain.RouteID]domain.Route{},
+		instances:   map[domain.InstanceID]domain.Instance{},
+		routes:      map[domain.RouteID]domain.Route{},
+		routeTokens: map[string]storedHTTPRouteToken{},
 	}
 }
 
@@ -180,4 +189,44 @@ func (f *routeTestRepo) GetInstance(_ context.Context, owner domain.OwnerID, id 
 		return domain.Instance{}, &domain.Error{Code: domain.CodeNotFound, Field: "instance"}
 	}
 	return instance, nil
+}
+
+func (f *routeTestRepo) CreateRouteToken(_ context.Context, token routes.RouteToken, digest []byte) error {
+	stored := token
+	stored.Secret = ""
+	f.routeTokens[token.ID] = storedHTTPRouteToken{token: stored, digest: append([]byte(nil), digest...)}
+	return nil
+}
+
+func (f *routeTestRepo) ListRouteTokens(_ context.Context, owner domain.OwnerID, routeID domain.RouteID) ([]routes.RouteToken, error) {
+	out := make([]routes.RouteToken, 0)
+	for _, item := range f.routeTokens {
+		if item.revoked != nil || item.token.OwnerID != owner || item.token.RouteID != routeID {
+			continue
+		}
+		out = append(out, item.token)
+	}
+	return out, nil
+}
+
+func (f *routeTestRepo) RevokeRouteToken(_ context.Context, owner domain.OwnerID, routeID domain.RouteID, id string, at time.Time) error {
+	item, ok := f.routeTokens[id]
+	if !ok || item.token.OwnerID != owner || item.token.RouteID != routeID || item.revoked != nil {
+		return &domain.Error{Code: domain.CodeNotFound, Field: "route_token"}
+	}
+	item.revoked = &at
+	f.routeTokens[id] = item
+	return nil
+}
+
+func (f *routeTestRepo) FindRouteToken(_ context.Context, digest []byte, _ time.Time) (routes.RouteToken, error) {
+	for _, item := range f.routeTokens {
+		if item.revoked != nil {
+			continue
+		}
+		if subtle.ConstantTimeCompare(item.digest, digest) == 1 {
+			return item.token, nil
+		}
+	}
+	return routes.RouteToken{}, &domain.Error{Code: domain.CodeNotFound, Field: "route_token"}
 }

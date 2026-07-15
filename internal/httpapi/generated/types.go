@@ -466,6 +466,12 @@ type AllowCertificateParams struct {
 	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
 }
 
+// GatewayAuthParams defines parameters for GatewayAuth.
+type GatewayAuthParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
 // GetHealthParams defines parameters for GetHealth.
 type GetHealthParams struct {
 	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.

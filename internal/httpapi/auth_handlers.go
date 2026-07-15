@@ -27,6 +27,10 @@ func isPublicAuthRoute(segments []string, method string) bool {
 	if len(segments) == 3 && segments[1] == "certificates" && segments[2] == "allow" && method == http.MethodGet {
 		return true
 	}
+	// Caddy forward_auth for HTTPS routes — authenticates via cookie/bearer itself.
+	if len(segments) == 3 && segments[1] == "gateway" && segments[2] == "auth" && method == http.MethodGet {
+		return true
+	}
 	return false
 }
 
