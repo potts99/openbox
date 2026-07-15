@@ -295,6 +295,95 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   color: var(--muted);
 }
 .instance-ledger tbody th { font-weight: 500; }
+.instance-link {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 500;
+  text-decoration: none;
+}
+.instance-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.instance-ledger tbody tr:hover { background: #fafaf7; }
+
+.instance-heading {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.instance-back {
+  display: inline-block;
+  margin-bottom: .45rem;
+  font-size: .7rem;
+  text-decoration: none;
+  color: var(--muted);
+}
+.instance-back:hover { color: var(--ink); text-decoration: underline; }
+.instance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  align-items: center;
+}
+.instance-actions .btn {
+  padding: .4rem .65rem;
+  font-size: .7rem;
+  border-color: var(--line);
+  background: var(--surface);
+}
+.instance-actions .btn:hover:not(:disabled) {
+  background: var(--bg);
+  color: var(--ink);
+  border-color: var(--ink);
+}
+.instance-detail {
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.state-pill {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: .7rem;
+  text-transform: lowercase;
+  color: var(--ink);
+}
+.state-pill.state-running { color: var(--ok); }
+.state-pill.state-error, .state-pill.state-deleted { color: var(--danger); }
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+}
+.detail-grid > div {
+  display: grid;
+  gap: .2rem;
+  padding: .85rem;
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
+.detail-grid > div:nth-child(2n) { border-right: 0; }
+.detail-grid .detail-span {
+  grid-column: 1 / -1;
+  border-right: 0;
+}
+.detail-grid dt {
+  margin: 0;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: .65rem;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.detail-grid dd {
+  margin: 0;
+  font-size: .875rem;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.detail-grid dd.is-error { color: var(--danger); }
+.detail-grid code {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: .75rem;
+  font-weight: 400;
+}
+
 .data-message { padding: .75rem 0; color: var(--muted); font-size: .875rem; text-align: center; }
 .data-message.is-error { color: var(--danger); }
 

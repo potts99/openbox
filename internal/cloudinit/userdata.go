@@ -17,7 +17,11 @@ func OwnerKey(publicKey string) (string, error) {
 	// lets OpenBox add its separate internal gateway key without exposing the
 	// corresponding private key or allowing key comments to alter YAML.
 	var body strings.Builder
-	body.WriteString("#cloud-config\nusers:\n  - name: root\n    ssh_authorized_keys:\n")
+	body.WriteString("#cloud-config\n")
+	// linuxcontainers cloud images may omit openssh-server; OpenBox readiness
+	// waits for SSH, so install and enable it during first boot.
+	body.WriteString("package_update: true\npackages:\n  - openssh-server\n")
+	body.WriteString("users:\n  - name: root\n    ssh_authorized_keys:\n")
 	for _, value := range strings.Split(publicKey, "\n") {
 		value = strings.TrimSpace(value)
 		if value == "" {
