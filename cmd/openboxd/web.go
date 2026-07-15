@@ -12,7 +12,7 @@ import (
 func rootHandler(api http.Handler) http.Handler {
 	dashboard := assets.NewHandler(assets.Files)
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.TLS != nil {
+		if request.TLS != nil || strings.EqualFold(request.Header.Get("X-Forwarded-Proto"), "https") {
 			response.Header().Set("Strict-Transport-Security", "max-age=31536000")
 		}
 		if request.URL.Path == "/v1" || strings.HasPrefix(request.URL.Path, "/v1/") {

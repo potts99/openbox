@@ -33,14 +33,12 @@ export function SandboxStatus({
   egressPolicy = "default",
   now,
 }: SandboxStatusProps) {
-  const [clock, setClock] = useState(() => now ?? new Date());
+  const [liveClock, setLiveClock] = useState(() => new Date());
+  const clock = now ?? liveClock;
 
   useEffect(() => {
-    if (now) {
-      setClock(now);
-      return;
-    }
-    const timer = window.setInterval(() => setClock(new Date()), 1000);
+    if (now) return;
+    const timer = window.setInterval(() => setLiveClock(new Date()), 1000);
     return () => window.clearInterval(timer);
   }, [now]);
 

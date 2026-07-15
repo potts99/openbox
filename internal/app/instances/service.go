@@ -38,6 +38,7 @@ type InstanceRuntime interface {
 	WaitInstanceReady(context.Context, runtimeapi.ReadinessRequest) error
 	StopInstance(context.Context, string) error
 	Exec(context.Context, runtimeapi.ExecRequest) (runtimeapi.ExecResult, error)
+	WriteFile(context.Context, runtimeapi.WriteFileRequest) error
 	DeleteInstance(context.Context, string) error
 }
 
@@ -127,7 +128,7 @@ type Service struct {
 	networkPolicy            NetworkPolicy
 	mutationGate             chan struct{}
 	execGate                 *sandbox.ExecGate
-	installSoftwareFn        func(context.Context, software.GuestExecer, string, software.Package, software.InstallOptions) error
+	installSoftwareFn        func(context.Context, software.Guest, string, software.Package, software.InstallOptions) error
 }
 
 func New(runtime InstanceRuntime, repo Repository, options Options) (*Service, error) {
@@ -704,10 +705,10 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 	if err != nil {
 		return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, err)
 	}
-	if err := s.repo.CompleteOperation(ctx, input.OwnerID, operation.ID, s.now()); err != nil {
+	if err := s.installCreatePackages(ctx, result, input.Packages); err != nil {
 		return domain.Instance{}, err
 	}
-	if err := s.installCreatePackages(ctx, result, input.Packages); err != nil {
+	if err := s.repo.CompleteOperation(ctx, input.OwnerID, operation.ID, s.now()); err != nil {
 		return domain.Instance{}, err
 	}
 	return result, nil
@@ -823,14 +824,14 @@ func (s *Service) recoverCreate(ctx context.Context, operation domain.Operation)
 	if _, err := s.Refresh(ctx, instance.OwnerID, instance.ID); err != nil {
 		return err
 	}
-	if err := s.repo.CompleteOperation(ctx, instance.OwnerID, operation.ID, s.now()); err != nil {
-		return err
-	}
 	refreshed, err := s.repo.GetInstance(ctx, instance.OwnerID, instance.ID)
 	if err != nil {
 		return err
 	}
-	return s.installCreatePackages(ctx, refreshed, payload.Packages)
+	if err := s.installCreatePackages(ctx, refreshed, payload.Packages); err != nil {
+		return err
+	}
+	return s.repo.CompleteOperation(ctx, instance.OwnerID, operation.ID, s.now())
 }
 
 func authorizedKeys(owner, gateway string) string {

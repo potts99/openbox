@@ -188,8 +188,8 @@ func TestHostnameUniquenessWithinOwner(t *testing.T) {
 	} else {
 		assertDomainError(t, err, domain.CodeConflict, "hostname")
 	}
-	if err := routes.CheckHostnameUnique("owner-3", "app.openbox.example", existing); err != nil {
-		t.Fatalf("same hostname for different owner rejected: %v", err)
+	if err := routes.CheckHostnameUnique("owner-3", "app.openbox.example", existing); err == nil {
+		t.Fatal("same hostname for different owner accepted")
 	}
 }
 

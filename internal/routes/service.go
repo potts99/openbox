@@ -88,12 +88,14 @@ func (s *Service) Create(ctx context.Context, ownerID domain.OwnerID, input Crea
 	if err := ValidateManagedTarget(ownerID, &instance); err != nil {
 		return domain.Route{}, err
 	}
-	existing, err := s.repo.ListRoutes(ctx, ownerID)
-	if err != nil {
-		return domain.Route{}, err
+	normalized, valid := normalizeCertificateHostname(input.Hostname)
+	if !valid {
+		return domain.Route{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "hostname"}
 	}
-	if err := CheckHostnameUnique(ownerID, input.Hostname, existing); err != nil {
+	if _, found, err := s.repo.FindRouteByHostname(ctx, normalized); err != nil {
 		return domain.Route{}, err
+	} else if found {
+		return domain.Route{}, &domain.Error{Code: domain.CodeConflict, Field: "hostname"}
 	}
 	now := s.now().UTC()
 	route, err := NewRoute(domain.RouteID(s.newID()), ownerID, input.InstanceID, input.Hostname, input.TargetPort, now)
@@ -125,22 +127,20 @@ func (s *Service) Update(ctx context.Context, ownerID domain.OwnerID, id domain.
 	}
 	if input.Hostname != nil {
 		hostname := *input.Hostname
-		if hostname != route.Hostname {
-			existing, listErr := s.repo.ListRoutes(ctx, ownerID)
-			if listErr != nil {
-				return domain.Route{}, listErr
+		normalized, valid := normalizeCertificateHostname(hostname)
+		if !valid {
+			return domain.Route{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "hostname"}
+		}
+		if normalized != route.Hostname {
+			other, found, findErr := s.repo.FindRouteByHostname(ctx, normalized)
+			if findErr != nil {
+				return domain.Route{}, findErr
 			}
-			others := make([]domain.Route, 0, len(existing))
-			for _, item := range existing {
-				if item.ID != route.ID {
-					others = append(others, item)
-				}
-			}
-			if err := CheckHostnameUnique(ownerID, hostname, others); err != nil {
-				return domain.Route{}, err
+			if found && other.ID != route.ID {
+				return domain.Route{}, &domain.Error{Code: domain.CodeConflict, Field: "hostname"}
 			}
 		}
-		route.Hostname = hostname
+		route.Hostname = normalized
 	}
 	if input.TargetPort != nil {
 		if err := ValidateTargetPort(*input.TargetPort); err != nil {

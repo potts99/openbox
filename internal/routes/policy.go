@@ -87,7 +87,8 @@ func NewRouteWithVisibility(
 	if instanceID == "" {
 		return domain.Route{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "instance_id"}
 	}
-	if strings.TrimSpace(hostname) == "" {
+	normalized, valid := normalizeCertificateHostname(hostname)
+	if !valid {
 		return domain.Route{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "hostname"}
 	}
 	if err := ValidateTargetPort(port); err != nil {
@@ -103,7 +104,7 @@ func NewRouteWithVisibility(
 		ID:         id,
 		OwnerID:    ownerID,
 		InstanceID: instanceID,
-		Hostname:   strings.TrimSpace(hostname),
+		Hostname:   normalized,
 		TargetPort: port,
 		Visibility: visibility,
 		CreatedAt:  now,
@@ -111,12 +112,15 @@ func NewRouteWithVisibility(
 	}, nil
 }
 
-// CheckHostnameUnique reports a conflict when hostname is already used by the
-// same owner among existing routes. Hostnames may repeat across owners.
+// CheckHostnameUnique reports a conflict when hostname is already used. The
+// gateway owns one global hostname namespace, regardless of owner.
 func CheckHostnameUnique(ownerID domain.OwnerID, hostname string, existing []domain.Route) error {
-	hostname = strings.TrimSpace(hostname)
+	normalized, valid := normalizeCertificateHostname(hostname)
+	if !valid {
+		return &domain.Error{Code: domain.CodeInvalidArgument, Field: "hostname"}
+	}
 	for _, route := range existing {
-		if route.OwnerID == ownerID && route.Hostname == hostname {
+		if route.Hostname == normalized {
 			return &domain.Error{Code: domain.CodeConflict, Field: "hostname"}
 		}
 	}

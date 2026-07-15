@@ -53,6 +53,42 @@ func (h *Handler) routeRoutes(response http.ResponseWriter, request *http.Reques
 		h.validateRouteDNS(response, request, requestID, owner, rest[0])
 		return true
 	}
+	if len(rest) == 2 && rest[1] == "tokens" {
+		switch request.Method {
+		case http.MethodGet:
+			tokens, err := h.routes.ListRouteTokens(request.Context(), owner, domain.RouteID(rest[0]))
+			if err != nil {
+				h.writeServiceError(response, requestID, err)
+				return true
+			}
+			h.writeJSON(response, http.StatusOK, map[string]any{"items": tokens})
+		case http.MethodPost:
+			var input struct {
+				Name string `json:"name"`
+			}
+			if h.decodeJSON(response, request, &input) != nil {
+				h.writeError(response, requestID, http.StatusBadRequest, string(domain.CodeInvalidArgument), "body")
+				return true
+			}
+			token, err := h.routes.CreateRouteToken(request.Context(), owner, domain.RouteID(rest[0]), input.Name)
+			if err != nil {
+				h.writeServiceError(response, requestID, err)
+				return true
+			}
+			h.writeJSON(response, http.StatusCreated, token)
+		default:
+			h.methodNotAllowed(response, requestID, http.MethodGet, http.MethodPost)
+		}
+		return true
+	}
+	if len(rest) == 3 && rest[1] == "tokens" && request.Method == http.MethodDelete {
+		if err := h.routes.RevokeRouteToken(request.Context(), owner, domain.RouteID(rest[0]), rest[2]); err != nil {
+			h.writeServiceError(response, requestID, err)
+			return true
+		}
+		response.WriteHeader(http.StatusNoContent)
+		return true
+	}
 	return false
 }
 
