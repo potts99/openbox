@@ -34,6 +34,7 @@ Commands:
   stop ID                Stop an instance
   restart ID             Restart an instance
   rm ID                  Delete an instance
+  route                  Manage HTTPS routes
   operation watch ID     Stream operation progress
   ssh-config print       Print optional OpenSSH aliases
   ssh-config install     Install aliases without replacing existing entries
@@ -100,6 +101,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runLifecycle(ctx, api, command, rest, options.json, stdout, stderr)
 	case "operation":
 		return runOperation(ctx, api, rest, options.json, stdout, stderr)
+	case "route":
+		return runRoute(ctx, api, rest, options.json, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", command, usage)
 		return 2

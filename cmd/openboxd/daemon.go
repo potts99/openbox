@@ -27,6 +27,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/operations"
 	"github.com/openbox-dev/openbox/internal/persistence/sqlite"
 	"github.com/openbox-dev/openbox/internal/reconcile"
+	"github.com/openbox-dev/openbox/internal/routes"
 	"github.com/openbox-dev/openbox/internal/runtime/incus"
 	"github.com/openbox-dev/openbox/internal/sshgateway"
 	sshproxy "github.com/openbox-dev/openbox/internal/sshgateway/proxy"
@@ -145,6 +146,10 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
+	routeService, err := routes.New(store, routes.Options{})
+	if err != nil {
+		return fail(err)
+	}
 	worker, err := operations.NewWorker(store, recovery.Executor{Instances: service}, operations.Config{WorkerID: "openboxd-local", Concurrency: config.WorkerConcurrency, Lease: config.Lease, Mode: mode})
 	if err != nil {
 		return fail(err)
@@ -155,6 +160,7 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	}
 	handler, err := httpapi.New(service, httpapi.Options{
 		Auth:          authManager,
+		Routes:        routeService,
 		Console:       runtime,
 		TerminalAudit: durableTerminalAuditor{store: store, fallbackOwner: domain.OwnerID(config.OwnerID)},
 	})

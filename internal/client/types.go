@@ -168,6 +168,30 @@ type MutationResult struct {
 	Operation Operation `json:"operation"`
 }
 
+type Route struct {
+	ID         string    `json:"id"`
+	InstanceID string    `json:"instance_id"`
+	Hostname   string    `json:"hostname"`
+	TargetPort int       `json:"target_port"`
+	Visibility string    `json:"visibility"`
+	TLSState   string    `json:"tls_state"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+func (r Route) validate() error {
+	if !oneOf(r.Visibility, "private", "public") {
+		return fmt.Errorf("route %q: unknown visibility %q", r.ID, r.Visibility)
+	}
+	return nil
+}
+
+type CreateRouteRequest struct {
+	InstanceID string `json:"instance_id"`
+	Hostname   string `json:"hostname"`
+	TargetPort int    `json:"target_port"`
+}
+
 func oneOf(value string, allowed ...string) bool {
 	for _, candidate := range allowed {
 		if value == candidate {

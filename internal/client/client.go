@@ -181,6 +181,59 @@ func (c *Client) GetOperation(ctx context.Context, id string) (Operation, error)
 	return operation, err
 }
 
+func (c *Client) ListRoutes(ctx context.Context) ([]Route, error) {
+	var envelope struct {
+		Items []Route `json:"items"`
+	}
+	_, err := c.do(ctx, http.MethodGet, "/v1/routes", "", nil, &envelope)
+	if err != nil {
+		return nil, err
+	}
+	for _, route := range envelope.Items {
+		if err := route.validate(); err != nil {
+			return nil, err
+		}
+	}
+	return envelope.Items, nil
+}
+
+func (c *Client) CreateRoute(ctx context.Context, request CreateRouteRequest) (Route, error) {
+	var route Route
+	_, err := c.do(ctx, http.MethodPost, "/v1/routes", "", request, &route)
+	if err == nil {
+		err = route.validate()
+	}
+	return route, err
+}
+
+func (c *Client) DeleteRoute(ctx context.Context, id string) error {
+	_, err := c.do(ctx, http.MethodDelete, resourcePath("/v1/routes", id), "", nil, nil)
+	return err
+}
+
+func (c *Client) PublishRoute(ctx context.Context, id string) (Route, error) {
+	var route Route
+	_, err := c.do(ctx, http.MethodPost, resourcePath("/v1/routes", id, "publish"), "", nil, &route)
+	if err == nil {
+		err = route.validate()
+	}
+	return route, err
+}
+
+func (c *Client) ListSuggestedPorts(ctx context.Context, instanceID string) ([]int, error) {
+	var envelope struct {
+		Items []int `json:"items"`
+	}
+	_, err := c.do(ctx, http.MethodGet, resourcePath("/v1/instances", instanceID, "suggested-ports"), "", nil, &envelope)
+	if err != nil {
+		return nil, err
+	}
+	if envelope.Items == nil {
+		return []int{}, nil
+	}
+	return envelope.Items, nil
+}
+
 func (c *Client) instanceAction(ctx context.Context, id, action, idempotencyKey string) (MutationResult, error) {
 	return c.mutateOperation(ctx, http.MethodPost, resourcePath("/v1/instances", id, "actions", action), idempotencyKey)
 }

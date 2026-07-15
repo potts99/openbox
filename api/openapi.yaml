@@ -228,6 +228,25 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Operation" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/instances/{instance_id}/suggested-ports:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { $ref: "#/components/parameters/InstanceID" }
+    get:
+      operationId: listSuggestedPorts
+      summary: Suggest candidate ports without creating routes
+      description: >
+        Returns detected or known candidate ports for an instance. Suggestions never
+        create or publish routes. When the runtime cannot list listening ports yet,
+        the items list is empty.
+      responses:
+        "200":
+          description: Suggested ports (may be empty).
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SuggestedPortsResponse" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/instances/{instance_id}/actions/{action}:
     parameters:
       - { $ref: "#/components/parameters/APIVersion" }
@@ -249,6 +268,90 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Operation" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/routes:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+    get:
+      operationId: listRoutes
+      responses:
+        "200":
+          description: Owner-scoped HTTPS routes.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListRoutesResponse" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createRoute
+      summary: Create a private HTTPS route
+      description: >
+        Explicitly creates a route for a managed instance port. New routes are
+        always private; publication requires POST /v1/routes/{route_id}/publish.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CreateRouteRequest" } } }
+      responses:
+        "201":
+          description: Private route created.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Route" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/routes/{route_id}:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { $ref: "#/components/parameters/RouteID" }
+    get:
+      operationId: getRoute
+      responses:
+        "200":
+          description: Route details.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Route" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateRoute
+      summary: Update hostname or target port
+      description: Updates hostname and/or target port without changing visibility.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/UpdateRouteRequest" } } }
+      responses:
+        "200":
+          description: Route updated.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Route" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteRoute
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Route deleted. }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/routes/{route_id}/publish:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { $ref: "#/components/parameters/RouteID" }
+    post:
+      operationId: publishRoute
+      summary: Publish a private route
+      description: Explicitly flips route visibility to public. Create never publishes automatically.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200":
+          description: Route is public.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Route" }
         default: { $ref: "#/components/responses/Error" }
   /v1/operations:
     parameters:
@@ -345,6 +448,11 @@ components:
       schema: { type: string, minLength: 1 }
     OperationID:
       name: operation_id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+    RouteID:
+      name: route_id
       in: path
       required: true
       schema: { type: string, minLength: 1 }
@@ -574,6 +682,49 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/Operation" }
+    Route:
+      type: object
+      required: [id, instance_id, hostname, target_port, visibility, tls_state, created_at, updated_at]
+      properties:
+        id: { type: string }
+        instance_id: { type: string }
+        hostname: { type: string }
+        target_port: { type: integer, minimum: 1, maximum: 65535 }
+        visibility: { type: string, enum: [private, public] }
+        tls_state: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateRouteRequest:
+      type: object
+      additionalProperties: false
+      required: [instance_id, hostname, target_port]
+      properties:
+        instance_id: { type: string, minLength: 1 }
+        hostname: { type: string, minLength: 1, maxLength: 253 }
+        target_port: { type: integer, minimum: 1, maximum: 65535 }
+    UpdateRouteRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        hostname: { type: string, minLength: 1, maxLength: 253 }
+        target_port: { type: integer, minimum: 1, maximum: 65535 }
+    ListRoutesResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Route" }
+    SuggestedPortsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { type: integer, minimum: 1, maximum: 65535 }
+      description: >
+        Candidate ports for route creation. Empty when the runtime cannot list
+        listening ports yet. Never creates or publishes routes.
     ErrorEnvelope:
       type: object
       required: [error]

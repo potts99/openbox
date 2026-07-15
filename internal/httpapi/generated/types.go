@@ -104,6 +104,12 @@ const (
 	OperationEventStatusSucceeded OperationEventStatus = "succeeded"
 )
 
+// Defines values for RouteVisibility.
+const (
+	Private RouteVisibility = "private"
+	Public  RouteVisibility = "public"
+)
+
 // Defines values for TokenMetadataScopes.
 const (
 	Owner TokenMetadataScopes = "owner"
@@ -161,6 +167,13 @@ type CreateInstanceRequestRequestedIsolation string
 type CreateInstanceResult struct {
 	Instance  *Instance `json:"instance"`
 	Operation Operation `json:"operation"`
+}
+
+// CreateRouteRequest defines model for CreateRouteRequest.
+type CreateRouteRequest struct {
+	Hostname   string `json:"hostname"`
+	InstanceId string `json:"instance_id"`
+	TargetPort int    `json:"target_port"`
 }
 
 // CreateSSHKeyRequest defines model for CreateSSHKeyRequest.
@@ -280,6 +293,11 @@ type ListOperationsResponse struct {
 	Items []Operation `json:"items"`
 }
 
+// ListRoutesResponse defines model for ListRoutesResponse.
+type ListRoutesResponse struct {
+	Items []Route `json:"items"`
+}
+
 // ListSSHKeysResponse defines model for ListSSHKeysResponse.
 type ListSSHKeysResponse struct {
 	Items []SSHKey `json:"items"`
@@ -339,6 +357,21 @@ type Resources struct {
 	Vcpus       int   `json:"vcpus"`
 }
 
+// Route defines model for Route.
+type Route struct {
+	CreatedAt  time.Time       `json:"created_at"`
+	Hostname   string          `json:"hostname"`
+	Id         string          `json:"id"`
+	InstanceId string          `json:"instance_id"`
+	TargetPort int             `json:"target_port"`
+	TlsState   string          `json:"tls_state"`
+	UpdatedAt  time.Time       `json:"updated_at"`
+	Visibility RouteVisibility `json:"visibility"`
+}
+
+// RouteVisibility defines model for Route.Visibility.
+type RouteVisibility string
+
 // SSHKey defines model for SSHKey.
 type SSHKey struct {
 	CreatedAt   time.Time `json:"created_at"`
@@ -355,6 +388,11 @@ type Session struct {
 	OwnerId   string    `json:"owner_id"`
 }
 
+// SuggestedPortsResponse Candidate ports for route creation. Empty when the runtime cannot list listening ports yet. Never creates or publishes routes.
+type SuggestedPortsResponse struct {
+	Items []int `json:"items"`
+}
+
 // TokenMetadata defines model for TokenMetadata.
 type TokenMetadata struct {
 	CreatedAt  time.Time             `json:"created_at"`
@@ -368,6 +406,12 @@ type TokenMetadata struct {
 
 // TokenMetadataScopes defines model for TokenMetadata.Scopes.
 type TokenMetadataScopes string
+
+// UpdateRouteRequest defines model for UpdateRouteRequest.
+type UpdateRouteRequest struct {
+	Hostname   *string `json:"hostname,omitempty"`
+	TargetPort *int    `json:"target_port,omitempty"`
+}
 
 // UpdateSSHKeyRequest defines model for UpdateSSHKeyRequest.
 type UpdateSSHKeyRequest struct {
@@ -388,6 +432,9 @@ type InstanceID = string
 
 // OperationID defines model for OperationID.
 type OperationID = string
+
+// RouteID defines model for RouteID.
+type RouteID = string
 
 // Error defines model for Error.
 type Error = ErrorEnvelope
@@ -466,6 +513,12 @@ type MutateInstanceParams struct {
 	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
 }
 
+// ListSuggestedPortsParams defines parameters for ListSuggestedPorts.
+type ListSuggestedPortsParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
 // ListOperationsParams defines parameters for ListOperations.
 type ListOperationsParams struct {
 	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
@@ -494,6 +547,54 @@ type WatchOperationParams struct {
 
 	// LastEventID Last processed operation-event sequence.
 	LastEventID *int `json:"Last-Event-ID,omitempty"`
+}
+
+// ListRoutesParams defines parameters for ListRoutes.
+type ListRoutesParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// CreateRouteParams defines parameters for CreateRoute.
+type CreateRouteParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// DeleteRouteParams defines parameters for DeleteRoute.
+type DeleteRouteParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// GetRouteParams defines parameters for GetRoute.
+type GetRouteParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// UpdateRouteParams defines parameters for UpdateRoute.
+type UpdateRouteParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// PublishRouteParams defines parameters for PublishRoute.
+type PublishRouteParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
 }
 
 // DeleteSessionParams defines parameters for DeleteSession.
@@ -579,6 +680,12 @@ type ConsumeBootstrapJSONRequestBody = BootstrapRequest
 
 // CreateInstanceJSONRequestBody defines body for CreateInstance for application/json ContentType.
 type CreateInstanceJSONRequestBody = CreateInstanceRequest
+
+// CreateRouteJSONRequestBody defines body for CreateRoute for application/json ContentType.
+type CreateRouteJSONRequestBody = CreateRouteRequest
+
+// UpdateRouteJSONRequestBody defines body for UpdateRoute for application/json ContentType.
+type UpdateRouteJSONRequestBody = UpdateRouteRequest
 
 // CreateSessionJSONRequestBody defines body for CreateSession for application/json ContentType.
 type CreateSessionJSONRequestBody = LoginRequest
