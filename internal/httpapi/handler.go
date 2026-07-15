@@ -25,6 +25,7 @@ import (
 	pi "github.com/openbox-dev/openbox/internal/profiles/pi"
 	"github.com/openbox-dev/openbox/internal/routes"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
+	"github.com/openbox-dev/openbox/internal/sandbox"
 	"github.com/openbox-dev/openbox/internal/terminal"
 	"github.com/openbox-dev/openbox/internal/version"
 )
@@ -61,6 +62,8 @@ type Service interface {
 	GetOperation(context.Context, domain.OwnerID, domain.OperationID) (domain.Operation, error)
 	ListOperationEventsAfter(context.Context, domain.OwnerID, domain.OperationID, int, int) ([]domain.OperationEvent, error)
 	CancelOperation(context.Context, domain.OwnerID, domain.OperationID) (domain.Operation, error)
+	Exec(context.Context, domain.OwnerID, domain.InstanceID, sandbox.ExecRequest, sandbox.FrameSink) error
+	ExtendExpiry(context.Context, domain.OwnerID, domain.InstanceID, time.Duration) (domain.Instance, error)
 }
 
 type Options struct {
@@ -281,6 +284,20 @@ func (h *Handler) routeInstances(response http.ResponseWriter, request *http.Req
 			return true
 		}
 		h.listSuggestedPorts(response, request, requestID, rest[0])
+		return true
+	}
+	if len(rest) == 2 && rest[1] == "exec" {
+		if !h.requireMethod(response, request, requestID, http.MethodPost) {
+			return true
+		}
+		h.execInstance(response, request, requestID, rest[0])
+		return true
+	}
+	if len(rest) == 2 && rest[1] == "extend" {
+		if !h.requireMethod(response, request, requestID, http.MethodPost) {
+			return true
+		}
+		h.extendInstance(response, request, requestID, rest[0])
 		return true
 	}
 	if len(rest) == 3 && rest[1] == "actions" {
@@ -525,6 +542,10 @@ func classifyError(err error) (int, string, string) {
 			return http.StatusConflict, string(domainError.Code), domainError.Field
 		case domain.CodeUnavailable:
 			return http.StatusServiceUnavailable, string(domainError.Code), domainError.Field
+		case domain.CodeBusy:
+			return http.StatusConflict, string(domainError.Code), domainError.Field
+		case domain.CodeRateLimited:
+			return http.StatusTooManyRequests, string(domainError.Code), domainError.Field
 		default:
 			return http.StatusInternalServerError, string(domainError.Code), domainError.Field
 		}

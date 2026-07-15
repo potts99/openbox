@@ -718,6 +718,126 @@ func TestProtectionIsDevboxOnly(t *testing.T) {
 	assertDomainCode(t, err, domain.CodeInvalidArgument)
 }
 
+func TestSandboxCreateAppliesKindDefaults(t *testing.T) {
+	runtime := fake.New(testCapabilities())
+	runtime.AddImage(runtimeapi.Image{
+		Fingerprint:  "sha256:sandbox",
+		Aliases:      []string{"openbox:sandbox/ubuntu/24.04"},
+		Architecture: "x86_64",
+		Type:         "container",
+		CloudInit:    true,
+	})
+	service, _, _ := newTestServiceWithIDs(t, runtime, newIDs("instance-1", "operation-1"), runtime)
+	created, err := service.Create(context.Background(), CreateInput{
+		OwnerID:        "owner-1",
+		Name:           "agent-box",
+		Kind:           domain.KindSandbox,
+		OwnerPublicKey: "ssh-ed25519 owner",
+		IdempotencyKey: "sandbox-create",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Kind != domain.KindSandbox {
+		t.Fatalf("kind=%q", created.Kind)
+	}
+	if created.ImageID != "sha256:sandbox" {
+		t.Fatalf("image_id=%q", created.ImageID)
+	}
+	if created.RequestedIsolation != domain.IsolationBestAvailable {
+		t.Fatalf("requested_isolation=%q", created.RequestedIsolation)
+	}
+	want := domain.Resources{VCPUs: 2, MemoryBytes: 2 << 30, DiskBytes: 10 << 30}
+	if created.Resources != want {
+		t.Fatalf("resources=%+v want=%+v", created.Resources, want)
+	}
+	if created.ExpiresAt == nil || !created.ExpiresAt.Equal(created.CreatedAt.Add(domain.DefaultSandboxLifetime)) {
+		t.Fatalf("expires_at=%v", created.ExpiresAt)
+	}
+}
+
+func TestMarkExpiredSetsDesiredDeletedWithoutHidingRuntime(t *testing.T) {
+	runtime := fake.New(testCapabilities())
+	runtime.AddImage(runtimeapi.Image{
+		Fingerprint:  "sha256:sandbox",
+		Aliases:      []string{"openbox:sandbox/ubuntu/24.04"},
+		Architecture: "x86_64",
+		Type:         "container",
+		CloudInit:    true,
+	})
+	service, fakeRuntime, store := newTestServiceWithIDs(t, runtime, newIDs("instance-1", "operation-1", "operation-2", "operation-3"), runtime)
+	ctx := context.Background()
+	created, err := service.Create(ctx, CreateInput{
+		OwnerID: "owner-1", Name: "agent-box", Kind: domain.KindSandbox,
+		OwnerPublicKey: "ssh-ed25519 owner", IdempotencyKey: "sandbox-create",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.MarkExpired(ctx, created.OwnerID, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	marked, err := service.GetInstance(ctx, created.OwnerID, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if marked.DesiredState != domain.DesiredDeleted || marked.ObservedState != domain.ObservedDeleting {
+		t.Fatalf("marked=%+v", marked)
+	}
+	if _, err := fakeRuntime.InspectInstance(ctx, created.RuntimeRef); err != nil {
+		t.Fatalf("runtime must still exist while observed deleting: %v", err)
+	}
+	tombstoned, err := store.IsInstanceTombstoned(ctx, created.OwnerID, created.ID)
+	if err != nil || tombstoned {
+		t.Fatalf("must not tombstone before runtime removal: tombstoned=%v err=%v", tombstoned, err)
+	}
+	if err := service.MarkExpired(ctx, created.OwnerID, created.ID); err != nil {
+		t.Fatalf("idempotent remark: %v", err)
+	}
+	if err := service.Delete(ctx, created.OwnerID, created.ID, "expiry-cleanup"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.GetInstance(ctx, created.OwnerID, created.ID); err == nil {
+		t.Fatal("expected not found after cleanup")
+	}
+	if _, err := fakeRuntime.InspectInstance(ctx, created.RuntimeRef); !errors.Is(err, runtimeapi.ErrNotFound) {
+		t.Fatalf("runtime err=%v", err)
+	}
+}
+
+func TestExtendExpiryPersistsAndRejectsAfterDeleteStarts(t *testing.T) {
+	runtime := fake.New(testCapabilities())
+	runtime.AddImage(runtimeapi.Image{
+		Fingerprint:  "sha256:sandbox",
+		Aliases:      []string{"openbox:sandbox/ubuntu/24.04"},
+		Architecture: "x86_64",
+		Type:         "container",
+		CloudInit:    true,
+	})
+	service, _, _ := newTestServiceWithIDs(t, runtime, newIDs("instance-1", "operation-1", "operation-2"), runtime)
+	ctx := context.Background()
+	created, err := service.Create(ctx, CreateInput{
+		OwnerID: "owner-1", Name: "agent-box", Kind: domain.KindSandbox,
+		OwnerPublicKey: "ssh-ed25519 owner", IdempotencyKey: "sandbox-create",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	extended, err := service.ExtendExpiry(ctx, created.OwnerID, created.ID, 30*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := created.ExpiresAt.Add(30 * time.Minute)
+	if extended.ExpiresAt == nil || !extended.ExpiresAt.Equal(want) {
+		t.Fatalf("expires_at=%v want=%v", extended.ExpiresAt, want)
+	}
+	if err := service.MarkExpired(ctx, created.OwnerID, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.ExtendExpiry(ctx, created.OwnerID, created.ID, time.Minute)
+	assertDomainCode(t, err, domain.CodeInvalidTransition)
+}
+
 func assertDomainCode(t *testing.T, err error, code domain.ErrorCode) {
 	t.Helper()
 	var domainErr *domain.Error

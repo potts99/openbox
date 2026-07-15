@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { InstanceAction, InstanceDetail, OpenBoxApi } from "../api/client";
 import { LaunchPi } from "../components/LaunchPi";
 import { launchPiAvailable } from "../components/launchPiAvailable";
+import { SandboxStatus } from "./Sandbox";
 
 interface InstancePageProps {
   api: OpenBoxApi;
@@ -195,11 +196,23 @@ export function InstancePage({ api, instanceId, onBack, onOpenTerminal }: Instan
                 {instance.errorCode ? (
                   <div className="detail-span">
                     <dt>Error</dt>
-                    <dd className="is-error">{instance.errorCode}</dd>
+                    <dd className="is-error">
+                      {instance.errorCode}
+                      {instance.errorStage ? ` at ${instance.errorStage}` : ""}
+                    </dd>
                   </div>
                 ) : null}
               </dl>
             </section>
+          ) : null}
+
+          {instance?.kind === "sandbox" ? (
+            <SandboxStatus
+              expiresAt={instance.expiresAt}
+              errorCode={instance.errorCode}
+              errorStage={instance.errorStage}
+              egressPolicy="default"
+            />
           ) : null}
         </main>
       </div>

@@ -90,9 +90,11 @@ type ReadinessRequest struct {
 }
 
 type ExecRequest struct {
-	Ref     string
-	Command []string
-	Stdin   io.Reader
+	Ref        string
+	Command    []string
+	WorkingDir string
+	Env        map[string]string
+	Stdin      io.Reader
 }
 
 type ExecResult struct {

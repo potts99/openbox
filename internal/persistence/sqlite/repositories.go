@@ -493,6 +493,42 @@ func (s *Store) UpdateInstanceProtection(ctx context.Context, ownerID domain.Own
 	return nil
 }
 
+// UpdateInstanceExpiry atomically sets expires_at when the instance is not on
+// an irreversible delete path. Callers must pass an already-validated expiry.
+func (s *Store) UpdateInstanceExpiry(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID, expiresAt, updatedAt time.Time) error {
+	release, err := s.acquireWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin expiry update: %w", err)
+	}
+	defer tx.Rollback()
+	current, err := getInstanceTx(ctx, tx, ownerID, id)
+	if err != nil {
+		return err
+	}
+	if current.DesiredState == domain.DesiredDeleted || current.ObservedState == domain.ObservedDeleting || current.ObservedState == domain.ObservedDeleted {
+		return &domain.Error{Code: domain.CodeInvalidTransition, Field: "expires_at"}
+	}
+	current.ExpiresAt = &expiresAt
+	current.UpdatedAt = updatedAt.UTC()
+	if err := domain.ValidateInstance(current); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE instances SET expires_at=?,updated_at=? WHERE owner_id=? AND id=? AND deleted_at IS NULL AND desired_state!=? AND observed_state NOT IN (?,?)`,
+		formatTime(expiresAt), formatTime(updatedAt), ownerID, id, domain.DesiredDeleted, domain.ObservedDeleting, domain.ObservedDeleted)
+	if err != nil {
+		return mapWriteError(err)
+	}
+	if n, _ := result.RowsAffected(); n != 1 {
+		return &domain.Error{Code: domain.CodeInvalidTransition, Field: "expires_at"}
+	}
+	return tx.Commit()
+}
+
 // TombstoneInstance removes active metadata while retaining the minimal deletion identity.
 func (s *Store) TombstoneInstance(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID, operation domain.Operation, deletedAt time.Time) error {
 	release, err := s.acquireWrite(ctx)

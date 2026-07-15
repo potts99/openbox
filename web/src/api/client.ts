@@ -36,7 +36,9 @@ export interface InstanceDetail {
   protected: boolean;
   createdAt: string;
   updatedAt: string;
+  expiresAt?: string;
   errorCode?: string;
+  errorStage?: string;
 }
 
 export interface OperationSummary {
@@ -131,7 +133,9 @@ function normalizeInstance(value: unknown): InstanceDetail {
     protected: bool(row.protected),
     createdAt: text(row.created_at),
     updatedAt: text(row.updated_at),
+    expiresAt: text(row.expires_at) || undefined,
     errorCode: text(row.error_code) || undefined,
+    errorStage: text(row.error_stage) || undefined,
   };
 }
 

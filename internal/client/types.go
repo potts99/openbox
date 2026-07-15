@@ -111,6 +111,18 @@ type CreateInstanceRequest struct {
 	OwnerPublicKey     string    `json:"owner_public_key,omitempty"`
 }
 
+type ExecInstanceRequest struct {
+	Argv           []string          `json:"argv"`
+	WorkingDir     string            `json:"working_dir,omitempty"`
+	Env            map[string]string `json:"env,omitempty"`
+	TimeoutSeconds int               `json:"timeout_seconds,omitempty"`
+	StdinBase64    string            `json:"stdin_base64,omitempty"`
+}
+
+type ExtendInstanceRequest struct {
+	DurationSeconds int `json:"duration_seconds"`
+}
+
 type OperationStatus string
 
 const (

@@ -65,6 +65,85 @@ func TestValidateInstancePolicies(t *testing.T) {
 	assertCode(t, domain.ValidateInstance(i), domain.CodeInvalidArgument)
 }
 
+func TestSandboxExpiryMaxTTL(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	i, err := domain.NewInstance("instance-1", "owner-1", "sandbox", domain.KindSandbox, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	over := now.Add(domain.MaxSandboxLifetime + time.Second)
+	i.ExpiresAt = &over
+	assertCode(t, domain.ValidateInstance(i), domain.CodeInvalidArgument)
+
+	atMax := now.Add(domain.MaxSandboxLifetime)
+	i.ExpiresAt = &atMax
+	if err := domain.ValidateInstance(i); err != nil {
+		t.Fatalf("expiry at max TTL should be valid: %v", err)
+	}
+}
+
+func TestExtendSandboxExpiry(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	i, err := domain.NewInstance("instance-1", "owner-1", "sandbox", domain.KindSandbox, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extended, err := domain.ExtendSandboxExpiry(i, 30*time.Minute, now.Add(10*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := i.ExpiresAt.Add(30 * time.Minute)
+	if extended.ExpiresAt == nil || !extended.ExpiresAt.Equal(want) {
+		t.Fatalf("expires_at = %v, want %v", extended.ExpiresAt, want)
+	}
+	if !extended.UpdatedAt.Equal(now.Add(10 * time.Minute).UTC()) {
+		t.Fatalf("updated_at = %v, want extension clock", extended.UpdatedAt)
+	}
+}
+
+func TestExtendSandboxExpiryRejectsPastMaxTTL(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	i, err := domain.NewInstance("instance-1", "owner-1", "sandbox", domain.KindSandbox, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = domain.ExtendSandboxExpiry(i, domain.MaxSandboxLifetime, now)
+	assertCode(t, err, domain.CodeInvalidArgument)
+}
+
+func TestExtendSandboxExpiryRejectsAfterDeletionStarts(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	i, err := domain.NewInstance("instance-1", "owner-1", "sandbox", domain.KindSandbox, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i.DesiredState = domain.DesiredDeleted
+	_, err = domain.ExtendSandboxExpiry(i, time.Minute, now)
+	assertCode(t, err, domain.CodeInvalidTransition)
+
+	i.DesiredState = domain.DesiredRunning
+	i.ObservedState = domain.ObservedDeleting
+	_, err = domain.ExtendSandboxExpiry(i, time.Minute, now)
+	assertCode(t, err, domain.CodeInvalidTransition)
+}
+
+func TestExtendSandboxExpiryRejectsNonSandbox(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	for _, kind := range []domain.InstanceKind{domain.KindVPS, domain.KindDevbox} {
+		i, err := domain.NewInstance("instance-1", "owner-1", "box", kind, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = domain.ExtendSandboxExpiry(i, time.Minute, now)
+		assertCode(t, err, domain.CodeInvalidArgument)
+	}
+}
+
 func TestValidateInstanceRejectsNegativeResources(t *testing.T) {
 	t.Parallel()
 	now := time.Now().UTC()

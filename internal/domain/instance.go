@@ -7,7 +7,10 @@ import (
 	"time"
 )
 
-const DefaultSandboxLifetime = time.Hour
+const (
+	DefaultSandboxLifetime = time.Hour
+	MaxSandboxLifetime     = 24 * time.Hour
+)
 
 var instanceNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
@@ -33,6 +36,31 @@ func NewInstance(id InstanceID, ownerID OwnerID, name string, kind InstanceKind,
 		i.ExpiresAt = &expires
 	}
 	return i, ValidateInstance(i)
+}
+
+// ExtendSandboxExpiry adds duration to a Sandbox's expires_at. It rejects
+// non-sandboxes, irreversible deletion, non-positive durations, and any result
+// past CreatedAt+MaxSandboxLifetime.
+func ExtendSandboxExpiry(i Instance, by time.Duration, now time.Time) (Instance, error) {
+	if i.Kind != KindSandbox {
+		return Instance{}, newError(CodeInvalidArgument, "kind")
+	}
+	if by <= 0 {
+		return Instance{}, newError(CodeInvalidArgument, "duration")
+	}
+	if i.DesiredState == DesiredDeleted || i.ObservedState == ObservedDeleting || i.ObservedState == ObservedDeleted {
+		return Instance{}, newError(CodeInvalidTransition, "expires_at")
+	}
+	if i.ExpiresAt == nil {
+		return Instance{}, newError(CodeExpiryRequired, "expires_at")
+	}
+	next := i.ExpiresAt.Add(by)
+	i.ExpiresAt = &next
+	i.UpdatedAt = now.UTC()
+	if err := ValidateInstance(i); err != nil {
+		return Instance{}, err
+	}
+	return i, nil
 }
 
 func ValidateInstance(i Instance) error {
@@ -74,6 +102,9 @@ func ValidateInstance(i Instance) error {
 		return newError(CodeExpiryRequired, "expires_at")
 	}
 	if i.ExpiresAt != nil && !i.ExpiresAt.After(i.CreatedAt) {
+		return newError(CodeInvalidArgument, "expires_at")
+	}
+	if i.Kind == KindSandbox && i.ExpiresAt != nil && i.ExpiresAt.After(i.CreatedAt.Add(MaxSandboxLifetime)) {
 		return newError(CodeInvalidArgument, "expires_at")
 	}
 	if i.Resources.VCPUs < 0 {
