@@ -17,6 +17,8 @@ type Manifest struct {
 	Runtime      string // container or virtual-machine
 	CloudInit    bool
 	IncludesPi   bool
+	PiVersion    string // pinned Pi CLI version; set only when IncludesPi
+	TmuxVersion  string // pinned tmux version; set only when IncludesPi
 }
 
 // Catalog is the curated set of workflow defaults for v0.1.
@@ -25,8 +27,26 @@ type Catalog struct {
 }
 
 // DefaultCatalog returns the built-in general, sandbox, and Devbox manifests.
+// Devbox entries carry the Pi and tmux versions from the checked-in definition.
 func DefaultCatalog() Catalog {
-	return Catalog{entries: curatedManifests}
+	entries := make([]Manifest, len(curatedManifests))
+	copy(entries, curatedManifests)
+	def, err := LoadDevboxDefinition()
+	if err != nil {
+		// The definition is embedded at compile time; failing to load it is a
+		// programmer error, not a runtime condition.
+		panic("invalid embedded devbox definition: " + err.Error())
+	}
+	pi, _ := def.Pin("npm", PiPackageName)
+	tmux, _ := def.Pin("apt", "tmux")
+	for i := range entries {
+		if !entries[i].IncludesPi {
+			continue
+		}
+		entries[i].PiVersion = pi.Version
+		entries[i].TmuxVersion = tmux.Version
+	}
+	return Catalog{entries: entries}
 }
 
 // DefaultFor selects the curated alias for a workflow kind, host architecture,

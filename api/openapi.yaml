@@ -269,6 +269,109 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Operation" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/pi-profiles:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+    get:
+      operationId: listPiProfiles
+      responses:
+        "200":
+          description: Owner-scoped shared Pi profiles.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/PiProfile" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/pi-profiles/{profile_id}/versions:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - name: profile_id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: listPiProfileVersions
+      responses:
+        "200":
+          description: Immutable Pi profile version history.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/PiProfileVersion" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/pi-profiles/{profile_id}/rollback:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - name: profile_id
+        in: path
+        required: true
+        schema: { type: string }
+      - { $ref: "#/components/parameters/CSRFToken" }
+    post:
+      operationId: rollbackPiProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Profile rolled back by creating a new version.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PiProfile" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/pi-profiles/{profile_id}/apply:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - name: profile_id
+        in: path
+        required: true
+        schema: { type: string }
+      - { $ref: "#/components/parameters/CSRFToken" }
+    post:
+      operationId: applyPiProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [instance_ids]
+              properties:
+                instance_ids:
+                  type: array
+                  items: { type: string }
+                  minItems: 1
+      responses:
+        "200":
+          description: Profile settings materialized into selected instances.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+        default: { $ref: "#/components/responses/Error" }
   /v1/routes:
     parameters:
       - { $ref: "#/components/parameters/APIVersion" }
@@ -692,6 +795,22 @@ components:
         next_attempt_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    PiProfile:
+      type: object
+      required: [id, name, version, settings_json, updated_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        version: { type: integer, minimum: 1 }
+        settings_json: { type: string }
+        updated_at: { type: string, format: date-time }
+    PiProfileVersion:
+      type: object
+      required: [version, settings_json, created_at]
+      properties:
+        version: { type: integer, minimum: 1 }
+        settings_json: { type: string }
+        created_at: { type: string, format: date-time }
     OperationEvent:
       type: object
       required: [sequence, operation_id, stage, status, progress, created_at]

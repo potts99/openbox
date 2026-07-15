@@ -15,6 +15,7 @@ import (
 
 	"github.com/openbox-dev/openbox/internal/auth"
 	"github.com/openbox-dev/openbox/internal/domain"
+	"github.com/openbox-dev/openbox/internal/pi"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 	"github.com/openbox-dev/openbox/internal/runtime/fake"
 	"github.com/openbox-dev/openbox/internal/terminal"
@@ -792,12 +793,44 @@ func TestTerminalNamedOpenUsesTmuxHelper(t *testing.T) {
 		InstanceID:  "inst-owned",
 		Cols:        80,
 		Rows:        24,
-		SessionName: "pi",
+		SessionName: "work",
 	})
 	defer conn.Close(websocket.StatusNormalClosure, "")
 	_ = ctx
 
-	want, err := terminal.CommandForSession("pi")
+	want, err := terminal.CommandForSession("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rt.LastConsoleCommand(); !slicesEqual(got, want) {
+		t.Fatalf("console command=%v want %v", got, want)
+	}
+	if ack.SessionName != "work" {
+		t.Fatalf("ack session_name=%q want work", ack.SessionName)
+	}
+	if ack.SessionID == "" {
+		t.Fatal("named open ack must include session_id for reconnect")
+	}
+	t.Cleanup(func() {
+		if s := rt.ActiveConsole("incus-owned-ref"); s != nil {
+			_ = s.Close()
+		}
+	})
+}
+
+func TestTerminalLaunchPiUsesAttachOrCreateCommand(t *testing.T) {
+	rt := newRunningFakeRuntime(t, "incus-owned-ref")
+	_, conn, ctx, ack := dialOpenTerminalWithAck(t, rt, terminal.DefaultLimits(), terminal.OpenFrame{
+		InstanceID:       "inst-owned",
+		Cols:             80,
+		Rows:             24,
+		SessionName:      "pi",
+		WorkingDirectory: "/home/owner/src",
+	})
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	_ = ctx
+
+	want, err := pi.AttachOrCreateCommand("/home/owner/src")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -806,9 +839,6 @@ func TestTerminalNamedOpenUsesTmuxHelper(t *testing.T) {
 	}
 	if ack.SessionName != "pi" {
 		t.Fatalf("ack session_name=%q want pi", ack.SessionName)
-	}
-	if ack.SessionID == "" {
-		t.Fatal("named open ack must include session_id for reconnect")
 	}
 	t.Cleanup(func() {
 		if s := rt.ActiveConsole("incus-owned-ref"); s != nil {

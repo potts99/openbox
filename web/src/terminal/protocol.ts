@@ -6,7 +6,7 @@
  */
 
 export type TerminalFrame =
-  | { type: "open"; instanceId: string; cols: number; rows: number; sessionName?: string; sessionId?: string }
+  | { type: "open"; instanceId: string; cols: number; rows: number; sessionName?: string; sessionId?: string; workingDirectory?: string }
   | { type: "input"; data: Uint8Array }
   | { type: "output"; data: Uint8Array }
   | { type: "resize"; cols: number; rows: number }
@@ -40,6 +40,7 @@ export function encodeFrame(frame: TerminalFrame): string {
       };
       if (frame.sessionName) payload.session_name = frame.sessionName;
       if (frame.sessionId) payload.session_id = frame.sessionId;
+      if (frame.workingDirectory) payload.working_directory = frame.workingDirectory;
       return JSON.stringify(payload);
     }
     case "input":
@@ -77,6 +78,7 @@ export function decodeFrame(raw: string): TerminalFrame {
         rows: Number(value.rows),
         sessionName: typeof value.session_name === "string" ? value.session_name : undefined,
         sessionId: typeof value.session_id === "string" ? value.session_id : undefined,
+        workingDirectory: typeof value.working_directory === "string" ? value.working_directory : undefined,
       };
     case "input":
       return { type: "input", data: base64ToBytes(String(value.data ?? "")) };

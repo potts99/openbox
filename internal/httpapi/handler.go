@@ -22,6 +22,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/domain"
 	"github.com/openbox-dev/openbox/internal/httpapi/generated"
 	"github.com/openbox-dev/openbox/internal/images"
+	pi "github.com/openbox-dev/openbox/internal/profiles/pi"
 	"github.com/openbox-dev/openbox/internal/routes"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 	"github.com/openbox-dev/openbox/internal/terminal"
@@ -79,6 +80,10 @@ type Options struct {
 	// TerminalAudit records session start/end metadata only (never PTY payloads).
 	// When nil, terminal sessions still run without audit emission.
 	TerminalAudit TerminalAuditor
+	// PiProfiles serves shared Pi profile preview/history/rollback.
+	PiProfiles *pi.Service
+	// PiApplier materializes profiles into selected instances. When nil, apply returns not_implemented.
+	PiApplier *pi.Applier
 }
 
 type Handler struct {
@@ -95,6 +100,8 @@ type Handler struct {
 	terminalSessions   *terminal.SessionRegistry
 	persistentConsoles *persistentConsoleStore
 	terminalAudit      TerminalAuditor
+	piProfiles         *pi.Service
+	piApplier          *pi.Applier
 }
 
 func New(service Service, options Options) (*Handler, error) {
@@ -125,6 +132,8 @@ func New(service Service, options Options) (*Handler, error) {
 		terminalSessions:   terminal.NewSessionRegistry(limits.MaxSessionsPerOwner, limits.MaxSessionsPerInstance),
 		persistentConsoles: newPersistentConsoleStore(),
 		terminalAudit:      options.TerminalAudit,
+		piProfiles:         options.PiProfiles,
+		piApplier:          options.PiApplier,
 	}, nil
 }
 
@@ -213,6 +222,10 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		}
 	case "routes":
 		if h.routeRoutes(response, request, requestID, segments[2:]) {
+			return
+		}
+	case "pi-profiles":
+		if h.routePiProfiles(response, request, requestID, segments[2:]) {
 			return
 		}
 	case "certificates":

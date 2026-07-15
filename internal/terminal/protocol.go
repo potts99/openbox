@@ -43,11 +43,12 @@ type Frame interface {
 
 // OpenFrame starts or confirms a terminal session inside an instance.
 type OpenFrame struct {
-	InstanceID  string `json:"instance_id"`
-	Cols        uint16 `json:"cols"`
-	Rows        uint16 `json:"rows"`
-	SessionName string `json:"session_name,omitempty"`
-	SessionID   string `json:"session_id,omitempty"`
+	InstanceID        string `json:"instance_id"`
+	Cols              uint16 `json:"cols"`
+	Rows              uint16 `json:"rows"`
+	SessionName       string `json:"session_name,omitempty"`
+	SessionID         string `json:"session_id,omitempty"`
+	WorkingDirectory  string `json:"working_directory,omitempty"`
 }
 
 func (OpenFrame) Type() string { return TypeOpen }
@@ -113,12 +114,13 @@ type envelope struct {
 }
 
 type openWire struct {
-	Type        string `json:"type"`
-	InstanceID  string `json:"instance_id"`
-	Cols        uint16 `json:"cols"`
-	Rows        uint16 `json:"rows"`
-	SessionName string `json:"session_name,omitempty"`
-	SessionID   string `json:"session_id,omitempty"`
+	Type              string `json:"type"`
+	InstanceID        string `json:"instance_id"`
+	Cols              uint16 `json:"cols"`
+	Rows              uint16 `json:"rows"`
+	SessionName       string `json:"session_name,omitempty"`
+	SessionID         string `json:"session_id,omitempty"`
+	WorkingDirectory  string `json:"working_directory,omitempty"`
 }
 
 type dataWire struct {
@@ -170,7 +172,7 @@ func Encode(frame Frame) ([]byte, error) {
 		}
 		payload = openWire{
 			Type: TypeOpen, InstanceID: f.InstanceID, Cols: f.Cols, Rows: f.Rows,
-			SessionName: f.SessionName, SessionID: f.SessionID,
+			SessionName: f.SessionName, SessionID: f.SessionID, WorkingDirectory: f.WorkingDirectory,
 		}
 	case InputFrame:
 		payload = dataWire{Type: TypeInput, Data: base64.StdEncoding.EncodeToString(f.Data)}
@@ -238,6 +240,7 @@ func Decode(raw []byte) (Frame, error) {
 		frame := OpenFrame{
 			InstanceID: wire.InstanceID, Cols: wire.Cols, Rows: wire.Rows,
 			SessionName: wire.SessionName, SessionID: wire.SessionID,
+			WorkingDirectory: wire.WorkingDirectory,
 		}
 		if err := validateOpen(frame); err != nil {
 			return nil, err
