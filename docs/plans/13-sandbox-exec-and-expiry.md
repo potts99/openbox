@@ -1,6 +1,6 @@
 ---
 title: "Slice 13 — Sandbox exec API and expiry"
-status: planned
+status: in_progress
 milestone: "M4 Sandbox and containment"
 depends_on: ["05-durable-operations-and-reconciliation", "06-versioned-api-and-cli"]
 spec: "../specs/2026-07-14-openbox-design.md"
@@ -33,11 +33,11 @@ Turn the instance engine into a reliable disposable execution environment for ag
 
 ## Test-first implementation tasks
 
-1. [ ] Write policy tests for required default expiry, maximum configurable TTL, explicit extension, and VPS/Devbox no-expiry behavior.
-2. [ ] Create Sandbox instances using kind-specific image, lifecycle, resource, and isolation defaults.
-3. [ ] Implement argv-based exec with working directory, environment allowlist, stdin, stdout/stderr framing, exit status, timeout, and cancellation.
+1. [x] Write policy tests for required default expiry, maximum configurable TTL, explicit extension, and VPS/Devbox no-expiry behavior.
+2. [x] Create Sandbox instances using kind-specific image, lifecycle, resource, and isolation defaults.
+3. [x] Implement argv-based exec with working directory, environment allowlist, stdin, stdout/stderr framing, exit status, timeout, and cancellation.
 4. [ ] Stream execution over the API without buffering unbounded output in memory or SQLite.
-5. [ ] Use a durable expiry scheduler driven by stored UTC timestamps and a fakeable clock.
+5. [x] Use a durable expiry scheduler driven by stored UTC timestamps and a fakeable clock.
 6. [ ] At expiry set desired state deleted, retry cleanup, and keep observed state truthful until Incus confirms removal.
 7. [ ] Support atomic TTL extension and reject extension after irreversible deletion begins.
 8. [ ] Expose countdown, isolation, egress policy, operation progress, and cleanup failure in CLI/dashboard.
