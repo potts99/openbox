@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { InstanceAction, InstanceDetail, OpenBoxApi } from "../api/client";
-import { LaunchPi, launchPiAvailable } from "../components/LaunchPi";
+import { LaunchPi } from "../components/LaunchPi";
+import { launchPiAvailable } from "../components/launchPiAvailable";
 
 interface InstancePageProps {
   api: OpenBoxApi;
@@ -47,9 +48,8 @@ export function InstancePage({ api, instanceId, onBack, onOpenTerminal }: Instan
   const [actionPending, setActionPending] = useState<InstanceAction | null>(null);
   const [actionError, setActionError] = useState("");
 
-  const load = useCallback(() => {
+  useEffect(() => {
     let active = true;
-    setData({ status: "loading" });
     void api.getInstance(instanceId)
       .then((instance) => {
         if (active) setData({ status: "ready", instance });
@@ -64,8 +64,6 @@ export function InstancePage({ api, instanceId, onBack, onOpenTerminal }: Instan
       });
     return () => { active = false; };
   }, [api, instanceId]);
-
-  useEffect(() => load(), [load]);
 
   async function runAction(action: InstanceAction) {
     setActionError("");
