@@ -211,7 +211,17 @@ func newAuthHandler(t *testing.T) (*Handler, *auth.Manager, string) {
 	return newAuthHandlerWithClock(t, &now)
 }
 
+func newAuthHandlerWithOptions(t *testing.T, options Options) (*Handler, *auth.Manager, string) {
+	t.Helper()
+	now := time.Now().UTC()
+	return newAuthHandlerWithClockAndOptions(t, &now, options)
+}
+
 func newAuthHandlerWithClock(t *testing.T, now *time.Time) (*Handler, *auth.Manager, string) {
+	return newAuthHandlerWithClockAndOptions(t, now, Options{})
+}
+
+func newAuthHandlerWithClockAndOptions(t *testing.T, now *time.Time, options Options) (*Handler, *auth.Manager, string) {
 	t.Helper()
 	ctx := context.Background()
 	store, err := sqlite.Open(ctx, t.TempDir()+"/auth.db")
@@ -231,7 +241,8 @@ func newAuthHandlerWithClock(t *testing.T, now *time.Time) (*Handler, *auth.Mana
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := New(&fakeService{}, Options{Auth: m})
+	options.Auth = m
+	h, err := New(&fakeService{}, options)
 	if err != nil {
 		t.Fatal(err)
 	}

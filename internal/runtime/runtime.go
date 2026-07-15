@@ -7,12 +7,16 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 )
 
 var (
 	ErrNotFound      = errors.New("runtime resource not found")
 	ErrAlreadyExists = errors.New("runtime resource already exists")
 	ErrUnsupported   = errors.New("runtime operation unsupported")
+	// ErrHostTarget is returned when OpenConsole is asked to address the OpenBox
+	// host instead of a managed instance runtime reference.
+	ErrHostTarget = errors.New("runtime console cannot target the host")
 )
 
 type Capabilities struct {
@@ -101,6 +105,31 @@ type CopyRequest struct {
 	SourceRef, Snapshot, TargetRef string
 }
 
+// ConsoleRequest opens an interactive PTY inside a managed instance.
+// Ref must be a runtime instance identity (never the OpenBox host).
+type ConsoleRequest struct {
+	Ref     string
+	Command []string
+	Cols    uint16
+	Rows    uint16
+}
+
+// ConsoleSession is an interactive PTY attached to a managed instance.
+// Implementations must not spawn a shell on the OpenBox host.
+type ConsoleSession interface {
+	Stdin() io.WriteCloser
+	Stdout() io.Reader
+	Resize(cols, rows uint16) error
+	Wait() (exitCode int, err error)
+	Close() error
+}
+
+// ConsoleOpener opens interactive consoles. Runtime implementations that support
+// browser terminals satisfy this narrower boundary for HTTP injection.
+type ConsoleOpener interface {
+	OpenConsole(context.Context, ConsoleRequest) (ConsoleSession, error)
+}
+
 // Runtime is deliberately provider-neutral. Implementations must honor context
 // cancellation and return the sentinel errors above through errors.Is.
 type Runtime interface {
@@ -113,7 +142,19 @@ type Runtime interface {
 	WaitInstanceReady(context.Context, ReadinessRequest) error
 	StopInstance(context.Context, string) error
 	Exec(context.Context, ExecRequest) (ExecResult, error)
+	OpenConsole(context.Context, ConsoleRequest) (ConsoleSession, error)
 	CreateSnapshot(context.Context, string, string) error
 	CopyInstance(context.Context, CopyRequest) (Instance, error)
 	DeleteInstance(context.Context, string) error
+}
+
+// IsHostConsoleTarget reports whether ref addresses the OpenBox host rather than
+// a managed instance. Empty refs are treated as host targets.
+func IsHostConsoleTarget(ref string) bool {
+	switch strings.ToLower(strings.TrimSpace(ref)) {
+	case "", "host":
+		return true
+	default:
+		return false
+	}
 }

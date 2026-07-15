@@ -153,7 +153,7 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
-	handler, err := httpapi.New(service, httpapi.Options{Auth: authManager})
+	handler, err := httpapi.New(service, httpapi.Options{Auth: authManager, Console: runtime})
 	if err != nil {
 		return fail(err)
 	}

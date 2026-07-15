@@ -67,6 +67,9 @@ type Options struct {
 	HeartbeatInterval time.Duration
 	MaxBodyBytes      int64
 	EventBatchSize    int
+	// Console opens interactive PTYs inside managed instances. When nil, the
+	// terminal WebSocket still authorizes but returns not_implemented.
+	Console runtimeapi.ConsoleOpener
 }
 
 type Handler struct {
@@ -77,6 +80,7 @@ type Handler struct {
 	heartbeatInterval time.Duration
 	maxBodyBytes      int64
 	eventBatchSize    int
+	console           runtimeapi.ConsoleOpener
 }
 
 func New(service Service, options Options) (*Handler, error) {
@@ -101,7 +105,7 @@ func New(service Service, options Options) (*Handler, error) {
 	return &Handler{
 		service: service, fixedOwnerID: options.OwnerID, auth: options.Auth, pollInterval: options.PollInterval,
 		heartbeatInterval: options.HeartbeatInterval, maxBodyBytes: options.MaxBodyBytes,
-		eventBatchSize: options.EventBatchSize,
+		eventBatchSize: options.EventBatchSize, console: options.Console,
 	}, nil
 }
 
