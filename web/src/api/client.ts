@@ -28,6 +28,20 @@ export interface NetworkPolicyStatus {
   deniedFlows: number;
 }
 
+export interface InstanceSoftware {
+  packageId: string;
+  status: string;
+  version?: string;
+  error?: string;
+  updatedAt: string;
+}
+
+export interface SoftwarePackage {
+  id: string;
+  name: string;
+  description: string;
+}
+
 export interface InstanceDetail {
   id: string;
   name: string;
@@ -47,6 +61,7 @@ export interface InstanceDetail {
   errorCode?: string;
   errorStage?: string;
   networkPolicy: NetworkPolicyStatus;
+  software: InstanceSoftware[];
 }
 
 export interface OperationSummary {
@@ -80,6 +95,8 @@ export interface OpenBoxApi {
   getCapabilities(): Promise<Capabilities>;
   listInstances(): Promise<InstanceSummary[]>;
   getInstance(id: string): Promise<InstanceDetail>;
+  listSoftwareCatalog(): Promise<SoftwarePackage[]>;
+  installSoftware(instanceId: string, packageId: string): Promise<InstanceSoftware>;
   mutateInstance(id: string, action: InstanceAction): Promise<OperationSummary>;
   listOperations(): Promise<OperationSummary[]>;
   listPiProfiles(): Promise<PiProfileSummary[]>;
@@ -123,11 +140,23 @@ function number(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function normalizeInstanceSoftware(value: unknown): InstanceSoftware {
+  const row = asRecord(value);
+  return {
+    packageId: text(row.package_id),
+    status: text(row.status),
+    version: text(row.version) || undefined,
+    error: text(row.error) || undefined,
+    updatedAt: text(row.updated_at),
+  };
+}
+
 function normalizeInstance(value: unknown): InstanceDetail {
   const row = asRecord(value);
   const resources = asRecord(row.resources);
   const networkPolicy = asRecord(row.network_policy);
   const resolution = asRecord(networkPolicy.resolution);
+  const softwareRaw = Array.isArray(row.software) ? row.software : [];
   return {
     id: text(row.id),
     name: text(row.name),
@@ -152,6 +181,7 @@ function normalizeInstance(value: unknown): InstanceDetail {
       resolutionState: text(resolution.state),
       deniedFlows: number(networkPolicy.denied_flows),
     },
+    software: softwareRaw.map(normalizeInstanceSoftware),
   };
 }
 
@@ -245,6 +275,25 @@ export function createHttpApi(options: HttpApiOptions = {}): OpenBoxApi {
     },
     async getInstance(id) {
       return normalizeInstance(await request(`/v1/instances/${encodeURIComponent(id)}`));
+    },
+    async listSoftwareCatalog() {
+      const body = asRecord(await request("/v1/software"));
+      const items = Array.isArray(body.items) ? body.items : [];
+      return items.map((item): SoftwarePackage => {
+        const row = asRecord(item);
+        return {
+          id: text(row.id),
+          name: text(row.name),
+          description: text(row.description),
+        };
+      });
+    },
+    async installSoftware(instanceId, packageId) {
+      const body = await request(
+        `/v1/instances/${encodeURIComponent(instanceId)}/software/${encodeURIComponent(packageId)}/install`,
+        { method: "POST" },
+      );
+      return normalizeInstanceSoftware(body);
     },
     async mutateInstance(id, action) {
       const body = await request(`/v1/instances/${encodeURIComponent(id)}/actions/${action}`, {
