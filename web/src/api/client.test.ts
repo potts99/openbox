@@ -52,10 +52,13 @@ describe("createHttpApi", () => {
       expires_at: "2026-07-15T18:00:00Z",
       csrf_token: "rotated-token",
     }), { status: 200, headers: { "content-type": "application/json" } }));
-    await expect(createHttpApi({ fetcher: loggedInFetch }).getSession()).resolves.toEqual({
+    const api = createHttpApi({ fetcher: loggedInFetch });
+    await expect(api.getSession()).resolves.toEqual({
       authenticated: true,
       owner: { displayName: "Owner" },
+      csrfToken: "rotated-token",
     });
+    expect(api.getCsrfToken()).toBe("rotated-token");
   });
 
   it("accepts the v1 items envelopes", async () => {

@@ -2,7 +2,9 @@
 
 export interface BootstrapStatus { required: boolean }
 export interface Owner { displayName: string }
-export type Session = { authenticated: false } | { authenticated: true; owner: Owner };
+export type Session =
+  | { authenticated: false }
+  | { authenticated: true; owner: Owner; csrfToken: string };
 
 export interface Capabilities {
   architecture: string;
@@ -30,6 +32,7 @@ export interface OperationSummary {
 export interface OpenBoxApi {
   getBootstrapStatus(): Promise<BootstrapStatus>;
   getSession(): Promise<Session>;
+  getCsrfToken(): string;
   getCapabilities(): Promise<Capabilities>;
   listInstances(): Promise<InstanceSummary[]>;
   listOperations(): Promise<OperationSummary[]>;
@@ -66,7 +69,7 @@ function bool(value: unknown): boolean {
   return value === true;
 }
 
-function normalizeSession(value: unknown): Session {
+function normalizeSession(value: unknown, fallbackCsrf = ""): Session {
   const result = asRecord(value);
   const authenticated = bool(result.authenticated) || text(result.owner_id) !== "";
   if (!authenticated) return { authenticated: false };
@@ -74,6 +77,7 @@ function normalizeSession(value: unknown): Session {
   return {
     authenticated: true,
     owner: { displayName: text(owner.display_name ?? owner.displayName ?? result.owner_name, "Owner") },
+    csrfToken: text(result.csrf_token, fallbackCsrf),
   };
 }
 
@@ -112,7 +116,10 @@ export function createHttpApi(options: HttpApiOptions = {}): OpenBoxApi {
       return { required: bool(body.required ?? body.bootstrap_required) };
     },
     async getSession() {
-      return normalizeSession(await request("/v1/session", {}, [401]));
+      return normalizeSession(await request("/v1/session", {}, [401]), csrfToken);
+    },
+    getCsrfToken() {
+      return csrfToken;
     },
     async getCapabilities() {
       const body = asRecord(await request("/v1/capabilities"));
@@ -147,10 +154,10 @@ export function createHttpApi(options: HttpApiOptions = {}): OpenBoxApi {
       });
     },
     async setup(input) {
-      return normalizeSession(await request("/v1/bootstrap", { method: "POST", body: JSON.stringify(input) }));
+      return normalizeSession(await request("/v1/bootstrap", { method: "POST", body: JSON.stringify(input) }), csrfToken);
     },
     async login(input) {
-      return normalizeSession(await request("/v1/sessions", { method: "POST", body: JSON.stringify(input) }));
+      return normalizeSession(await request("/v1/sessions", { method: "POST", body: JSON.stringify(input) }), csrfToken);
     },
     async logout() {
       await request("/v1/session", { method: "DELETE" });
