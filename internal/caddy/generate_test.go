@@ -57,6 +57,37 @@ func TestGenerateMixedVisibilityMatchesGolden(t *testing.T) {
 	assertGolden(t, "mixed_visibility.caddyfile", got)
 }
 
+func TestGenerateEmitsStreamingAndForwardedHeaders(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	got, err := caddy.Generate([]domain.Route{{
+		ID: "rt-1", OwnerID: "owner-1", InstanceID: "inst-1",
+		Hostname: "app.example.com", TargetPort: 3000,
+		Visibility: domain.RoutePublic, TLSState: "none",
+		CreatedAt: now, UpdatedAt: now,
+	}}, mapResolver{
+		"inst-1": {
+			Instance: domain.Instance{ID: "inst-1", OwnerID: "owner-1", RuntimeRef: "incus-1"},
+			Address:  "10.42.0.9",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	for _, want := range []string{
+		"header_up Host {host}",
+		"header_up X-Forwarded-Host {host}",
+		"header_up X-Forwarded-Proto {scheme}",
+		"header_up X-Forwarded-For {remote_host}",
+		"flush_interval -1",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated config missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestGenerateDoesNotInventRoutes(t *testing.T) {
 	t.Parallel()
 	// Resolver knows about an instance, but no approved route was passed.
