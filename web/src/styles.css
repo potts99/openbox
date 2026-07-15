@@ -337,6 +337,24 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   border: 1px solid var(--line);
   background: var(--surface);
 }
+.software-list {
+  list-style: none;
+  margin: 0;
+  padding: .85rem;
+  display: grid;
+  gap: .75rem;
+}
+.software-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.software-row p {
+  margin: .25rem 0 .5rem;
+  color: var(--muted);
+  font-size: .9rem;
+}
 .instance-metrics {
   margin-bottom: 1rem;
 }

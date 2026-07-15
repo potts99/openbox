@@ -64,23 +64,38 @@ type Resources struct {
 	DiskBytes   int64 `json:"disk_bytes"`
 }
 
+type AllowlistResolution struct {
+	State    string   `json:"state"`
+	Pending  []string `json:"pending"`
+	Resolved []string `json:"resolved"`
+	Failed   []string `json:"failed"`
+}
+
+type NetworkPolicyStatus struct {
+	EgressMode  string              `json:"egress_mode"`
+	ACLs        []string            `json:"acls"`
+	Resolution  AllowlistResolution `json:"resolution"`
+	DeniedFlows uint64              `json:"denied_flows"`
+}
+
 type Instance struct {
-	ID                 string     `json:"id"`
-	Name               string     `json:"name"`
-	Kind               string     `json:"kind"`
-	ImageID            string     `json:"image_id"`
-	RequestedIsolation string     `json:"requested_isolation"`
-	ActualIsolation    string     `json:"actual_isolation"`
-	DesiredState       string     `json:"desired_state"`
-	ObservedState      string     `json:"observed_state"`
-	Resources          Resources  `json:"resources"`
-	ExpiresAt          *time.Time `json:"expires_at,omitempty"`
-	Protected          bool       `json:"protected"`
-	ErrorCode          string     `json:"error_code,omitempty"`
-	ErrorStage         string     `json:"error_stage,omitempty"`
-	ErrorRetryable     bool       `json:"error_retryable,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	ID                 string              `json:"id"`
+	Name               string              `json:"name"`
+	Kind               string              `json:"kind"`
+	ImageID            string              `json:"image_id"`
+	RequestedIsolation string              `json:"requested_isolation"`
+	ActualIsolation    string              `json:"actual_isolation"`
+	DesiredState       string              `json:"desired_state"`
+	ObservedState      string              `json:"observed_state"`
+	Resources          Resources           `json:"resources"`
+	ExpiresAt          *time.Time          `json:"expires_at,omitempty"`
+	Protected          bool                `json:"protected"`
+	ErrorCode          string              `json:"error_code,omitempty"`
+	ErrorStage         string              `json:"error_stage,omitempty"`
+	ErrorRetryable     bool                `json:"error_retryable,omitempty"`
+	NetworkPolicy      NetworkPolicyStatus `json:"network_policy"`
+	CreatedAt          time.Time           `json:"created_at"`
+	UpdatedAt          time.Time           `json:"updated_at"`
 }
 
 func (i Instance) validate() error {

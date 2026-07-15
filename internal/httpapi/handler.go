@@ -691,7 +691,7 @@ func mapInstance(value domain.Instance, softwareRows []domain.InstanceSoftware) 
 		DesiredState: generated.InstanceDesiredState(value.DesiredState), ObservedState: generated.InstanceObservedState(value.ObservedState),
 		Resources: generated.Resources{Vcpus: value.Resources.VCPUs, MemoryBytes: value.Resources.MemoryBytes, DiskBytes: value.Resources.DiskBytes},
 		ExpiresAt: value.ExpiresAt, Protected: value.Protected, ErrorCode: optionalString(string(value.ErrorCode)), ErrorStage: optionalString(value.ErrorStage),
-		ErrorRetryable: pointer(value.ErrorRetryable), CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+		ErrorRetryable: pointer(value.ErrorRetryable), NetworkPolicy: mapNetworkPolicy(value.NetworkPolicy), CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 	}
 	if len(softwareRows) > 0 {
 		items := make([]generated.InstanceSoftware, 0, len(softwareRows))
@@ -701,6 +701,20 @@ func mapInstance(value domain.Instance, softwareRows []domain.InstanceSoftware) 
 		out.Software = &items
 	}
 	return out
+}
+
+func mapNetworkPolicy(value domain.NetworkPolicyStatus) generated.NetworkPolicyStatus {
+	return generated.NetworkPolicyStatus{
+		EgressMode:  generated.NetworkPolicyStatusEgressMode(value.EgressMode),
+		Acls:        nonNilSlice(value.ACLs),
+		DeniedFlows: int64(value.DeniedFlows),
+		Resolution: generated.AllowlistResolution{
+			State:    generated.AllowlistResolutionState(value.Resolution.State),
+			Pending:  nonNilSlice(value.Resolution.Pending),
+			Resolved: nonNilSlice(value.Resolution.Resolved),
+			Failed:   nonNilSlice(value.Resolution.Failed),
+		},
+	}
 }
 
 func mapInstanceSoftware(row domain.InstanceSoftware) generated.InstanceSoftware {

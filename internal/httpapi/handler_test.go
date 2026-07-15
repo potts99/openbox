@@ -89,7 +89,13 @@ func TestCapabilitiesImagesAndInstancesUseFixedOwner(t *testing.T) {
 	service := &fakeService{
 		capabilities: runtimeapi.Capabilities{Architecture: "x86_64", Containers: true, KVM: true, VirtualMachines: true, VMAvailability: runtimeapi.VMAvailable},
 		images:       []domain.Image{{ID: "img-1", OwnerID: "owner-local", Alias: "ubuntu", Digest: "sha256:abc"}},
-		instances:    []domain.Instance{{ID: "instance-1", OwnerID: "owner-local", Name: "dev", Kind: domain.KindVPS}},
+		instances: []domain.Instance{{
+			ID: "instance-1", OwnerID: "owner-local", Name: "dev", Kind: domain.KindVPS,
+			NetworkPolicy: domain.NetworkPolicyStatus{
+				EgressMode: domain.EgressStandard, ACLs: []string{"openbox-default-deny", "openbox-egress-standard"}, DeniedFlows: 2,
+				Resolution: domain.AllowlistResolution{State: "idle", Pending: []string{}, Resolved: []string{}, Failed: []string{}},
+			},
+		}},
 	}
 	handler := newTestHandler(t, service)
 
@@ -102,6 +108,10 @@ func TestCapabilitiesImagesAndInstancesUseFixedOwner(t *testing.T) {
 			t.Fatalf("%s: status = %d, body = %s", path, response.Code, response.Body.String())
 		}
 	}
+	request := httptest.NewRequest(http.MethodGet, "/v1/instances/instance-1", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	assertJSONContains(t, response.Body.Bytes(), `"egress_mode":"standard"`, `"acls":["openbox-default-deny","openbox-egress-standard"]`, `"denied_flows":2`, `"state":"idle"`)
 	if service.lastOwner != "owner-local" {
 		t.Fatalf("owner = %q, want fixed owner-local", service.lastOwner)
 	}

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/openbox-dev/openbox/internal/domain"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 )
 
@@ -71,6 +72,16 @@ func (r *Runtime) InstanceUsage(ctx context.Context, ref string) (runtimeapi.Usa
 		return runtimeapi.UsageSnapshot{Status: instance.State}, nil
 	}
 	return usage, nil
+}
+
+// ApplyNetworkPolicy satisfies the instance-service policy port in tests.
+func (r *Runtime) ApplyNetworkPolicy(ctx context.Context, _ domain.Instance) error {
+	return ctx.Err()
+}
+
+// RemoveNetworkPolicy satisfies the instance-service policy port in tests.
+func (r *Runtime) RemoveNetworkPolicy(ctx context.Context, _ domain.Instance) error {
+	return ctx.Err()
 }
 
 func (r *Runtime) AddImage(image runtimeapi.Image) {
