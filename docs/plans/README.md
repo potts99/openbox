@@ -36,6 +36,7 @@ These plans split the approved v0.1 specification into small, dependency-ordered
 | [16-provider-adapters-and-pi-gateway-package](16-provider-adapters-and-pi-gateway-package.md) | M5 OpenBox LLM Gateway | [`12-pi-profile-and-launcher`](12-pi-profile-and-launcher.md), [`15-llm-gateway-security-core`](15-llm-gateway-security-core.md) |
 | [17-installer-upgrade-and-recovery](17-installer-upgrade-and-recovery.md) | M6 v0.1 hardening | [`08-ssh-command-and-instance-gateway`](08-ssh-command-and-instance-gateway.md), [`10-https-routes-and-optional-domains`](10-https-routes-and-optional-domains.md), [`16-provider-adapters-and-pi-gateway-package`](16-provider-adapters-and-pi-gateway-package.md) |
 | [18-v0.1-hardening-and-release](18-v0.1-hardening-and-release.md) | M6 v0.1 hardening | [`17-installer-upgrade-and-recovery`](17-installer-upgrade-and-recovery.md) |
+| [19-egress-allowlists-and-network-ux](19-egress-allowlists-and-network-ux.md) | M4 Sandbox and containment | [`14-egress-and-instance-network-policy`](14-egress-and-instance-network-policy.md) |
 
 ## Critical path
 
@@ -64,6 +65,7 @@ flowchart TD
   S06 --> S13
   S02 --> S14["14 Egress policy"]
   S13 --> S14
+  S14 --> S19["19 Egress allowlists and UX"]
   S07 --> S15["15 LLM gateway core"]
   S14 --> S15
   S12 --> S16["16 Providers and Pi gateway"]
@@ -83,3 +85,4 @@ flowchart TD
 - **Sandbox preview:** slices 13–14.
 - **Shared-model-access preview:** slices 15–16.
 - **v0.1 release candidate:** slices 17–18.
+- **Egress allowlist completion:** slice 19 (can proceed after 14; parallel with 15–16 when files do not overlap).

@@ -60,3 +60,7 @@ Enforce host-external network policy so instances cannot relax containment from 
 ## Slice boundary
 
 This slice is complete only when its tests, operator/developer documentation, and acceptance gate pass. Do not pull work from later slices merely because an interface leaves room for it.
+
+## Follow-ups
+
+Intentional gaps are tracked in [19-egress-allowlists-and-network-ux](19-egress-allowlists-and-network-ux.md): non-empty restricted allowlists on the apply path, `dnsproxy` integration, dedicated network-policy UX/CLI, and live Incus connectivity matrix coverage.
