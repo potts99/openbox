@@ -82,6 +82,12 @@ export function InstanceTerminal({
   }, [attachSession]);
 
   useEffect(() => {
+    const { classList } = document.body;
+    classList.add("terminal-open");
+    return () => classList.remove("terminal-open");
+  }, []);
+
+  useEffect(() => {
     if (connection.status !== "connected") {
       setChromeRevealed(true);
       return;

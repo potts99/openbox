@@ -680,8 +680,31 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   cursor: pointer;
 }
 .terminal-reveal[hidden] { display: none; }
+body.terminal-open { overflow: hidden; }
+
+@media (max-width: 900px) {
+  .terminal-toolbar { gap: .45rem .75rem; padding: .5rem .65rem; }
+  .terminal-toolbar button { padding: .5rem .7rem; min-height: 2.25rem; }
+  .terminal-reveal { height: 28px; }
+}
 
 @media (max-width: 720px) {
+  .terminal-toolbar {
+    align-items: flex-start;
+  }
+  .terminal-actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+  .terminal-hint { display: none; }
+  .terminal-toolbar h1 {
+    font-size: .875rem;
+    max-width: 12rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .console-header { flex-wrap: wrap; padding: .65rem 1rem; gap: .5rem 1rem; }
   .console-header nav { margin-left: 0; width: 100%; order: 3; }
   .owner-control { margin-left: auto; }
