@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/openbox-dev/openbox/internal/app/instances"
+	"github.com/openbox-dev/openbox/internal/app/metrics"
 	"github.com/openbox-dev/openbox/internal/auth"
 	"github.com/openbox-dev/openbox/internal/domain"
 	"github.com/openbox-dev/openbox/internal/httpapi/generated"
@@ -87,6 +88,9 @@ type Options struct {
 	PiProfiles *pi.Service
 	// PiApplier materializes profiles into selected instances. When nil, apply returns not_implemented.
 	PiApplier *pi.Applier
+	// Metrics is the in-memory sample hub for instance monitoring WebSockets.
+	// When nil, /metrics returns not_implemented.
+	Metrics *metrics.Hub
 }
 
 type Handler struct {
@@ -105,6 +109,7 @@ type Handler struct {
 	terminalAudit      TerminalAuditor
 	piProfiles         *pi.Service
 	piApplier          *pi.Applier
+	metrics            *metrics.Hub
 }
 
 func New(service Service, options Options) (*Handler, error) {
@@ -137,6 +142,7 @@ func New(service Service, options Options) (*Handler, error) {
 		terminalAudit:      options.TerminalAudit,
 		piProfiles:         options.PiProfiles,
 		piApplier:          options.PiApplier,
+		metrics:            options.Metrics,
 	}, nil
 }
 
@@ -277,6 +283,13 @@ func (h *Handler) routeInstances(response http.ResponseWriter, request *http.Req
 			return true
 		}
 		h.openTerminal(response, request, requestID, rest[0])
+		return true
+	}
+	if len(rest) == 2 && rest[1] == "metrics" {
+		if !h.requireMethod(response, request, requestID, http.MethodGet) {
+			return true
+		}
+		h.openMetrics(response, request, requestID, rest[0])
 		return true
 	}
 	if len(rest) == 2 && rest[1] == "suggested-ports" {
