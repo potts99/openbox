@@ -350,6 +350,22 @@ type OperationEvent struct {
 // OperationEventStatus defines model for OperationEvent.Status.
 type OperationEventStatus string
 
+// PiProfile defines model for PiProfile.
+type PiProfile struct {
+	Id           string    `json:"id"`
+	Name         string    `json:"name"`
+	SettingsJson string    `json:"settings_json"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	Version      int       `json:"version"`
+}
+
+// PiProfileVersion defines model for PiProfileVersion.
+type PiProfileVersion struct {
+	CreatedAt    time.Time `json:"created_at"`
+	SettingsJson string    `json:"settings_json"`
+	Version      int       `json:"version"`
+}
+
 // Resources defines model for Resources.
 type Resources struct {
 	DiskBytes   int64 `json:"disk_bytes"`
@@ -564,6 +580,46 @@ type WatchOperationParams struct {
 	LastEventID *int `json:"Last-Event-ID,omitempty"`
 }
 
+// ListPiProfilesParams defines parameters for ListPiProfiles.
+type ListPiProfilesParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// ApplyPiProfileJSONBody defines parameters for ApplyPiProfile.
+type ApplyPiProfileJSONBody struct {
+	InstanceIds []string `json:"instance_ids"`
+}
+
+// ApplyPiProfileParams defines parameters for ApplyPiProfile.
+type ApplyPiProfileParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+}
+
+// RollbackPiProfileJSONBody defines parameters for RollbackPiProfile.
+type RollbackPiProfileJSONBody struct {
+	Version int `json:"version"`
+}
+
+// RollbackPiProfileParams defines parameters for RollbackPiProfile.
+type RollbackPiProfileParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+}
+
+// ListPiProfileVersionsParams defines parameters for ListPiProfileVersions.
+type ListPiProfileVersionsParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
 // ListRoutesParams defines parameters for ListRoutes.
 type ListRoutesParams struct {
 	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
@@ -704,6 +760,12 @@ type ConsumeBootstrapJSONRequestBody = BootstrapRequest
 
 // CreateInstanceJSONRequestBody defines body for CreateInstance for application/json ContentType.
 type CreateInstanceJSONRequestBody = CreateInstanceRequest
+
+// ApplyPiProfileJSONRequestBody defines body for ApplyPiProfile for application/json ContentType.
+type ApplyPiProfileJSONRequestBody ApplyPiProfileJSONBody
+
+// RollbackPiProfileJSONRequestBody defines body for RollbackPiProfile for application/json ContentType.
+type RollbackPiProfileJSONRequestBody RollbackPiProfileJSONBody
 
 // CreateRouteJSONRequestBody defines body for CreateRoute for application/json ContentType.
 type CreateRouteJSONRequestBody = CreateRouteRequest

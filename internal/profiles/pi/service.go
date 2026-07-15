@@ -16,6 +16,7 @@ import (
 type Repository interface {
 	CreatePiProfile(context.Context, domain.PiProfile) error
 	GetPiProfile(context.Context, domain.OwnerID, domain.PiProfileID) (domain.PiProfile, error)
+	ListPiProfiles(context.Context, domain.OwnerID) ([]domain.PiProfile, error)
 	UpdatePiProfile(context.Context, domain.PiProfile) error
 	InsertPiProfileVersion(context.Context, VersionRecord) error
 	ListPiProfileVersions(context.Context, domain.OwnerID, domain.PiProfileID) ([]VersionRecord, error)
@@ -67,6 +68,11 @@ func New(repo Repository, options Options) (*Service, error) {
 		options.NewID = randomProfileID
 	}
 	return &Service{repo: repo, now: options.Now, newID: options.NewID}, nil
+}
+
+// List returns owner-scoped Pi profiles.
+func (s *Service) List(ctx context.Context, ownerID domain.OwnerID) ([]domain.PiProfile, error) {
+	return s.repo.ListPiProfiles(ctx, ownerID)
 }
 
 // Create stores a new owner-level profile at version 1.
@@ -150,6 +156,28 @@ func (s *Service) GetVersion(ctx context.Context, ownerID domain.OwnerID, id dom
 		return VersionRecord{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "version"}
 	}
 	return s.repo.GetPiProfileVersion(ctx, ownerID, id, version)
+}
+
+// Rollback restores settings from a prior version by creating a new version.
+func (s *Service) Rollback(ctx context.Context, ownerID domain.OwnerID, id domain.PiProfileID, version int) (domain.PiProfile, error) {
+	rec, err := s.GetVersion(ctx, ownerID, id, version)
+	if err != nil {
+		return domain.PiProfile{}, err
+	}
+	settings, err := ParseSettings(rec.SettingsJSON)
+	if err != nil {
+		return domain.PiProfile{}, err
+	}
+	return s.Update(ctx, ownerID, id, UpdateInput{Settings: settings})
+}
+
+// Preview returns the current settings decoded for display.
+func (s *Service) Preview(ctx context.Context, ownerID domain.OwnerID, id domain.PiProfileID) (Settings, error) {
+	profile, err := s.Get(ctx, ownerID, id)
+	if err != nil {
+		return Settings{}, err
+	}
+	return ParseSettings(profile.SettingsJSON)
 }
 
 func randomProfileID() string {

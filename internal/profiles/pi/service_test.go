@@ -116,6 +116,44 @@ func TestCreateRequiresName(t *testing.T) {
 	}
 }
 
+func TestRollbackRestoresPriorVersionAsNewHead(t *testing.T) {
+	t.Parallel()
+	repo := newMemoryRepo()
+	svc, err := pi.New(repo, pi.Options{
+		Now:   func() time.Time { return time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC) },
+		NewID: func() string { return "profile-1" },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	created, err := svc.Create(ctx, "owner-1", pi.CreateInput{
+		Name: "default", Settings: pi.Settings{Theme: "dark", DefaultProvider: "anthropic"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Update(ctx, "owner-1", created.ID, pi.UpdateInput{
+		Settings: pi.Settings{Theme: "light", DefaultProvider: "openai"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rolled, err := svc.Rollback(ctx, "owner-1", created.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rolled.Version != 3 {
+		t.Fatalf("version=%d, want 3", rolled.Version)
+	}
+	settings, err := pi.ParseSettings(rolled.SettingsJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.Theme != "dark" || settings.DefaultProvider != "anthropic" {
+		t.Fatalf("rolled settings=%+v", settings)
+	}
+}
+
 type memoryRepo struct {
 	profiles map[domain.PiProfileID]domain.PiProfile
 	history  map[domain.PiProfileID][]pi.VersionRecord
@@ -146,6 +184,16 @@ func (m *memoryRepo) GetPiProfile(_ context.Context, owner domain.OwnerID, id do
 		return domain.PiProfile{}, &domain.Error{Code: domain.CodeNotFound, Field: "pi_profile"}
 	}
 	return p, nil
+}
+
+func (m *memoryRepo) ListPiProfiles(_ context.Context, owner domain.OwnerID) ([]domain.PiProfile, error) {
+	out := make([]domain.PiProfile, 0)
+	for _, p := range m.profiles {
+		if p.OwnerID == owner {
+			out = append(out, p)
+		}
+	}
+	return out, nil
 }
 
 func (m *memoryRepo) UpdatePiProfile(_ context.Context, profile domain.PiProfile) error {
