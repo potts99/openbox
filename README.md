@@ -41,6 +41,9 @@ configurable port 2222 and never changes host SSH. See the
 registration, management commands, direct instance sessions, optional local
 aliases, denied forwarding modes, and recovery behavior.
 
+Optional HTTPS routes (private by default) and `openbox forward` tunnels are
+documented in the [HTTPS routes operator guide](docs/operators/https-routes.md).
+
 ## Security
 
 Do not report vulnerabilities in a public issue. See [SECURITY.md](SECURITY.md) for private reporting instructions.
