@@ -392,6 +392,33 @@ func (r *Runtime) CreateSnapshot(ctx context.Context, ref, name string) error {
 	return nil
 }
 
+func (r *Runtime) DeleteSnapshot(ctx context.Context, ref, name string) error {
+	if err := r.begin(ctx, "snapshot.delete"); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	instance, exists := r.instances[ref]
+	if !exists {
+		return runtimeapi.ErrNotFound
+	}
+	kept := make([]string, 0, len(instance.Snapshots))
+	found := false
+	for _, snapshot := range instance.Snapshots {
+		if snapshot == name {
+			found = true
+			continue
+		}
+		kept = append(kept, snapshot)
+	}
+	if !found {
+		return runtimeapi.ErrNotFound
+	}
+	instance.Snapshots = kept
+	r.instances[ref] = instance
+	return nil
+}
+
 func (r *Runtime) CopyInstance(ctx context.Context, request runtimeapi.CopyRequest) (runtimeapi.Instance, error) {
 	if err := r.begin(ctx, "instance.copy"); err != nil {
 		return runtimeapi.Instance{}, err
