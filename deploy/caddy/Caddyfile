@@ -1,0 +1,8 @@
+{
+	# OpenBox HTTPS gateway base config.
+	# On-demand TLS "ask" authorization is supplied by openboxd (later task).
+	# admin off
+}
+
+# Managed routes — generated only from approved database routes.
+import routes.caddyfile
