@@ -20,6 +20,9 @@ func TestOwnerKeyProducesRecognizableCloudConfig(t *testing.T) {
 	if !strings.Contains(data, "ssh_authorized_keys:") || !strings.Contains(data, `"ssh-ed25519 AAAA owner@example"`) {
 		t.Fatalf("owner key missing: %q", data)
 	}
+	if !strings.Contains(data, "packages:\n  - openssh-server\n") {
+		t.Fatalf("openssh-server package missing: %q", data)
+	}
 }
 
 func TestOwnerKeyQuotesUntrustedTextAndRejectsEmpty(t *testing.T) {

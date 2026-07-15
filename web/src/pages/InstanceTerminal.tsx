@@ -122,7 +122,7 @@ export function InstanceTerminal({
     <div className="terminal-page">
       <a className="skip-link" href="#terminal-main">Skip to terminal</a>
       <header className="terminal-toolbar">
-        <button type="button" onClick={onBack}>Back to instances</button>
+        <button type="button" onClick={onBack}>Back to instance</button>
         <div>
           <p className="eyebrow">Instance terminal</p>
           <h1 id="terminal-heading">{instanceName}</h1>

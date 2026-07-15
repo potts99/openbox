@@ -21,6 +21,8 @@ function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
       vmReason: "/dev/kvm is not available",
     }),
     listInstances: vi.fn().mockResolvedValue([]),
+    getInstance: vi.fn(),
+    mutateInstance: vi.fn(),
     listOperations: vi.fn().mockResolvedValue([]),
     setup: vi.fn(),
     login: vi.fn(),
@@ -163,11 +165,32 @@ describe("App", () => {
         { id: "box-1", name: "workbench", kind: "devbox", status: "running" },
         { id: "box-2", name: "staging", kind: "devbox", status: "stopped" },
       ]),
+      getInstance: vi.fn().mockImplementation(async (id: string) => ({
+        id,
+        name: id === "box-1" ? "workbench" : "staging",
+        kind: "devbox",
+        imageId: "img",
+        requestedIsolation: "standard",
+        actualIsolation: "container",
+        desiredState: "running",
+        observedState: id === "box-1" ? "running" : "stopped",
+        vcpus: 2,
+        memoryBytes: 8 * 1024 ** 3,
+        diskBytes: 20 * 1024 ** 3,
+        protected: false,
+        createdAt: "now",
+        updatedAt: "now",
+      })),
     });
+    const user = userEvent.setup();
     render(<App api={api} />);
 
-    expect(await screen.findByRole("button", { name: "Open terminal for workbench" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open terminal for staging" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "workbench" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "staging" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "workbench" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "workbench" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Terminal" })).toBeInTheDocument();
   });
 
   it("opens and closes the operations drawer with keyboard-accessible controls", async () => {

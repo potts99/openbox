@@ -81,4 +81,33 @@ describe("createHttpApi", () => {
     await expect(api.listInstances()).resolves.toEqual([{ id: "box-1", name: "dev", kind: "devbox", status: "running" }]);
     await expect(api.listOperations()).resolves.toEqual([{ id: "op-1", action: "create", target: "box-1", status: "running", updatedAt: "now" }]);
   });
+
+  it("loads instance detail and posts lifecycle actions with an idempotency key", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: "box-1", name: "demo", kind: "vps", image_id: "img", requested_isolation: "best_available",
+        actual_isolation: "virtual_machine", desired_state: "running", observed_state: "running",
+        resources: { vcpus: 2, memory_bytes: 4294967296, disk_bytes: 21474836480 },
+        protected: false, created_at: "now", updated_at: "now",
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: "op-9", type: "instance.stop", target_type: "instance", target_id: "box-1",
+        status: "pending", stage: "queued", progress: 0, attempts: 0, created_at: "now", updated_at: "now",
+      }), { status: 202, headers: { "content-type": "application/json" } }));
+    const api = createHttpApi({ fetcher, csrfToken: "csrf" });
+
+    await expect(api.getInstance("box-1")).resolves.toMatchObject({
+      id: "box-1", name: "demo", actualIsolation: "virtual_machine", vcpus: 2, memoryBytes: 4294967296,
+    });
+    await expect(api.mutateInstance("box-1", "stop")).resolves.toMatchObject({
+      id: "op-9", action: "instance.stop", target: "box-1", status: "pending",
+    });
+    expect(fetcher).toHaveBeenLastCalledWith("/v1/instances/box-1/actions/stop", expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({
+        "Idempotency-Key": expect.any(String),
+        "X-CSRF-Token": "csrf",
+      }),
+    }));
+  });
 });

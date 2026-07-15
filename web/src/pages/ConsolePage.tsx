@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Capabilities, InstanceSummary, OpenBoxApi, OperationSummary, Session } from "../api/client";
 import { CapabilityBanner } from "../components/CapabilityBanner";
 import { OperationDrawer } from "../components/OperationDrawer";
+import { InstancePage } from "./InstancePage";
 import { InstanceTerminal } from "./InstanceTerminal";
 
 interface ConsolePageProps {
@@ -17,12 +18,17 @@ type ConsoleData =
   | { status: "error"; message: string }
   | { status: "ready"; capabilities: Capabilities; instances: InstanceSummary[]; operations: OperationSummary[] };
 
+type View =
+  | { kind: "list" }
+  | { kind: "detail"; instanceId: string }
+  | { kind: "terminal"; instanceId: string; instanceName: string };
+
 export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
   const [data, setData] = useState<ConsoleData>({ status: "loading" });
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [logoutPending, setLogoutPending] = useState(false);
   const [logoutError, setLogoutError] = useState("");
-  const [terminalInstance, setTerminalInstance] = useState<InstanceSummary | null>(null);
+  const [view, setView] = useState<View>({ kind: "list" });
   const operationsButton = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -55,13 +61,28 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
     queueMicrotask(() => operationsButton.current?.focus());
   }
 
-  if (terminalInstance) {
+  if (view.kind === "terminal") {
     return (
       <InstanceTerminal
-        instanceId={terminalInstance.id}
-        instanceName={terminalInstance.name}
+        instanceId={view.instanceId}
+        instanceName={view.instanceName}
         csrfToken={session.csrfToken || api.getCsrfToken()}
-        onBack={() => setTerminalInstance(null)}
+        onBack={() => setView({ kind: "detail", instanceId: view.instanceId })}
+      />
+    );
+  }
+
+  if (view.kind === "detail") {
+    return (
+      <InstancePage
+        api={api}
+        instanceId={view.instanceId}
+        onBack={() => setView({ kind: "list" })}
+        onOpenTerminal={(instance) => setView({
+          kind: "terminal",
+          instanceId: instance.id,
+          instanceName: instance.name,
+        })}
       />
     );
   }
@@ -121,22 +142,20 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
                 ) : (
                   <table>
                     <caption className="sr-only">OpenBox instances</caption>
-                    <thead><tr><th>Name</th><th>Kind</th><th>Status</th><th></th></tr></thead>
+                    <thead><tr><th>Name</th><th>Kind</th><th>Status</th></tr></thead>
                     <tbody>{data.instances.map((instance) => (
                       <tr key={instance.id}>
-                        <th scope="row">{instance.name}</th>
-                        <td>{instance.kind}</td>
-                        <td>{instance.status}</td>
-                        <td>
+                        <th scope="row">
                           <button
                             type="button"
-                            className="link-button"
-                            aria-label={`Open terminal for ${instance.name}`}
-                            onClick={() => setTerminalInstance(instance)}
+                            className="link-button instance-link"
+                            onClick={() => setView({ kind: "detail", instanceId: instance.id })}
                           >
-                            Terminal
+                            {instance.name}
                           </button>
-                        </td>
+                        </th>
+                        <td>{instance.kind}</td>
+                        <td>{instance.status}</td>
                       </tr>
                     ))}</tbody>
                   </table>

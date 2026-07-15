@@ -21,6 +21,24 @@ export interface InstanceSummary {
   status: string;
 }
 
+export interface InstanceDetail {
+  id: string;
+  name: string;
+  kind: string;
+  imageId: string;
+  requestedIsolation: string;
+  actualIsolation: string;
+  desiredState: string;
+  observedState: string;
+  vcpus: number;
+  memoryBytes: number;
+  diskBytes: number;
+  protected: boolean;
+  createdAt: string;
+  updatedAt: string;
+  errorCode?: string;
+}
+
 export interface OperationSummary {
   id: string;
   action: string;
@@ -29,12 +47,16 @@ export interface OperationSummary {
   updatedAt: string;
 }
 
+export type InstanceAction = "start" | "stop" | "restart";
+
 export interface OpenBoxApi {
   getBootstrapStatus(): Promise<BootstrapStatus>;
   getSession(): Promise<Session>;
   getCsrfToken(): string;
   getCapabilities(): Promise<Capabilities>;
   listInstances(): Promise<InstanceSummary[]>;
+  getInstance(id: string): Promise<InstanceDetail>;
+  mutateInstance(id: string, action: InstanceAction): Promise<OperationSummary>;
   listOperations(): Promise<OperationSummary[]>;
   setup(input: { secret: string; password: string }): Promise<Session>;
   login(input: { password: string }): Promise<Session>;
@@ -67,6 +89,50 @@ function text(value: unknown, fallback = ""): string {
 
 function bool(value: unknown): boolean {
   return value === true;
+}
+
+function number(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeInstance(value: unknown): InstanceDetail {
+  const row = asRecord(value);
+  const resources = asRecord(row.resources);
+  return {
+    id: text(row.id),
+    name: text(row.name),
+    kind: text(row.kind),
+    imageId: text(row.image_id),
+    requestedIsolation: text(row.requested_isolation),
+    actualIsolation: text(row.actual_isolation),
+    desiredState: text(row.desired_state),
+    observedState: text(row.observed_state),
+    vcpus: number(resources.vcpus),
+    memoryBytes: number(resources.memory_bytes),
+    diskBytes: number(resources.disk_bytes),
+    protected: bool(row.protected),
+    createdAt: text(row.created_at),
+    updatedAt: text(row.updated_at),
+    errorCode: text(row.error_code) || undefined,
+  };
+}
+
+function normalizeOperation(value: unknown): OperationSummary {
+  const row = asRecord(value);
+  return {
+    id: text(row.id),
+    action: text(row.type),
+    status: text(row.status),
+    target: text(row.target_id, "system"),
+    updatedAt: text(row.updated_at),
+  };
+}
+
+function newIdempotencyKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `web-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function normalizeSession(value: unknown, fallbackCsrf = ""): Session {
@@ -139,19 +205,20 @@ export function createHttpApi(options: HttpApiOptions = {}): OpenBoxApi {
         return { id: text(row.id), name: text(row.name), kind: text(row.kind), status: text(row.observed_state) };
       });
     },
+    async getInstance(id) {
+      return normalizeInstance(await request(`/v1/instances/${encodeURIComponent(id)}`));
+    },
+    async mutateInstance(id, action) {
+      const body = await request(`/v1/instances/${encodeURIComponent(id)}/actions/${action}`, {
+        method: "POST",
+        headers: { "Idempotency-Key": newIdempotencyKey() },
+      });
+      return normalizeOperation(body);
+    },
     async listOperations() {
       const body = asRecord(await request("/v1/operations"));
       const items = Array.isArray(body.items) ? body.items : Array.isArray(body.operations) ? body.operations : [];
-      return items.map((item): OperationSummary => {
-        const row = asRecord(item);
-        return {
-          id: text(row.id),
-          action: text(row.type),
-          status: text(row.status),
-          target: text(row.target_id, "system"),
-          updatedAt: text(row.updated_at),
-        };
-      });
+      return items.map((item) => normalizeOperation(item));
     },
     async setup(input) {
       return normalizeSession(await request("/v1/bootstrap", { method: "POST", body: JSON.stringify(input) }), csrfToken);

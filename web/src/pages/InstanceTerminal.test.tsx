@@ -190,7 +190,7 @@ describe("InstanceTerminal", () => {
     await screen.findByRole("heading", { name: /workbench/i });
 
     expect((await axe.run(view.container)).violations).toEqual([]);
-    await userEvent.setup().click(screen.getByRole("button", { name: "Back to instances" }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "Back to instance" }));
     expect(onBack).toHaveBeenCalledOnce();
   });
 
