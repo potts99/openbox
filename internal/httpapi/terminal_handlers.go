@@ -98,14 +98,18 @@ func isWebSocketUpgrade(request *http.Request) bool {
 	return strings.EqualFold(request.Header.Get("Upgrade"), "websocket")
 }
 
-// sessionCSRFToken prefers X-CSRF-Token. For WebSocket upgrades only, browsers
+func isWebSocketHandshake(request *http.Request) bool {
+	return request.Method == http.MethodGet && isWebSocketUpgrade(request)
+}
+
+// sessionCSRFToken prefers X-CSRF-Token. For WebSocket handshakes only, browsers
 // may supply the same token via ?csrf= because the WebSocket API cannot set
 // custom headers. Non-WebSocket cookie mutations still require the header.
 func sessionCSRFToken(request *http.Request) string {
 	if token := request.Header.Get(auth.CSRFHeader); token != "" {
 		return token
 	}
-	if isWebSocketUpgrade(request) {
+	if isWebSocketHandshake(request) {
 		return request.URL.Query().Get(auth.CSRFQuery)
 	}
 	return ""
