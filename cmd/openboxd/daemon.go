@@ -22,6 +22,7 @@ import (
 
 	"github.com/openbox-dev/openbox/internal/app/clones"
 	"github.com/openbox-dev/openbox/internal/app/instances"
+	"github.com/openbox-dev/openbox/internal/app/metrics"
 	"github.com/openbox-dev/openbox/internal/app/recovery"
 	"github.com/openbox-dev/openbox/internal/app/sshcommands"
 	"github.com/openbox-dev/openbox/internal/auth"
@@ -47,14 +48,14 @@ type daemonConfig struct {
 	SSHAddress, SSHHostKeyPath, SSHInstanceKeyPath, SSHKnownHostsPath            string
 	OwnerID, OwnerName                                                           string
 	WorkerConcurrency                                                            int
-	OperationInterval, ReconcileInterval, Lease                                  time.Duration
+	OperationInterval, ReconcileInterval, MetricsInterval, Lease                 time.Duration
 }
 
 func (c daemonConfig) validate() error {
 	if c.DatabasePath == "" || c.IncusSocket == "" {
 		return errors.New("database and Incus socket paths are required")
 	}
-	if c.WorkerConcurrency <= 0 || c.OperationInterval <= 0 || c.ReconcileInterval <= 0 || c.Lease <= 0 {
+	if c.WorkerConcurrency <= 0 || c.OperationInterval <= 0 || c.ReconcileInterval <= 0 || c.MetricsInterval <= 0 || c.Lease <= 0 {
 		return errors.New("worker concurrency and daemon intervals must be positive")
 	}
 	if c.APIAddress == "" || c.OwnerID == "" || c.OwnerName == "" {
@@ -93,9 +94,12 @@ type apiRunner interface {
 }
 type sshRunner interface{ ListenAndServe(context.Context) error }
 
+type metricsRunner interface{ RunOnce(context.Context) error }
+
 type daemonComponents struct {
 	operations operationRunner
 	reconciler reconciliationRunner
+	metrics    metricsRunner
 	closer     daemonCloser
 	api        apiRunner
 	ssh        sshRunner
@@ -202,6 +206,37 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
+	intervalSec := int(config.MetricsInterval / time.Second)
+	if intervalSec <= 0 {
+		intervalSec = metrics.DefaultIntervalSeconds
+	}
+	capacity := (60 * 60) / intervalSec
+	if capacity < 1 {
+		capacity = metrics.DefaultRetention
+	}
+	metricsHub := metrics.NewHub(capacity, intervalSec)
+	metricsSampler := metrics.NewSampler(metricsHub, func(ctx context.Context) ([]metrics.Target, error) {
+		rows, err := store.ListInstances(ctx)
+		if err != nil {
+			return nil, err
+		}
+		targets := make([]metrics.Target, 0, len(rows))
+		for _, row := range rows {
+			if row.ObservedState != domain.ObservedRunning || strings.TrimSpace(row.RuntimeRef) == "" {
+				continue
+			}
+			targets = append(targets, metrics.Target{
+				ID:         row.ID,
+				RuntimeRef: row.RuntimeRef,
+				Limits: metrics.Limits{
+					VCPUs:       row.Resources.VCPUs,
+					MemoryBytes: row.Resources.MemoryBytes,
+					DiskBytes:   row.Resources.DiskBytes,
+				},
+			})
+		}
+		return targets, nil
+	}, runtime.InstanceUsage)
 	handler, err := httpapi.New(service, httpapi.Options{
 		Auth:          authManager,
 		Routes:        routeService,
@@ -209,6 +244,7 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 		TerminalAudit: durableTerminalAuditor{store: store, fallbackOwner: domain.OwnerID(config.OwnerID)},
 		PiProfiles:    piProfiles,
 		PiApplier:     piApplier,
+		Metrics:       metricsHub,
 	})
 	if err != nil {
 		return fail(err)
@@ -230,7 +266,14 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
-	return daemonComponents{operations: worker, reconciler: expiryThenReconcile{expiry: expiry, inner: reconciler}, closer: store, api: api, ssh: sshServer}, nil
+	return daemonComponents{
+		operations: worker,
+		reconciler: expiryThenReconcile{expiry: expiry, inner: reconciler},
+		metrics:    metricsSampler,
+		closer:     store,
+		api:        api,
+		ssh:        sshServer,
+	}, nil
 }
 
 type expiryThenReconcile struct {
@@ -307,7 +350,11 @@ func runDaemon(ctx context.Context, config daemonConfig, factory componentFactor
 		log.Printf("openboxd: startup operation recovery: %v", err)
 	}
 	var wg sync.WaitGroup
-	wg.Add(2)
+	periodicCount := 2
+	if components.metrics != nil {
+		periodicCount++
+	}
+	wg.Add(periodicCount)
 	go periodic(runCtx, &wg, config.OperationInterval, false, "operation recovery", func(ctx context.Context) error {
 		return components.operations.RunOnce(ctx)
 	})
@@ -315,6 +362,11 @@ func runDaemon(ctx context.Context, config daemonConfig, factory componentFactor
 		_, err := components.reconciler.RunOnce(ctx)
 		return err
 	})
+	if components.metrics != nil {
+		go periodic(runCtx, &wg, config.MetricsInterval, true, "instance metrics", func(ctx context.Context) error {
+			return components.metrics.RunOnce(ctx)
+		})
+	}
 	var runErr error
 	select {
 	case <-ctx.Done():
