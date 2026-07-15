@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { InstanceAction, InstanceDetail, OpenBoxApi } from "../api/client";
+import { InstanceMetrics } from "../components/InstanceMetrics";
 import { LaunchPi } from "../components/LaunchPi";
 import { launchPiAvailable } from "../components/launchPiAvailable";
 import { SandboxStatus } from "./Sandbox";
@@ -9,6 +10,7 @@ import { SandboxStatus } from "./Sandbox";
 interface InstancePageProps {
   api: OpenBoxApi;
   instanceId: string;
+  csrfToken?: string;
   onBack(): void;
   onOpenTerminal(instance: { id: string; name: string; launchPi?: boolean }): void;
 }
@@ -44,7 +46,7 @@ function shortenId(id: string): string {
   return `${id.slice(0, 8)}…${id.slice(-6)}`;
 }
 
-export function InstancePage({ api, instanceId, onBack, onOpenTerminal }: InstancePageProps) {
+export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTerminal }: InstancePageProps) {
   const [data, setData] = useState<PageData>({ status: "loading" });
   const [actionPending, setActionPending] = useState<InstanceAction | null>(null);
   const [actionError, setActionError] = useState("");
@@ -141,6 +143,16 @@ export function InstancePage({ api, instanceId, onBack, onOpenTerminal }: Instan
           {actionError ? <p className="data-message is-error" role="alert">{actionError}</p> : null}
           {data.status === "loading" ? <p className="data-message" role="status">Loading…</p> : null}
           {data.status === "error" ? <p className="data-message is-error" role="alert">{data.message}</p> : null}
+
+          {instance ? (
+            <InstanceMetrics
+              instanceId={instance.id}
+              csrfToken={csrfToken || api.getCsrfToken()}
+              vcpus={instance.vcpus}
+              memoryBytes={instance.memoryBytes}
+              diskBytes={instance.diskBytes}
+            />
+          ) : null}
 
           {instance ? (
             <section className="instance-detail" aria-labelledby="instance-detail-heading">
