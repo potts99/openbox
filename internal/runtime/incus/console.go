@@ -46,6 +46,10 @@ func (a *Adapter) OpenConsole(ctx context.Context, request runtimeapi.ConsoleReq
 		"interactive":        true,
 		"width":              int(cols),
 		"height":             int(rows),
+		// tmux rejects PTY sessions when TERM is missing/unknown ("does not support clear").
+		"environment": map[string]string{
+			"TERM": "xterm-256color",
+		},
 	}
 	query := url.Values{"project": {a.project}}
 	envelope, err := a.call(ctx, a.timeout, http.MethodPost, "/1.0/instances/"+url.PathEscape(request.Ref)+"/exec", query, payload, nil)

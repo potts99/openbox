@@ -583,6 +583,9 @@ func terminalConsoleError(err error) (code, message string) {
 	case errors.Is(err, runtimeapi.ErrUnsupported):
 		return "unsupported", "interactive console is not available"
 	default:
+		if err != nil && err.Error() != "" {
+			return "console_failed", err.Error()
+		}
 		return "console_failed", "failed to open console"
 	}
 }
