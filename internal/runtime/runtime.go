@@ -144,6 +144,7 @@ type Runtime interface {
 	Exec(context.Context, ExecRequest) (ExecResult, error)
 	OpenConsole(context.Context, ConsoleRequest) (ConsoleSession, error)
 	CreateSnapshot(context.Context, string, string) error
+	DeleteSnapshot(context.Context, string, string) error
 	CopyInstance(context.Context, CopyRequest) (Instance, error)
 	DeleteInstance(context.Context, string) error
 }

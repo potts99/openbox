@@ -48,6 +48,12 @@ func TestRuntimeContract(t *testing.T) {
 	if err != nil || copy.Ref != "copy" || copy.State != runtimeapi.StateRunning {
 		t.Fatalf("copy = %#v, %v", copy, err)
 	}
+	if err := r.DeleteSnapshot(context.Background(), "dev", "ready"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.DeleteSnapshot(context.Background(), "dev", "ready"); !errors.Is(err, runtimeapi.ErrNotFound) {
+		t.Fatalf("delete missing snapshot error = %v", err)
+	}
 	if err := r.StopInstance(context.Background(), "copy"); err != nil {
 		t.Fatal(err)
 	}
