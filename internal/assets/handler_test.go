@@ -77,4 +77,10 @@ func assertSecurityHeaders(t *testing.T, response *httptest.ResponseRecorder) {
 			t.Fatalf("missing %s", name)
 		}
 	}
+	csp := response.Header().Get("Content-Security-Policy")
+	for _, want := range []string{"style-src", "'unsafe-inline'", "fonts.googleapis.com", "fonts.gstatic.com"} {
+		if !strings.Contains(csp, want) {
+			t.Fatalf("CSP missing %q: %s", want, csp)
+		}
+	}
 }

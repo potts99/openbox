@@ -114,7 +114,10 @@ func contentHashed(name string) bool {
 }
 
 func setSecurityHeaders(header http.Header) {
-	header.Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'")
+	// style-src includes 'unsafe-inline' because xterm.js injects a runtime <style>
+	// tag for viewport/canvas layout. Google Fonts stay allowed until we self-host
+	// IBM Plex; font files load from fonts.gstatic.com.
+	header.Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self' https://fonts.gstatic.com; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com")
 	header.Set("Referrer-Policy", "no-referrer")
 	header.Set("X-Content-Type-Options", "nosniff")
 	header.Set("X-Frame-Options", "DENY")
