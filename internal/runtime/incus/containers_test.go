@@ -39,6 +39,10 @@ func TestContainerHTTPLifecycleUsesStructuredIncusAPI(t *testing.T) {
 	if created.State != runtimeapi.StateStopped || created.IsVM || created.Privileged {
 		t.Fatalf("created=%+v", created)
 	}
+	listed, err := adapter.ListInstances(context.Background())
+	if err != nil || len(listed) != 1 || listed[0].Ref != created.Ref || listed[0].Metadata[InstanceIDLabel] != "instance-1" {
+		t.Fatalf("listed=%+v err=%v", listed, err)
+	}
 	api.mu.Lock()
 	posted := api.posted
 	api.mu.Unlock()
@@ -133,6 +137,12 @@ func (a *containerAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		config["volatile.base_image"] = a.posted.Source["fingerprint"]
 		a.instance = &instanceRecord{Name: a.posted.Name, Type: a.posted.Type, Status: "Stopped", Config: config, ExpandedConfig: config}
 		writeSync(w, nil)
+	case r.Method == http.MethodGet && r.URL.Path == "/1.0/instances":
+		if a.instance == nil {
+			writeSync(w, []instanceRecord{})
+			return
+		}
+		writeSync(w, []instanceRecord{*a.instance})
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/1.0/instances/") && !strings.HasSuffix(r.URL.Path, "/state"):
 		if a.instance == nil {
 			writeError(w, http.StatusNotFound, "not found")

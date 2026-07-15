@@ -106,6 +106,7 @@ type CopyRequest struct {
 type Runtime interface {
 	DiscoverCapabilities(context.Context) (Capabilities, error)
 	ListImages(context.Context) ([]Image, error)
+	ListInstances(context.Context) ([]Instance, error)
 	InspectInstance(context.Context, string) (Instance, error)
 	CreateInstance(context.Context, CreateRequest) (Instance, error)
 	StartInstance(context.Context, string) error

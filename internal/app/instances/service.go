@@ -114,6 +114,10 @@ type CreateInput struct {
 	IdempotencyKey     string
 }
 
+type createRecoveryPayload struct {
+	OwnerPublicKey string `json:"owner_public_key"`
+}
+
 func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instance, error) {
 	if input.OwnerID == "" || input.Image == "" || input.OwnerPublicKey == "" || input.IdempotencyKey == "" {
 		return domain.Instance{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "create"}
@@ -206,6 +210,11 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 		return domain.Instance{}, err
 	}
 	operation := s.operation("instance.create", instance, input.IdempotencyKey, requestHash)
+	payload, err := json.Marshal(createRecoveryPayload{OwnerPublicKey: input.OwnerPublicKey})
+	if err != nil {
+		return domain.Instance{}, fmt.Errorf("encode create recovery payload: %w", err)
+	}
+	operation.PayloadJSON = payload
 	original, replay, err := s.repo.CreateInstance(ctx, instance, operation)
 	if err != nil {
 		return domain.Instance{}, err
@@ -245,16 +254,32 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 			return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, err)
 		}
 	}
+	createdStage := "container_created"
+	if actualIsolation == domain.IsolationVM {
+		createdStage = "vm_created"
+	}
+	if err := s.repo.UpdateOperationStage(ctx, input.OwnerID, operation.ID, createdStage, 40, s.now()); err != nil {
+		return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, err)
+	}
 	if !runtimeExists || existingRuntime.State != runtimeapi.StateRunning {
+		startStage := "starting_container"
 		if actualIsolation == domain.IsolationVM {
-			if err := s.repo.UpdateOperationStage(ctx, input.OwnerID, operation.ID, "starting_vm", 50, s.now()); err != nil {
-				return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, err)
-			}
+			startStage = "starting_vm"
+		}
+		if err := s.repo.UpdateOperationStage(ctx, input.OwnerID, operation.ID, startStage, 50, s.now()); err != nil {
+			return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, err)
 		}
 		if err := s.runtime.StartInstance(ctx, runtimeRef); err != nil {
 			s.markError(ctx, instance, err)
 			return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, fmt.Errorf("start %s: %w", imageType, err))
 		}
+	}
+	startedStage := "container_started"
+	if actualIsolation == domain.IsolationVM {
+		startedStage = "vm_started"
+	}
+	if err := s.repo.UpdateOperationStage(ctx, input.OwnerID, operation.ID, startedStage, 60, s.now()); err != nil {
+		return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, err)
 	}
 	if actualIsolation == domain.IsolationVM {
 		err := s.waitForVMReady(ctx, instance, operation)
@@ -271,6 +296,115 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 		return domain.Instance{}, err
 	}
 	return result, nil
+}
+
+// RecoverOperation resumes a durable lifecycle operation by inspecting the
+// recorded runtime identity before taking another external action.
+func (s *Service) RecoverOperation(ctx context.Context, operation domain.Operation) error {
+	ownerID := operation.OwnerID
+	id := domain.InstanceID(operation.TargetID)
+	switch operation.Type {
+	case "instance.create":
+		return s.recoverCreate(ctx, operation)
+	case "instance.start":
+		_, err := s.Start(ctx, ownerID, id, operation.IdempotencyKey)
+		return err
+	case "instance.stop":
+		_, err := s.Stop(ctx, ownerID, id, operation.IdempotencyKey)
+		return err
+	case "instance.restart":
+		_, err := s.Restart(ctx, ownerID, id, operation.IdempotencyKey)
+		return err
+	case "instance.delete":
+		return s.Delete(ctx, ownerID, id, operation.IdempotencyKey)
+	default:
+		return &domain.Error{Code: domain.CodeInvalidArgument, Field: "operation.type"}
+	}
+}
+
+func (s *Service) recoverCreate(ctx context.Context, operation domain.Operation) error {
+	release, err := s.acquireMutation(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	instance, err := s.repo.GetInstance(ctx, operation.OwnerID, domain.InstanceID(operation.TargetID))
+	if err != nil {
+		return err
+	}
+	var payload createRecoveryPayload
+	if err := json.Unmarshal(operation.PayloadJSON, &payload); err != nil || payload.OwnerPublicKey == "" {
+		return &domain.Error{Code: domain.CodeConflict, Field: "operation.payload", Cause: err}
+	}
+	runtimeInstance, exists, err := s.inspectOptional(ctx, instance.RuntimeRef)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		if operation.Stage != "runtime" && operation.Stage != "creating_container" && operation.Stage != "creating_vm" {
+			return s.recordRuntimeMissing(ctx, instance, runtimeapi.ErrNotFound)
+		}
+		stage := "creating_container"
+		if instance.ActualIsolation == domain.IsolationVM {
+			stage = "creating_vm"
+		}
+		if err := s.repo.UpdateOperationStage(ctx, instance.OwnerID, operation.ID, stage, 25, s.now()); err != nil {
+			return err
+		}
+		runtimeInstance, err = s.runtime.CreateInstance(ctx, runtimeapi.CreateRequest{
+			Ref: instance.RuntimeRef, Image: string(instance.ImageID), VM: instance.ActualIsolation == domain.IsolationVM,
+			Unprivileged: instance.ActualIsolation == domain.IsolationContainer, OwnerPublicKey: payload.OwnerPublicKey,
+			Resources: runtimeapi.Resources{VCPUs: instance.Resources.VCPUs, MemoryBytes: instance.Resources.MemoryBytes, DiskBytes: instance.Resources.DiskBytes},
+			Metadata:  managedMetadata(instance.OwnerID, instance.ID),
+		})
+		if err != nil {
+			if !errors.Is(err, runtimeapi.ErrAlreadyExists) {
+				return fmt.Errorf("recover create runtime instance: %w", err)
+			}
+			runtimeInstance, err = s.runtime.InspectInstance(ctx, instance.RuntimeRef)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	if err := verifyRuntime(runtimeInstance, instance.ID, instance.ActualIsolation); err != nil {
+		return err
+	}
+	createdStage := "container_created"
+	if instance.ActualIsolation == domain.IsolationVM {
+		createdStage = "vm_created"
+	}
+	if err := s.repo.UpdateOperationStage(ctx, instance.OwnerID, operation.ID, createdStage, 40, s.now()); err != nil {
+		return err
+	}
+	if runtimeInstance.State != runtimeapi.StateRunning {
+		startStage := "starting_container"
+		if instance.ActualIsolation == domain.IsolationVM {
+			startStage = "starting_vm"
+		}
+		if err := s.repo.UpdateOperationStage(ctx, instance.OwnerID, operation.ID, startStage, 50, s.now()); err != nil {
+			return err
+		}
+		if err := s.runtime.StartInstance(ctx, instance.RuntimeRef); err != nil {
+			return fmt.Errorf("recover start runtime instance: %w", err)
+		}
+	}
+	startedStage := "container_started"
+	if instance.ActualIsolation == domain.IsolationVM {
+		startedStage = "vm_started"
+	}
+	if err := s.repo.UpdateOperationStage(ctx, instance.OwnerID, operation.ID, startedStage, 60, s.now()); err != nil {
+		return err
+	}
+	if instance.ActualIsolation == domain.IsolationVM {
+		if err := s.waitForVMReady(ctx, instance, operation); err != nil {
+			return err
+		}
+	}
+	if _, err := s.Refresh(ctx, instance.OwnerID, instance.ID); err != nil {
+		return err
+	}
+	return s.repo.CompleteOperation(ctx, instance.OwnerID, operation.ID, s.now())
 }
 
 func (s *Service) Inspect(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID) (domain.Instance, error) {
@@ -331,9 +465,15 @@ func (s *Service) Start(ctx context.Context, ownerID domain.OwnerID, id domain.I
 		}
 	}
 	if runtimeInstance.State != runtimeapi.StateRunning {
+		if err := s.repo.UpdateOperationStage(ctx, ownerID, op.ID, "starting_instance", 25, s.now()); err != nil {
+			return domain.Instance{}, err
+		}
 		if err := s.runtime.StartInstance(ctx, instance.RuntimeRef); err != nil {
 			return domain.Instance{}, fmt.Errorf("start runtime instance: %w", err)
 		}
+	}
+	if err := s.repo.UpdateOperationStage(ctx, ownerID, op.ID, "instance_started", 60, s.now()); err != nil {
+		return domain.Instance{}, err
 	}
 	if instance.ActualIsolation == domain.IsolationVM {
 		if err := s.waitForVMReady(ctx, instance, op); err != nil {
@@ -383,9 +523,15 @@ func (s *Service) Stop(ctx context.Context, ownerID domain.OwnerID, id domain.In
 		}
 	}
 	if runtimeInstance.State == runtimeapi.StateRunning {
+		if err := s.repo.UpdateOperationStage(ctx, ownerID, op.ID, "stopping_instance", 25, s.now()); err != nil {
+			return domain.Instance{}, err
+		}
 		if err := s.runtime.StopInstance(ctx, instance.RuntimeRef); err != nil {
 			return domain.Instance{}, fmt.Errorf("stop runtime instance: %w", err)
 		}
+	}
+	if err := s.repo.UpdateOperationStage(ctx, ownerID, op.ID, "instance_stopped", 75, s.now()); err != nil {
+		return domain.Instance{}, err
 	}
 	result, err := s.Refresh(ctx, ownerID, id)
 	if err != nil {
@@ -430,6 +576,9 @@ func (s *Service) Restart(ctx context.Context, ownerID domain.OwnerID, id domain
 		}
 	}
 	if runtimeInstance.State == runtimeapi.StateRunning {
+		if err := s.repo.UpdateOperationStage(ctx, ownerID, op.ID, "restart_stopping", 20, s.now()); err != nil {
+			return domain.Instance{}, err
+		}
 		if err := s.runtime.StopInstance(ctx, instance.RuntimeRef); err != nil {
 			return domain.Instance{}, fmt.Errorf("restart stop runtime instance: %w", err)
 		}
@@ -437,11 +586,20 @@ func (s *Service) Restart(ctx context.Context, ownerID domain.OwnerID, id domain
 			return domain.Instance{}, err
 		}
 		runtimeInstance.State = runtimeapi.StateStopped
+		if err := s.repo.UpdateOperationStage(ctx, ownerID, op.ID, "restart_stopped", 35, s.now()); err != nil {
+			return domain.Instance{}, err
+		}
 	}
 	if runtimeInstance.State != runtimeapi.StateRunning {
+		if err := s.repo.UpdateOperationStage(ctx, ownerID, op.ID, "restart_starting", 50, s.now()); err != nil {
+			return domain.Instance{}, err
+		}
 		if err := s.runtime.StartInstance(ctx, instance.RuntimeRef); err != nil {
 			return domain.Instance{}, fmt.Errorf("restart start runtime instance: %w", err)
 		}
+	}
+	if err := s.repo.UpdateOperationStage(ctx, ownerID, op.ID, "restart_started", 60, s.now()); err != nil {
+		return domain.Instance{}, err
 	}
 	if instance.ActualIsolation == domain.IsolationVM {
 		if err := s.waitForVMReady(ctx, instance, op); err != nil {
@@ -497,11 +655,20 @@ func (s *Service) Delete(ctx context.Context, ownerID domain.OwnerID, id domain.
 		}
 	}
 	if exists && runtimeInstance.State == runtimeapi.StateRunning {
+		if err := s.repo.UpdateOperationStage(ctx, ownerID, op.ID, "delete_stopping", 20, s.now()); err != nil {
+			return err
+		}
 		if err := s.runtime.StopInstance(ctx, instance.RuntimeRef); err != nil {
 			return fmt.Errorf("stop runtime instance for deletion: %w", err)
 		}
+		if err := s.repo.UpdateOperationStage(ctx, ownerID, op.ID, "delete_stopped", 35, s.now()); err != nil {
+			return err
+		}
 	}
 	if exists {
+		if err := s.repo.UpdateOperationStage(ctx, ownerID, op.ID, "deleting_runtime", 60, s.now()); err != nil {
+			return err
+		}
 		if err := s.runtime.DeleteInstance(ctx, instance.RuntimeRef); err != nil && !errors.Is(err, runtimeapi.ErrNotFound) {
 			return fmt.Errorf("delete runtime instance: %w", err)
 		}
@@ -515,6 +682,9 @@ func (s *Service) Delete(ctx context.Context, ownerID domain.OwnerID, id domain.
 			return identityErr
 		}
 		return fmt.Errorf("runtime resource %q still exists after deletion", instance.RuntimeRef)
+	}
+	if err := s.repo.UpdateOperationStage(ctx, ownerID, op.ID, "runtime_deleted", 80, s.now()); err != nil {
+		return err
 	}
 	if err := s.repo.UpdateInstanceObservation(ctx, ownerID, id, instance.RuntimeRef, instance.ActualIsolation, domain.ObservedDeleted, "", s.now()); err != nil {
 		return err
@@ -757,6 +927,11 @@ func verifyRuntime(instance runtimeapi.Instance, expected domain.InstanceID, iso
 		return &CapabilityError{Capability: "actual_isolation", Reason: string(isolation)}
 	}
 	return nil
+}
+
+// VerifyRuntimeIdentity rejects replacement resources and isolation drift.
+func VerifyRuntimeIdentity(instance runtimeapi.Instance, expected domain.InstanceID, isolation domain.IsolationType) error {
+	return verifyRuntime(instance, expected, isolation)
 }
 
 func observedState(state runtimeapi.InstanceState) (domain.ObservedState, error) {

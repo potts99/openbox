@@ -71,6 +71,26 @@ func (a *Adapter) InspectInstance(ctx context.Context, ref string) (runtimeapi.I
 	if err != nil {
 		return runtimeapi.Instance{}, fmt.Errorf("inspect Incus instance: %w", err)
 	}
+	return runtimeInstance(record)
+}
+
+func (a *Adapter) ListInstances(ctx context.Context) ([]runtimeapi.Instance, error) {
+	var records []instanceRecord
+	if err := a.request(ctx, http.MethodGet, "/1.0/instances", url.Values{"project": {a.project}, "recursion": {"1"}}, nil, &records); err != nil {
+		return nil, fmt.Errorf("list Incus instances: %w", err)
+	}
+	result := make([]runtimeapi.Instance, 0, len(records))
+	for _, record := range records {
+		instance, err := runtimeInstance(record)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, instance)
+	}
+	return result, nil
+}
+
+func runtimeInstance(record instanceRecord) (runtimeapi.Instance, error) {
 	state, err := incusState(record.Status)
 	if err != nil {
 		return runtimeapi.Instance{}, err

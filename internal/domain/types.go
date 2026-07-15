@@ -208,7 +208,28 @@ type Operation struct {
 	ErrorCode            ErrorCode
 	IdempotencyKey       string
 	RequestHash          string
+	PayloadJSON          []byte
+	Attempts             int
+	NextAttemptAt        *time.Time
+	ClaimedBy            string
+	ClaimToken           string
+	ClaimExpiresAt       *time.Time
+	ErrorClass           string
 	CreatedAt, UpdatedAt time.Time
+}
+
+type OperationEvent struct {
+	ID           int64
+	OwnerID      OwnerID
+	OperationID  OperationID
+	Sequence     int
+	Stage        string
+	Status       OperationStatus
+	ErrorClass   string
+	ErrorCode    ErrorCode
+	Message      string
+	MetadataJSON []byte
+	CreatedAt    time.Time
 }
 
 type AuditEvent struct {

@@ -113,6 +113,24 @@ func (r *Runtime) InspectInstance(ctx context.Context, ref string) (runtimeapi.I
 	return cloneInstance(instance), nil
 }
 
+func (r *Runtime) ListInstances(ctx context.Context) ([]runtimeapi.Instance, error) {
+	if err := r.begin(ctx, "instances.list"); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	refs := make([]string, 0, len(r.instances))
+	for ref := range r.instances {
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+	result := make([]runtimeapi.Instance, 0, len(refs))
+	for _, ref := range refs {
+		result = append(result, cloneInstance(r.instances[ref]))
+	}
+	return result, nil
+}
+
 func (r *Runtime) CreateInstance(ctx context.Context, request runtimeapi.CreateRequest) (runtimeapi.Instance, error) {
 	if err := r.begin(ctx, "instance.create"); err != nil {
 		return runtimeapi.Instance{}, err

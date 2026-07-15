@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/openbox-dev/openbox/internal/domain"
+	"github.com/openbox-dev/openbox/internal/operations"
 )
 
 func (s *Store) CreateOwner(ctx context.Context, owner domain.Owner) error {
@@ -112,24 +113,36 @@ func (s *Store) GetInstance(ctx context.Context, ownerID domain.OwnerID, id doma
 	return scanInstance(row)
 }
 
+// ListInstances returns all non-tombstoned durable instances for reconciliation.
+func (s *Store) ListInstances(ctx context.Context) ([]domain.Instance, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id,owner_id,name,kind,COALESCE(image_id,''),requested_isolation,actual_isolation,
+		desired_state,observed_state,vcpus,memory_bytes,disk_bytes,expires_at,protected,runtime_ref,error_code,error_stage,
+		error_retryable,created_at,updated_at,deleted_at FROM instances WHERE deleted_at IS NULL ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("list instances: %w", err)
+	}
+	defer rows.Close()
+	result := make([]domain.Instance, 0)
+	for rows.Next() {
+		instance, err := scanInstance(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, instance)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list instances: %w", err)
+	}
+	return result, nil
+}
+
 func (s *Store) GetOperationByIdempotency(ctx context.Context, ownerID domain.OwnerID, key string) (domain.Operation, bool, error) {
-	var op domain.Operation
-	var created, updated string
-	err := s.db.QueryRowContext(ctx, `SELECT id,owner_id,type,target_type,target_id,status,stage,progress,error_code,idempotency_key,request_hash,created_at,updated_at FROM operations WHERE owner_id=? AND idempotency_key=?`, ownerID, key).Scan(
-		&op.ID, &op.OwnerID, &op.Type, &op.TargetType, &op.TargetID, &op.Status, &op.Stage, &op.Progress, &op.ErrorCode, &op.IdempotencyKey, &op.RequestHash, &created, &updated)
+	op, err := scanOperation(s.db.QueryRowContext(ctx, operationColumns+` WHERE owner_id=? AND idempotency_key=?`, ownerID, key))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Operation{}, false, nil
 	}
 	if err != nil {
 		return domain.Operation{}, false, fmt.Errorf("find idempotent operation: %w", err)
-	}
-	op.CreatedAt, err = parseTime(created)
-	if err != nil {
-		return domain.Operation{}, false, err
-	}
-	op.UpdatedAt, err = parseTime(updated)
-	if err != nil {
-		return domain.Operation{}, false, err
 	}
 	return op, true, nil
 }
@@ -140,16 +153,27 @@ func (s *Store) CompleteOperation(ctx context.Context, ownerID domain.OwnerID, i
 		return err
 	}
 	defer release()
-	result, err := s.db.ExecContext(ctx, `UPDATE operations SET status=?,stage='complete',progress=100,updated_at=? WHERE owner_id=? AND id=? AND status IN (?,?)`,
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := enforceClaimTx(ctx, tx, ownerID, "", id); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE operations SET status=?,stage='complete',progress=100,error_code='',next_attempt_at=NULL,claimed_by='',claim_token='',claim_expires_at=NULL,error_class='',updated_at=? WHERE owner_id=? AND id=? AND status IN (?,?)`,
 		domain.OperationSucceeded, formatTime(completedAt), ownerID, id, domain.OperationPending, domain.OperationRunning)
 	if err != nil {
 		return mapWriteError(err)
 	}
 	if count, _ := result.RowsAffected(); count == 1 {
-		return nil
+		if err := appendOperationEventTx(ctx, tx, ownerID, id, "complete", domain.OperationSucceeded, "", "", "", nil, completedAt); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	var status domain.OperationStatus
-	if err := s.db.QueryRowContext(ctx, `SELECT status FROM operations WHERE owner_id=? AND id=?`, ownerID, id).Scan(&status); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM operations WHERE owner_id=? AND id=?`, ownerID, id).Scan(&status); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return &domain.Error{Code: domain.CodeNotFound, Field: "operation"}
 		}
@@ -170,7 +194,15 @@ func (s *Store) UpdateOperationStage(ctx context.Context, ownerID domain.OwnerID
 		return err
 	}
 	defer release()
-	result, err := s.db.ExecContext(ctx, `UPDATE operations SET status=?,stage=?,progress=?,updated_at=? WHERE owner_id=? AND id=? AND status IN (?,?)`,
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := enforceClaimTx(ctx, tx, ownerID, "", id); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE operations SET status=?,stage=?,progress=?,updated_at=? WHERE owner_id=? AND id=? AND status IN (?,?)`,
 		domain.OperationRunning, stage, progress, formatTime(updatedAt), ownerID, id, domain.OperationPending, domain.OperationRunning)
 	if err != nil {
 		return mapWriteError(err)
@@ -178,7 +210,10 @@ func (s *Store) UpdateOperationStage(ctx context.Context, ownerID domain.OwnerID
 	if count, _ := result.RowsAffected(); count != 1 {
 		return &domain.Error{Code: domain.CodeConflict, Field: "operation.status"}
 	}
-	return nil
+	if err := appendOperationEventTx(ctx, tx, ownerID, id, stage, domain.OperationRunning, "", "", "", nil, updatedAt); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // UpdateInstanceObservation persists runtime facts while preventing runtime
@@ -194,6 +229,9 @@ func (s *Store) UpdateInstanceObservation(ctx context.Context, ownerID domain.Ow
 		return fmt.Errorf("begin observation update: %w", err)
 	}
 	defer tx.Rollback()
+	if err := enforceClaimTx(ctx, tx, ownerID, string(id), ""); err != nil {
+		return err
+	}
 	current, err := getInstanceTx(ctx, tx, ownerID, id)
 	if err != nil {
 		return err
@@ -246,6 +284,9 @@ func (s *Store) FinalizeInstanceDeletion(ctx context.Context, ownerID domain.Own
 		return fmt.Errorf("begin deletion finalization: %w", err)
 	}
 	defer tx.Rollback()
+	if err := enforceClaimTx(ctx, tx, ownerID, string(id), operationID); err != nil {
+		return err
+	}
 	i, err := getInstanceTx(ctx, tx, ownerID, id)
 	if err != nil {
 		return err
@@ -266,13 +307,16 @@ func (s *Store) FinalizeInstanceDeletion(ctx context.Context, ownerID domain.Own
 	if operationOwner != string(ownerID) || targetType != "instance" || targetID != string(id) {
 		return &domain.Error{Code: domain.CodeInvalidArgument, Field: "operation.target"}
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE operations SET status=?,stage='complete',progress=100,updated_at=? WHERE owner_id=? AND id=? AND status IN (?,?)`,
+	result, err := tx.ExecContext(ctx, `UPDATE operations SET status=?,stage='complete',progress=100,error_code='',next_attempt_at=NULL,claimed_by='',claim_token='',claim_expires_at=NULL,error_class='',updated_at=? WHERE owner_id=? AND id=? AND status IN (?,?)`,
 		domain.OperationSucceeded, formatTime(deletedAt), ownerID, operationID, domain.OperationPending, domain.OperationRunning)
 	if err != nil {
 		return mapWriteError(err)
 	}
 	if count, _ := result.RowsAffected(); count != 1 {
 		return &domain.Error{Code: domain.CodeConflict, Field: "operation.status"}
+	}
+	if err := appendOperationEventTx(ctx, tx, ownerID, operationID, "complete", domain.OperationSucceeded, "", "", "", nil, deletedAt); err != nil {
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO instance_tombstones(instance_id,owner_id,name,operation_id,deleted_at) VALUES(?,?,?,?,?)`, id, ownerID, i.Name, operationID, formatTime(deletedAt)); err != nil {
 		return mapWriteError(err)
@@ -295,6 +339,9 @@ func (s *Store) UpdateInstanceState(ctx context.Context, ownerID domain.OwnerID,
 		return fmt.Errorf("begin state update: %w", err)
 	}
 	defer tx.Rollback()
+	if err := enforceClaimTx(ctx, tx, ownerID, string(id), operation.ID); err != nil {
+		return err
+	}
 	current, err := getInstanceTx(ctx, tx, ownerID, id)
 	if err != nil {
 		return err
@@ -368,8 +415,12 @@ func insertOperation(ctx context.Context, tx *sql.Tx, op domain.Operation) error
 	if err := domain.ValidateOperation(op); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO operations(id,owner_id,type,target_type,target_id,status,stage,progress,error_code,idempotency_key,request_hash,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		op.ID, op.OwnerID, op.Type, op.TargetType, op.TargetID, op.Status, op.Stage, op.Progress, op.ErrorCode, op.IdempotencyKey, op.RequestHash, formatTime(op.CreatedAt), formatTime(op.UpdatedAt))
+	payload := op.PayloadJSON
+	if len(payload) == 0 {
+		payload = []byte("{}")
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO operations(id,owner_id,type,target_type,target_id,status,stage,progress,error_code,idempotency_key,request_hash,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		op.ID, op.OwnerID, op.Type, op.TargetType, op.TargetID, op.Status, op.Stage, op.Progress, op.ErrorCode, op.IdempotencyKey, op.RequestHash, payload, formatTime(op.CreatedAt), formatTime(op.UpdatedAt))
 	return mapWriteError(err)
 }
 
@@ -411,25 +462,39 @@ func getInstanceTx(ctx context.Context, tx *sql.Tx, ownerID domain.OwnerID, id d
 }
 
 func findOperationByIdempotency(ctx context.Context, tx *sql.Tx, ownerID domain.OwnerID, key string) (domain.Operation, bool, error) {
-	var op domain.Operation
-	var created, updated string
-	err := tx.QueryRowContext(ctx, `SELECT id,owner_id,type,target_type,target_id,status,stage,progress,error_code,idempotency_key,request_hash,created_at,updated_at FROM operations WHERE owner_id=? AND idempotency_key=?`, ownerID, key).Scan(
-		&op.ID, &op.OwnerID, &op.Type, &op.TargetType, &op.TargetID, &op.Status, &op.Stage, &op.Progress, &op.ErrorCode, &op.IdempotencyKey, &op.RequestHash, &created, &updated)
+	op, err := scanOperation(tx.QueryRowContext(ctx, operationColumns+` WHERE owner_id=? AND idempotency_key=?`, ownerID, key))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Operation{}, false, nil
 	}
 	if err != nil {
 		return domain.Operation{}, false, fmt.Errorf("find idempotent operation: %w", err)
 	}
-	op.CreatedAt, err = parseTime(created)
-	if err != nil {
-		return domain.Operation{}, false, err
-	}
-	op.UpdatedAt, err = parseTime(updated)
-	if err != nil {
-		return domain.Operation{}, false, err
-	}
 	return op, true, nil
+}
+
+const operationColumns = `SELECT id,owner_id,type,target_type,target_id,status,stage,progress,error_code,idempotency_key,request_hash,payload_json,attempts,next_attempt_at,claimed_by,claim_token,claim_expires_at,error_class,created_at,updated_at FROM operations`
+
+func scanOperation(row rowScanner) (domain.Operation, error) {
+	var op domain.Operation
+	var nextAttempt, claimExpires sql.NullString
+	var created, updated string
+	err := row.Scan(&op.ID, &op.OwnerID, &op.Type, &op.TargetType, &op.TargetID, &op.Status, &op.Stage, &op.Progress, &op.ErrorCode, &op.IdempotencyKey, &op.RequestHash, &op.PayloadJSON, &op.Attempts, &nextAttempt, &op.ClaimedBy, &op.ClaimToken, &claimExpires, &op.ErrorClass, &created, &updated)
+	if err != nil {
+		return domain.Operation{}, err
+	}
+	if op.CreatedAt, err = parseTime(created); err != nil {
+		return domain.Operation{}, err
+	}
+	if op.UpdatedAt, err = parseTime(updated); err != nil {
+		return domain.Operation{}, err
+	}
+	if op.NextAttemptAt, err = parseNullableTime(nextAttempt); err != nil {
+		return domain.Operation{}, err
+	}
+	if op.ClaimExpiresAt, err = parseNullableTime(claimExpires); err != nil {
+		return domain.Operation{}, err
+	}
+	return op, nil
 }
 
 func mapWriteError(err error) error {
@@ -443,4 +508,24 @@ func mapWriteError(err error) error {
 		return &domain.Error{Code: domain.CodeInvalidArgument, Field: "foreign_key", Cause: err}
 	}
 	return err
+}
+
+func enforceClaimTx(ctx context.Context, tx *sql.Tx, ownerID domain.OwnerID, targetID string, operationID domain.OperationID) error {
+	claim, fenced := operations.ClaimFromContext(ctx)
+	if !fenced {
+		return nil
+	}
+	if claim.OwnerID != ownerID || (operationID != "" && claim.OperationID != operationID) {
+		return &domain.Error{Code: domain.CodeConflict, Field: "operation.claim"}
+	}
+	var worker, token, storedTarget string
+	var status domain.OperationStatus
+	err := tx.QueryRowContext(ctx, `SELECT claimed_by,claim_token,status,target_id FROM operations WHERE owner_id=? AND id=?`, claim.OwnerID, claim.OperationID).Scan(&worker, &token, &status, &storedTarget)
+	if err != nil {
+		return err
+	}
+	if worker != claim.WorkerID || token != claim.Token || status != domain.OperationRunning || (targetID != "" && storedTarget != targetID) {
+		return &domain.Error{Code: domain.CodeConflict, Field: "operation.claim"}
+	}
+	return nil
 }
