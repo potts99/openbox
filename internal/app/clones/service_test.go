@@ -58,10 +58,13 @@ func TestSubmitCopyRecordsProvenanceAndVerifiesIdentity(t *testing.T) {
 	}
 }
 
-func TestSubmitCopyWarnsForFullCopyAndPersonalDevboxSecrets(t *testing.T) {
+func TestSubmitCopyWarnsForFullCopyAndPersonalPiSecrets(t *testing.T) {
 	t.Parallel()
 	svc, runtime, repo := newTestService(t, runtimeapi.Capabilities{Architecture: "x86_64", Containers: true, StorageDrivers: []string{"dir"}})
 	source := seedRunning(t, repo, runtime, "inst-source", "personal", "sha256:ubuntu", false)
+	repo.software[source.ID] = []domain.InstanceSoftware{{
+		InstanceID: source.ID, OwnerID: source.OwnerID, PackageID: "pi", Status: domain.SoftwareInstalled,
+	}}
 
 	result, err := svc.SubmitCopy(context.Background(), clones.CopyInput{
 		OwnerID: source.OwnerID, Source: "personal", Destination: "scratch", IdempotencyKey: "cp-warn",
@@ -156,12 +159,17 @@ func TestStorageEfficientCopyDrivers(t *testing.T) {
 type memoryRepo struct {
 	instances map[domain.InstanceID]domain.Instance
 	ops       map[string]domain.Operation
+	software  map[domain.InstanceID][]domain.InstanceSoftware
 }
 
 func newTestService(t *testing.T, capabilities runtimeapi.Capabilities) (*clones.Service, *fake.Runtime, *memoryRepo) {
 	t.Helper()
 	runtime := fake.New(capabilities)
-	repo := &memoryRepo{instances: map[domain.InstanceID]domain.Instance{}, ops: map[string]domain.Operation{}}
+	repo := &memoryRepo{
+		instances: map[domain.InstanceID]domain.Instance{},
+		ops:       map[string]domain.Operation{},
+		software:  map[domain.InstanceID][]domain.InstanceSoftware{},
+	}
 	n := 0
 	svc, err := clones.New(runtime, repo, clones.Options{
 		Now: func() time.Time { return time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC) },
@@ -277,4 +285,11 @@ func (m *memoryRepo) UpdateOperationStage(_ context.Context, owner domain.OwnerI
 	op.Stage, op.Progress, op.UpdatedAt = stage, progress, at
 	m.ops[string(id)] = op
 	return nil
+}
+func (m *memoryRepo) ListInstanceSoftware(_ context.Context, owner domain.OwnerID, id domain.InstanceID) ([]domain.InstanceSoftware, error) {
+	instance, ok := m.instances[id]
+	if !ok || instance.OwnerID != owner {
+		return nil, &domain.Error{Code: domain.CodeNotFound, Field: "instance"}
+	}
+	return append([]domain.InstanceSoftware(nil), m.software[id]...), nil
 }

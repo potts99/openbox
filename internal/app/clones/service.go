@@ -24,8 +24,9 @@ const (
 
 	// WarningFullCopy is reported before execution when storage lacks CoW.
 	WarningFullCopy = "storage does not provide copy-on-write; OpenBox will use a full copy and will not claim copy-on-write behavior"
-	// WarningSecrets is reported when cloning an unprotected VPS that may retain guest secrets.
-	WarningSecrets = "source VPS is not a protected base; cloned guest files may include secrets"
+	// WarningSecrets is reported when cloning an unprotected VPS that has Pi
+	// (or other guest-persisted agent state) installed.
+	WarningSecrets = "source has installed software that may retain secrets; cloned guest files may include them"
 )
 
 // CloneRuntime is the narrow runtime boundary used for efficient copies.
@@ -44,6 +45,7 @@ type Repository interface {
 	GetOperationByIdempotency(context.Context, domain.OwnerID, string) (domain.Operation, bool, error)
 	CompleteOperation(context.Context, domain.OwnerID, domain.OperationID, time.Time) error
 	UpdateOperationStage(context.Context, domain.OwnerID, domain.OperationID, string, int, time.Time) error
+	ListInstanceSoftware(context.Context, domain.OwnerID, domain.InstanceID) ([]domain.InstanceSoftware, error)
 }
 
 // Options configures clocks and ID generation.
@@ -141,8 +143,17 @@ func (s *Service) SubmitCopy(ctx context.Context, input CopyInput) (SubmitResult
 	if !StorageEfficientCopy(capabilities.StorageDrivers) {
 		warnings = append(warnings, WarningFullCopy)
 	}
-	if source.Kind == domain.KindVPS && !source.Protected {
-		warnings = append(warnings, WarningSecrets)
+	if !source.Protected {
+		rows, listErr := s.repo.ListInstanceSoftware(ctx, source.OwnerID, source.ID)
+		if listErr != nil {
+			return SubmitResult{}, listErr
+		}
+		for _, row := range rows {
+			if row.PackageID == "pi" && (row.Status == domain.SoftwareInstalled || row.Status == domain.SoftwareFailed || row.Status == domain.SoftwarePending) {
+				warnings = append(warnings, WarningSecrets)
+				break
+			}
+		}
 	}
 	now := s.now().UTC()
 	clone, err := domain.NewInstance(domain.InstanceID(s.newID()), input.OwnerID, input.Destination, source.Kind, now)
