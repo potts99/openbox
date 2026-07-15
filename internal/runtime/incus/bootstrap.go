@@ -71,9 +71,12 @@ func (a *Adapter) Bootstrap(ctx context.Context, config BootstrapConfig) error {
 	if err := a.requireStoragePool(ctx, config.StoragePool); err != nil {
 		return err
 	}
+	// Keep features.networks=false so the managed bridge lives in the default
+	// project. Ubuntu's Incus packages (and some host builds) reject bridge
+	// networks in non-default projects unless OVN is installed.
 	project := resource{
 		Name: config.Project, Description: "OpenBox managed project",
-		Config: managedConfig("project", map[string]string{"features.images": "false", "features.networks": "true", "features.profiles": "true"}),
+		Config: managedConfig("project", map[string]string{"features.images": "false", "features.networks": "false", "features.profiles": "true"}),
 	}
 	projectExists, err := a.checkExisting(ctx, "project", "/1.0/projects/"+url.PathEscape(config.Project), nil, project)
 	if err != nil {
@@ -83,14 +86,15 @@ func (a *Adapter) Bootstrap(ctx context.Context, config BootstrapConfig) error {
 	if projectExists {
 		checks := []struct {
 			kind, path string
+			query      url.Values
 			value      resource
 		}{
-			{kind: "network", path: "/1.0/networks/" + url.PathEscape(config.Network), value: networkResource(config)},
-			{kind: "profile", path: "/1.0/profiles/" + url.PathEscape(config.ContainerProfile), value: profileResource(config.ContainerProfile, "container-profile", config)},
-			{kind: "profile", path: "/1.0/profiles/" + url.PathEscape(config.VMProfile), value: profileResource(config.VMProfile, "vm-profile", config)},
+			{kind: "network", path: "/1.0/networks/" + url.PathEscape(config.Network), query: nil, value: networkResource(config)},
+			{kind: "profile", path: "/1.0/profiles/" + url.PathEscape(config.ContainerProfile), query: projectQuery, value: profileResource(config.ContainerProfile, "container-profile", config)},
+			{kind: "profile", path: "/1.0/profiles/" + url.PathEscape(config.VMProfile), query: projectQuery, value: profileResource(config.VMProfile, "vm-profile", config)},
 		}
 		for _, check := range checks {
-			if _, err := a.checkExisting(ctx, check.kind, check.path, projectQuery, check.value); err != nil {
+			if _, err := a.checkExisting(ctx, check.kind, check.path, check.query, check.value); err != nil {
 				return err
 			}
 		}
@@ -99,7 +103,7 @@ func (a *Adapter) Bootstrap(ctx context.Context, config BootstrapConfig) error {
 		return err
 	}
 	network := networkResource(config)
-	if err := a.ensure(ctx, "network", "/1.0/networks/"+url.PathEscape(config.Network), "/1.0/networks", projectQuery, network); err != nil {
+	if err := a.ensure(ctx, "network", "/1.0/networks/"+url.PathEscape(config.Network), "/1.0/networks", nil, network); err != nil {
 		return err
 	}
 	for _, profile := range []struct {
@@ -165,7 +169,13 @@ func requiredDrift(existing, desired resource) []string {
 		fields = append(fields, "type")
 	}
 	for key, wanted := range desired.Config {
-		if existing.Config[key] != wanted {
+		existingValue := existing.Config[key]
+		// Incus expands ipv4.address=auto (and similar) to a concrete value after
+		// create; treat that expansion as matching the desired intent.
+		if wanted == "auto" && existingValue != "" && existingValue != "none" {
+			continue
+		}
+		if existingValue != wanted {
 			fields = append(fields, "config."+key)
 		}
 	}
