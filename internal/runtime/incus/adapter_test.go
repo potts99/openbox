@@ -620,6 +620,43 @@ func TestApplyNetworkPolicyUpdatesInstanceNICACLs(t *testing.T) {
 	}
 }
 
+func TestNetworkPolicyStatusReportsEffectiveACLsAndApplyFailures(t *testing.T) {
+	socket := serveUnixHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeSync(w, instanceRecord{
+				Name: "instance-1", Type: "container", Status: "Stopped",
+				Devices: map[string]map[string]string{"eth0": {"type": "nic", "network": "openbox0", "name": "eth0"}},
+			})
+		case http.MethodPatch:
+			writeError(w, http.StatusInternalServerError, "policy backend unavailable")
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	}))
+	adapter, err := New(Options{SocketPath: socket})
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance := domain.Instance{ID: "instance-1", RuntimeRef: "instance-1", EgressMode: domain.EgressRestricted}
+
+	before := adapter.NetworkPolicyStatus(instance)
+	if before.Resolution.State != "idle" || len(before.Resolution.Resolved) != 0 {
+		t.Fatalf("resolution before apply = %#v, want idle with no resolved hostnames", before.Resolution)
+	}
+	if got, want := before.ACLs, []string{DefaultDenyACLName}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ACLs before apply = %#v, want %#v", got, want)
+	}
+
+	if err := adapter.ApplyNetworkPolicy(context.Background(), instance); err == nil {
+		t.Fatal("ApplyNetworkPolicy succeeded despite ACL update failure")
+	}
+	after := adapter.NetworkPolicyStatus(instance)
+	if after.DeniedFlows != 1 {
+		t.Fatalf("denied flows = %d, want 1", after.DeniedFlows)
+	}
+}
+
 func cleanupIntegrationResources(adapter *Adapter, config BootstrapConfig) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

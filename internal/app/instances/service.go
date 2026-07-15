@@ -47,6 +47,12 @@ type NetworkPolicy interface {
 	RemoveNetworkPolicy(context.Context, domain.Instance) error
 }
 
+// NetworkPolicyStatusProvider supplies non-payload policy observability for
+// instance inspect and status responses.
+type NetworkPolicyStatusProvider interface {
+	NetworkPolicyStatus(domain.Instance) domain.NetworkPolicyStatus
+}
+
 // ContainerRuntime is retained as a source-compatible name for slice 03 callers.
 type ContainerRuntime = InstanceRuntime
 
@@ -449,11 +455,22 @@ func (s *Service) ListImages(ctx context.Context, ownerID domain.OwnerID) ([]dom
 }
 
 func (s *Service) ListInstances(ctx context.Context, ownerID domain.OwnerID) ([]domain.Instance, error) {
-	return s.repo.ListInstancesByOwner(ctx, ownerID, 100)
+	instances, err := s.repo.ListInstancesByOwner(ctx, ownerID, 100)
+	if err != nil {
+		return nil, err
+	}
+	for index := range instances {
+		instances[index] = s.withNetworkPolicyStatus(instances[index])
+	}
+	return instances, nil
 }
 
 func (s *Service) GetInstance(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID) (domain.Instance, error) {
-	return s.repo.GetInstance(ctx, ownerID, id)
+	instance, err := s.repo.GetInstance(ctx, ownerID, id)
+	if err != nil {
+		return domain.Instance{}, err
+	}
+	return s.withNetworkPolicyStatus(instance), nil
 }
 
 func (s *Service) GetOperation(ctx context.Context, ownerID domain.OwnerID, id domain.OperationID) (domain.Operation, error) {
@@ -802,7 +819,11 @@ func (s *Service) Refresh(ctx context.Context, ownerID domain.OwnerID, id domain
 	if err := s.syncObserved(ctx, instance, target); err != nil {
 		return domain.Instance{}, err
 	}
-	return s.repo.GetInstance(ctx, ownerID, id)
+	refreshed, err := s.repo.GetInstance(ctx, ownerID, id)
+	if err != nil {
+		return domain.Instance{}, err
+	}
+	return s.withNetworkPolicyStatus(refreshed), nil
 }
 
 func (s *Service) Start(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID, key string) (domain.Instance, error) {
@@ -1217,6 +1238,15 @@ func (s *Service) applyNetworkPolicy(ctx context.Context, instance domain.Instan
 		return nil
 	}
 	return s.networkPolicy.ApplyNetworkPolicy(ctx, instance)
+}
+
+func (s *Service) withNetworkPolicyStatus(instance domain.Instance) domain.Instance {
+	provider, ok := s.networkPolicy.(NetworkPolicyStatusProvider)
+	if !ok {
+		return instance
+	}
+	instance.NetworkPolicy = provider.NetworkPolicyStatus(instance)
+	return instance
 }
 
 func (s *Service) removeNetworkPolicy(ctx context.Context, instance domain.Instance) error {

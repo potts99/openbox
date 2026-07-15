@@ -14,6 +14,14 @@ const (
 	CookieAuthScopes = "cookieAuth.Scopes"
 )
 
+// Defines values for AllowlistResolutionState.
+const (
+	AllowlistResolutionStateFailed   AllowlistResolutionState = "failed"
+	AllowlistResolutionStateIdle     AllowlistResolutionState = "idle"
+	AllowlistResolutionStatePending  AllowlistResolutionState = "pending"
+	AllowlistResolutionStateResolved AllowlistResolutionState = "resolved"
+)
+
 // Defines values for CreateInstanceRequestKind.
 const (
 	CreateInstanceRequestKindDevbox  CreateInstanceRequestKind = "devbox"
@@ -88,6 +96,12 @@ const (
 	InstanceRequestedIsolationStrong        InstanceRequestedIsolation = "strong"
 )
 
+// Defines values for NetworkPolicyStatusEgressMode.
+const (
+	Restricted NetworkPolicyStatusEgressMode = "restricted"
+	Standard   NetworkPolicyStatusEgressMode = "standard"
+)
+
 // Defines values for OperationStatus.
 const (
 	OperationStatusFailed    OperationStatus = "failed"
@@ -98,10 +112,10 @@ const (
 
 // Defines values for OperationEventStatus.
 const (
-	OperationEventStatusFailed    OperationEventStatus = "failed"
-	OperationEventStatusPending   OperationEventStatus = "pending"
-	OperationEventStatusRunning   OperationEventStatus = "running"
-	OperationEventStatusSucceeded OperationEventStatus = "succeeded"
+	Failed    OperationEventStatus = "failed"
+	Pending   OperationEventStatus = "pending"
+	Running   OperationEventStatus = "running"
+	Succeeded OperationEventStatus = "succeeded"
 )
 
 // Defines values for RouteVisibility.
@@ -119,6 +133,17 @@ const (
 const (
 	APIVersionV1 APIVersion = "v1"
 )
+
+// AllowlistResolution Hostname resolution state. Resolved DNS addresses are not exposed.
+type AllowlistResolution struct {
+	Failed   []string                 `json:"failed"`
+	Pending  []string                 `json:"pending"`
+	Resolved []string                 `json:"resolved"`
+	State    AllowlistResolutionState `json:"state"`
+}
+
+// AllowlistResolutionState defines model for AllowlistResolution.State.
+type AllowlistResolutionState string
 
 // BootstrapRequest defines model for BootstrapRequest.
 type BootstrapRequest struct {
@@ -261,17 +286,20 @@ type Image struct {
 
 // Instance defines model for Instance.
 type Instance struct {
-	ActualIsolation    InstanceActualIsolation    `json:"actual_isolation"`
-	CreatedAt          time.Time                  `json:"created_at"`
-	DesiredState       InstanceDesiredState       `json:"desired_state"`
-	ErrorCode          *string                    `json:"error_code,omitempty"`
-	ErrorRetryable     *bool                      `json:"error_retryable,omitempty"`
-	ErrorStage         *string                    `json:"error_stage,omitempty"`
-	ExpiresAt          *time.Time                 `json:"expires_at"`
-	Id                 string                     `json:"id"`
-	ImageId            string                     `json:"image_id"`
-	Kind               InstanceKind               `json:"kind"`
-	Name               string                     `json:"name"`
+	ActualIsolation InstanceActualIsolation `json:"actual_isolation"`
+	CreatedAt       time.Time               `json:"created_at"`
+	DesiredState    InstanceDesiredState    `json:"desired_state"`
+	ErrorCode       *string                 `json:"error_code,omitempty"`
+	ErrorRetryable  *bool                   `json:"error_retryable,omitempty"`
+	ErrorStage      *string                 `json:"error_stage,omitempty"`
+	ExpiresAt       *time.Time              `json:"expires_at"`
+	Id              string                  `json:"id"`
+	ImageId         string                  `json:"image_id"`
+	Kind            InstanceKind            `json:"kind"`
+	Name            string                  `json:"name"`
+
+	// NetworkPolicy Effective host-enforced network policy metadata without packet or DNS-answer payloads.
+	NetworkPolicy      NetworkPolicyStatus        `json:"network_policy"`
 	ObservedState      InstanceObservedState      `json:"observed_state"`
 	Protected          bool                       `json:"protected"`
 	RequestedIsolation InstanceRequestedIsolation `json:"requested_isolation"`
@@ -328,6 +356,19 @@ type ListTokensResponse struct {
 type LoginRequest struct {
 	Password *string `json:"password,omitempty"`
 }
+
+// NetworkPolicyStatus Effective host-enforced network policy metadata without packet or DNS-answer payloads.
+type NetworkPolicyStatus struct {
+	Acls        []string                      `json:"acls"`
+	DeniedFlows int64                         `json:"denied_flows"`
+	EgressMode  NetworkPolicyStatusEgressMode `json:"egress_mode"`
+
+	// Resolution Hostname resolution state. Resolved DNS addresses are not exposed.
+	Resolution AllowlistResolution `json:"resolution"`
+}
+
+// NetworkPolicyStatusEgressMode defines model for NetworkPolicyStatus.EgressMode.
+type NetworkPolicyStatusEgressMode string
 
 // Operation defines model for Operation.
 type Operation struct {

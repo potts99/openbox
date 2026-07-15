@@ -21,6 +21,13 @@ export interface InstanceSummary {
   status: string;
 }
 
+export interface NetworkPolicyStatus {
+  egressMode: string;
+  acls: string[];
+  resolutionState: string;
+  deniedFlows: number;
+}
+
 export interface InstanceDetail {
   id: string;
   name: string;
@@ -39,6 +46,7 @@ export interface InstanceDetail {
   expiresAt?: string;
   errorCode?: string;
   errorStage?: string;
+  networkPolicy: NetworkPolicyStatus;
 }
 
 export interface OperationSummary {
@@ -118,6 +126,8 @@ function number(value: unknown, fallback = 0): number {
 function normalizeInstance(value: unknown): InstanceDetail {
   const row = asRecord(value);
   const resources = asRecord(row.resources);
+  const networkPolicy = asRecord(row.network_policy);
+  const resolution = asRecord(networkPolicy.resolution);
   return {
     id: text(row.id),
     name: text(row.name),
@@ -136,6 +146,12 @@ function normalizeInstance(value: unknown): InstanceDetail {
     expiresAt: text(row.expires_at) || undefined,
     errorCode: text(row.error_code) || undefined,
     errorStage: text(row.error_stage) || undefined,
+    networkPolicy: {
+      egressMode: text(networkPolicy.egress_mode),
+      acls: Array.isArray(networkPolicy.acls) ? networkPolicy.acls.filter((acl): acl is string => typeof acl === "string") : [],
+      resolutionState: text(resolution.state),
+      deniedFlows: number(networkPolicy.denied_flows),
+    },
   };
 }
 

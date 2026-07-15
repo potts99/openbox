@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	openbox "github.com/openbox-dev/openbox/internal/client"
@@ -129,9 +130,10 @@ func runSandboxExtend(ctx context.Context, api *openbox.Client, args []string, j
 }
 
 func printInstanceStatus(stdout io.Writer, instance openbox.Instance, now time.Time) {
-	fmt.Fprintf(stdout, "Name: %s\nID: %s\nKind: %s\nImage: %s\nDesired: %s\nObserved: %s\nIsolation: %s (requested %s)\nEgress: %s\nCPUs: %d\nMemory: %s\nDisk: %s\n",
+	fmt.Fprintf(stdout, "Name: %s\nID: %s\nKind: %s\nImage: %s\nDesired: %s\nObserved: %s\nIsolation: %s (requested %s)\nEgress: %s\nNetwork ACLs: %s\nHostname resolution: %s\nDenied flows: %d\nCPUs: %d\nMemory: %s\nDisk: %s\n",
 		instance.Name, instance.ID, instance.Kind, instance.ImageID, instance.DesiredState, instance.ObservedState,
-		instance.ActualIsolation, instance.RequestedIsolation, sandbox.EgressLabel(domain.InstanceKind(instance.Kind)),
+		instance.ActualIsolation, instance.RequestedIsolation, sandbox.EgressLabel(domain.EgressMode(instance.NetworkPolicy.EgressMode)),
+		strings.Join(instance.NetworkPolicy.ACLs, ", "), instance.NetworkPolicy.Resolution.State, instance.NetworkPolicy.DeniedFlows,
 		instance.Resources.VCPUs, formatBytes(instance.Resources.MemoryBytes), formatBytes(instance.Resources.DiskBytes))
 	if instance.ExpiresAt != nil {
 		fmt.Fprintf(stdout, "Expires: %s (%s)\n", instance.ExpiresAt.UTC().Format(time.RFC3339), sandbox.FormatRemaining(instance.ExpiresAt, now))
