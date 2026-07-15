@@ -22,6 +22,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/domain"
 	"github.com/openbox-dev/openbox/internal/httpapi/generated"
 	"github.com/openbox-dev/openbox/internal/images"
+	"github.com/openbox-dev/openbox/internal/routes"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 	"github.com/openbox-dev/openbox/internal/terminal"
 	"github.com/openbox-dev/openbox/internal/version"
@@ -64,6 +65,7 @@ type Service interface {
 type Options struct {
 	OwnerID           domain.OwnerID
 	Auth              *auth.Manager
+	Routes            *routes.Service
 	PollInterval      time.Duration
 	HeartbeatInterval time.Duration
 	MaxBodyBytes      int64
@@ -83,6 +85,7 @@ type Handler struct {
 	service            Service
 	fixedOwnerID       domain.OwnerID
 	auth               *auth.Manager
+	routes             *routes.Service
 	pollInterval       time.Duration
 	heartbeatInterval  time.Duration
 	maxBodyBytes       int64
@@ -115,8 +118,8 @@ func New(service Service, options Options) (*Handler, error) {
 	}
 	limits := options.TerminalLimits.WithDefaults()
 	return &Handler{
-		service: service, fixedOwnerID: options.OwnerID, auth: options.Auth, pollInterval: options.PollInterval,
-		heartbeatInterval: options.HeartbeatInterval, maxBodyBytes: options.MaxBodyBytes,
+		service: service, fixedOwnerID: options.OwnerID, auth: options.Auth, routes: options.Routes,
+		pollInterval: options.PollInterval, heartbeatInterval: options.HeartbeatInterval, maxBodyBytes: options.MaxBodyBytes,
 		eventBatchSize: options.EventBatchSize, console: options.Console,
 		terminalLimits:     limits,
 		terminalSessions:   terminal.NewSessionRegistry(limits.MaxSessionsPerOwner, limits.MaxSessionsPerInstance),
@@ -208,6 +211,10 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		if h.routeInstances(response, request, requestID, segments[2:]) {
 			return
 		}
+	case "routes":
+		if h.routeRoutes(response, request, requestID, segments[2:]) {
+			return
+		}
 	case "operations":
 		if h.routeOperations(response, request, requestID, segments[2:]) {
 			return
@@ -244,6 +251,13 @@ func (h *Handler) routeInstances(response http.ResponseWriter, request *http.Req
 			return true
 		}
 		h.openTerminal(response, request, requestID, rest[0])
+		return true
+	}
+	if len(rest) == 2 && rest[1] == "suggested-ports" {
+		if !h.requireMethod(response, request, requestID, http.MethodGet) {
+			return true
+		}
+		h.listSuggestedPorts(response, request, requestID, rest[0])
 		return true
 	}
 	if len(rest) == 3 && rest[1] == "actions" {

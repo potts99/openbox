@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package routes implements pure HTTPS route policy: managed target identity,
-// allowed ports, private-by-default visibility, and per-owner hostname uniqueness.
-// Persistence, Caddy, and HTTP handlers belong to later slice tasks.
+// Package routes implements HTTPS route policy and administrator-facing route
+// management: managed target identity, allowed ports, private-by-default
+// visibility, hostname uniqueness, CRUD, publish, and detected-port suggestions.
+// Caddy configuration and certificate allowlisting belong to later slice tasks.
 package routes
 
 import (
