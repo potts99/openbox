@@ -28,6 +28,7 @@ func NewInstance(id InstanceID, ownerID OwnerID, name string, kind InstanceKind,
 		ID: id, OwnerID: ownerID, Name: name, Kind: kind,
 		RequestedIsolation: IsolationBestAvailable,
 		ActualIsolation:    IsolationUnknown,
+		EgressMode:         defaultEgressMode(kind),
 		DesiredState:       DesiredRunning, ObservedState: ObservedPending,
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -88,6 +89,11 @@ func ValidateInstance(i Instance) error {
 	default:
 		return newError(CodeInvalidArgument, "actual_isolation")
 	}
+	switch i.EgressMode {
+	case "", EgressStandard, EgressRestricted:
+	default:
+		return newError(CodeInvalidArgument, "egress_mode")
+	}
 	switch i.DesiredState {
 	case DesiredRunning, DesiredStopped, DesiredDeleted:
 	default:
@@ -120,6 +126,13 @@ func ValidateInstance(i Instance) error {
 		return newError(CodeProtectedBase, "desired_state")
 	}
 	return nil
+}
+
+func defaultEgressMode(kind InstanceKind) EgressMode {
+	if kind == KindSandbox {
+		return EgressRestricted
+	}
+	return EgressStandard
 }
 
 func ValidateOperation(op Operation) error {

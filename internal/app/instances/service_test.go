@@ -583,6 +583,61 @@ func newTestServiceWithIDs(t *testing.T, runtime ContainerRuntime, ids func() st
 	return service, base, store
 }
 
+func newPolicyTestService(t *testing.T, runtime ContainerRuntime, policy *recordingNetworkPolicy) (*Service, *fake.Runtime, *sqlite.Store) {
+	t.Helper()
+	store, err := sqlite.Open(context.Background(), t.TempDir()+"/openbox.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	now := time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC)
+	if err := store.CreateOwner(context.Background(), domain.Owner{ID: "owner-1", Name: "Owner", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	policy.observe = func(instance domain.Instance) {
+		stored, err := store.GetInstance(context.Background(), instance.OwnerID, instance.ID)
+		if err != nil {
+			t.Errorf("read instance while applying policy: %v", err)
+			return
+		}
+		policy.observedWhenApplied = stored.ObservedState
+	}
+	service, err := New(runtime, store, Options{
+		Now:           func() time.Time { return now },
+		NewID:         newIDs("instance-1", "operation-1", "operation-2"),
+		NetworkPolicy: policy,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, _ := runtime.(*fake.Runtime)
+	return service, base, store
+}
+
+type recordingNetworkPolicy struct {
+	runtime                *fake.Runtime
+	applyErr               error
+	calls                  []string
+	observe                func(domain.Instance)
+	observedWhenApplied    domain.ObservedState
+	runtimeGoneWhenRemoved bool
+}
+
+func (p *recordingNetworkPolicy) ApplyNetworkPolicy(_ context.Context, instance domain.Instance) error {
+	p.calls = append(p.calls, "apply:"+string(instance.ID))
+	if p.observe != nil {
+		p.observe(instance)
+	}
+	return p.applyErr
+}
+
+func (p *recordingNetworkPolicy) RemoveNetworkPolicy(ctx context.Context, instance domain.Instance) error {
+	p.calls = append(p.calls, "remove:"+string(instance.ID))
+	_, err := p.runtime.InspectInstance(ctx, instance.RuntimeRef)
+	p.runtimeGoneWhenRemoved = errors.Is(err, runtimeapi.ErrNotFound)
+	return nil
+}
+
 func createInput() CreateInput {
 	return CreateInput{OwnerID: "owner-1", Name: "project", Kind: domain.KindDevbox, Image: "ubuntu", RequestedIsolation: domain.IsolationStandard,
 		Resources: domain.Resources{VCPUs: 2, MemoryBytes: 1024, DiskBytes: 2048}, OwnerPublicKey: "ssh-ed25519 owner", IdempotencyKey: "create-key"}
@@ -753,6 +808,119 @@ func TestSandboxCreateAppliesKindDefaults(t *testing.T) {
 	}
 	if created.ExpiresAt == nil || !created.ExpiresAt.Equal(created.CreatedAt.Add(domain.DefaultSandboxLifetime)) {
 		t.Fatalf("expires_at=%v", created.ExpiresAt)
+	}
+}
+
+func TestCreateAppliesNetworkPolicyBeforeReportingReady(t *testing.T) {
+	runtime := fake.New(testCapabilities())
+	runtime.AddImage(testImage())
+	policy := &recordingNetworkPolicy{}
+	service, _, _ := newPolicyTestService(t, runtime, policy)
+
+	created, err := service.Create(context.Background(), createInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.EgressMode != domain.EgressStandard {
+		t.Fatalf("egress mode=%q", created.EgressMode)
+	}
+	if got := policy.calls; len(got) != 1 || got[0] != "apply:"+string(created.ID) {
+		t.Fatalf("policy calls=%v", got)
+	}
+	if policy.observedWhenApplied == domain.ObservedRunning {
+		t.Fatalf("policy applied after readiness: observed=%q", policy.observedWhenApplied)
+	}
+}
+
+func TestSandboxCreateDefaultsToRestrictedNetworkPolicy(t *testing.T) {
+	runtime := fake.New(testCapabilities())
+	runtime.AddImage(runtimeapi.Image{
+		Fingerprint:  "sha256:sandbox",
+		Aliases:      []string{"openbox:sandbox/ubuntu/24.04"},
+		Architecture: "x86_64",
+		Type:         "container",
+		CloudInit:    true,
+	})
+	policy := &recordingNetworkPolicy{}
+	service, _, store := newPolicyTestService(t, runtime, policy)
+
+	created, err := service.Create(context.Background(), CreateInput{
+		OwnerID: "owner-1", Name: "agent-box", Kind: domain.KindSandbox,
+		OwnerPublicKey: "ssh-ed25519 owner", IdempotencyKey: "sandbox-policy",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.EgressMode != domain.EgressRestricted {
+		t.Fatalf("egress mode=%q", created.EgressMode)
+	}
+	reloaded, err := store.GetInstance(context.Background(), created.OwnerID, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.EgressMode != domain.EgressRestricted {
+		t.Fatalf("persisted egress mode=%q", reloaded.EgressMode)
+	}
+}
+
+func TestCreateNetworkPolicyFailurePreventsReady(t *testing.T) {
+	runtime := fake.New(testCapabilities())
+	runtime.AddImage(testImage())
+	policy := &recordingNetworkPolicy{applyErr: errors.New("apply policy")}
+	service, _, store := newPolicyTestService(t, runtime, policy)
+
+	_, err := service.Create(context.Background(), createInput())
+	if !errors.Is(err, policy.applyErr) {
+		t.Fatalf("create error=%v", err)
+	}
+	stored, err := store.GetInstance(context.Background(), "owner-1", "instance-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ObservedState == domain.ObservedRunning {
+		t.Fatal("policy failure reported the instance ready")
+	}
+}
+
+func TestRecoverCreateAppliesNetworkPolicyBeforeReportingReady(t *testing.T) {
+	runtime := fake.New(testCapabilities())
+	runtime.AddImage(testImage())
+	policy := &recordingNetworkPolicy{}
+	service, _, _ := newPolicyTestService(t, runtime, policy)
+
+	instance, operation, err := service.SubmitCreate(context.Background(), createInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.RecoverOperation(context.Background(), operation); err != nil {
+		t.Fatal(err)
+	}
+	if got := policy.calls; len(got) != 1 || got[0] != "apply:"+string(instance.ID) {
+		t.Fatalf("policy calls=%v", got)
+	}
+	if policy.observedWhenApplied == domain.ObservedRunning {
+		t.Fatalf("policy applied after readiness: observed=%q", policy.observedWhenApplied)
+	}
+}
+
+func TestDeleteRemovesNetworkPolicyOnlyAfterRuntimeDisappears(t *testing.T) {
+	runtime := fake.New(testCapabilities())
+	runtime.AddImage(testImage())
+	policy := &recordingNetworkPolicy{runtime: runtime}
+	service, _, _ := newPolicyTestService(t, runtime, policy)
+	created, err := service.Create(context.Background(), createInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := service.Delete(context.Background(), created.OwnerID, created.ID, "delete-policy"); err != nil {
+		t.Fatal(err)
+	}
+	if got := policy.calls; len(got) != 2 || got[1] != "remove:"+string(created.ID) {
+		t.Fatalf("policy calls=%v", got)
+	}
+	if !policy.runtimeGoneWhenRemoved {
+		t.Fatal("policy was removed before runtime deletion completed")
 	}
 }
 

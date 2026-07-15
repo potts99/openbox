@@ -149,7 +149,7 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	}
 	instancePublicKey := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(instanceSigner.PublicKey())))
 	mode := &operations.Mode{}
-	service, err := instances.New(runtime, store, instances.Options{Mode: mode, InstanceGatewayPublicKey: instancePublicKey})
+	service, err := instances.New(runtime, store, instances.Options{Mode: mode, InstanceGatewayPublicKey: instancePublicKey, NetworkPolicy: runtime})
 	if err != nil {
 		return fail(err)
 	}
