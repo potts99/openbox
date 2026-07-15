@@ -161,8 +161,12 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 	case <-sessionCtx.Done():
 	case err := <-errCh:
 		cancel()
-		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
+		if err != nil && isTerminalLimitError(err) {
 			h.closeTerminalLimit(ctx, conn, err)
+			return
+		}
+		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
+			_ = conn.Close(websocket.StatusNormalClosure, "")
 			return
 		}
 	}
@@ -355,6 +359,13 @@ func pumpTerminalInput(
 			// Ignore protocol frames that are not input/control for this task.
 		}
 	}
+}
+
+func isTerminalLimitError(err error) bool {
+	return errors.Is(err, terminal.ErrFrameTooLarge) ||
+		errors.Is(err, terminal.ErrRateLimited) ||
+		errors.Is(err, terminal.ErrIdleTimeout) ||
+		errors.Is(err, terminal.ErrBufferLimit)
 }
 
 func (h *Handler) closeTerminalLimit(_ context.Context, conn *websocket.Conn, err error) {

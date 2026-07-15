@@ -637,6 +637,40 @@ func TestTerminalEnforcesTotalBufferLimit(t *testing.T) {
 	}
 }
 
+func TestTerminalClientDisconnectDoesNotEmitInvalidFrame(t *testing.T) {
+	rt := newRunningFakeRuntime(t, "incus-owned-ref")
+	_, conn, ctx := dialOpenTerminal(t, rt, terminal.DefaultLimits())
+
+	errFrames := make(chan terminal.ErrorFrame, 1)
+	go func() {
+		for {
+			_, data, err := conn.Read(ctx)
+			if err != nil {
+				return
+			}
+			frame, err := terminal.Decode(data)
+			if err != nil {
+				continue
+			}
+			if errFrame, ok := frame.(terminal.ErrorFrame); ok {
+				errFrames <- errFrame
+				return
+			}
+		}
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	_ = conn.Close(websocket.StatusNormalClosure, "")
+
+	select {
+	case errFrame := <-errFrames:
+		if errFrame.Code == "invalid_frame" {
+			t.Fatalf("client disconnect mislabeled as invalid_frame: %#v", errFrame)
+		}
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
 func newRunningFakeRuntime(t *testing.T, ref string) *fake.Runtime {
 	t.Helper()
 	rt := fake.New(runtimeapi.Capabilities{})
