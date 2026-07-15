@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -61,6 +62,8 @@ type resource struct {
 	Type        string                       `json:"type,omitempty"`
 	Config      map[string]string            `json:"config,omitempty"`
 	Devices     map[string]map[string]string `json:"devices,omitempty"`
+	Ingress     []networkACLRule             `json:"ingress,omitempty"`
+	Egress      []networkACLRule             `json:"egress,omitempty"`
 }
 
 func (a *Adapter) Bootstrap(ctx context.Context, config BootstrapConfig) error {
@@ -90,6 +93,7 @@ func (a *Adapter) Bootstrap(ctx context.Context, config BootstrapConfig) error {
 			value      resource
 		}{
 			{kind: "network", path: "/1.0/networks/" + url.PathEscape(config.Network), query: nil, value: networkResource(config)},
+			{kind: "network ACL", path: "/1.0/network-acls/" + url.PathEscape(DefaultDenyACLName), query: nil, value: networkACLResource()},
 			{kind: "profile", path: "/1.0/profiles/" + url.PathEscape(config.ContainerProfile), query: projectQuery, value: profileResource(config.ContainerProfile, "container-profile", config)},
 			{kind: "profile", path: "/1.0/profiles/" + url.PathEscape(config.VMProfile), query: projectQuery, value: profileResource(config.VMProfile, "vm-profile", config)},
 		}
@@ -104,6 +108,10 @@ func (a *Adapter) Bootstrap(ctx context.Context, config BootstrapConfig) error {
 	}
 	network := networkResource(config)
 	if err := a.ensure(ctx, "network", "/1.0/networks/"+url.PathEscape(config.Network), "/1.0/networks", nil, network); err != nil {
+		return err
+	}
+	acl := networkACLResource()
+	if err := a.ensure(ctx, "network ACL", "/1.0/network-acls/"+url.PathEscape(acl.Name), "/1.0/network-acls", nil, acl); err != nil {
 		return err
 	}
 	for _, profile := range []struct {
@@ -191,6 +199,12 @@ func requiredDrift(existing, desired resource) []string {
 			}
 		}
 	}
+	if !reflect.DeepEqual(existing.Ingress, desired.Ingress) {
+		fields = append(fields, "ingress")
+	}
+	if !reflect.DeepEqual(existing.Egress, desired.Egress) {
+		fields = append(fields, "egress")
+	}
 	sort.Strings(fields)
 	return fields
 }
@@ -198,7 +212,7 @@ func requiredDrift(existing, desired resource) []string {
 func networkResource(config BootstrapConfig) resource {
 	return resource{
 		Name: config.Network, Description: "OpenBox managed bridge", Type: "bridge",
-		Config: managedConfig("network", map[string]string{"ipv4.address": "auto", "ipv4.nat": "true", "ipv6.address": "none"}),
+		Config: managedConfig("network", map[string]string{"ipv4.address": ManagedBridgeGateway, "ipv4.nat": "true", "ipv6.address": "none"}),
 	}
 }
 
@@ -207,7 +221,7 @@ func profileResource(name, kind string, config BootstrapConfig) resource {
 		Name: name, Description: "OpenBox managed profile",
 		Config: managedConfig(kind, nil),
 		Devices: map[string]map[string]string{
-			"eth0": {"type": "nic", "network": config.Network, "name": "eth0"},
+			"eth0": {"type": "nic", "network": config.Network, "name": "eth0", "security.acls": DefaultDenyACLName},
 			"root": {"type": "disk", "path": "/", "pool": config.StoragePool},
 		},
 	}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -201,8 +202,8 @@ func TestBootstrapIsIdempotentAndLeavesUnknownResourcesUntouched(t *testing.T) {
 	if !reflect.DeepEqual(first, second) {
 		t.Fatalf("second bootstrap changed configuration:\nfirst=%#v\nsecond=%#v", first, second)
 	}
-	if api.posts != 4 {
-		t.Fatalf("POST count = %d, want 4", api.posts)
+	if api.posts != 5 {
+		t.Fatalf("POST count = %d, want 5", api.posts)
 	}
 	for key, value := range second {
 		if key == "project/unrelated" || key == "storage/default" {
@@ -217,6 +218,76 @@ func TestBootstrapIsIdempotentAndLeavesUnknownResourcesUntouched(t *testing.T) {
 	}
 	if second["project/openbox"].Config["features.images"] != "false" {
 		t.Fatalf("OpenBox project does not inherit default-project images: %#v", second["project/openbox"].Config)
+	}
+}
+
+func TestBootstrapCreatesACLAndAttachesItToManagedNICs(t *testing.T) {
+	api := newBootstrapAPI()
+	socket := serveUnixHTTP(t, api)
+	adapter, err := New(Options{SocketPath: socket})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.Bootstrap(context.Background(), BootstrapConfig{Project: "openbox", Network: "openbox0", StoragePool: "default"}); err != nil {
+		t.Fatal(err)
+	}
+
+	resources := api.snapshot()
+	aclResource, exists := resources["network-acl/openbox-default-deny"]
+	if !exists {
+		t.Fatal("managed default-deny ACL was not created")
+	}
+	if aclResource.Config[ManagedLabel] != "true" || aclResource.Config[ResourceLabel] != "network-acl" {
+		t.Fatalf("ACL ownership labels = %#v", aclResource.Config)
+	}
+	for _, name := range []string{"openbox-container", "openbox-vm"} {
+		if got := resources["profile/"+name].Devices["eth0"]["security.acls"]; got != "openbox-default-deny" {
+			t.Fatalf("%s eth0 security.acls = %q, want openbox-default-deny", name, got)
+		}
+	}
+	var acl struct {
+		Egress  []aclRule `json:"egress"`
+		Ingress []aclRule `json:"ingress"`
+	}
+	if err := json.Unmarshal(api.postsByPath["/1.0/network-acls"], &acl); err != nil {
+		t.Fatal(err)
+	}
+	for _, wanted := range []aclRule{
+		{Action: "allow", Destination: "10.42.0.1", Protocol: "udp", DestinationPort: "53"},
+		{Action: "allow", Destination: "10.42.0.1", Protocol: "tcp", DestinationPort: "53"},
+		{Action: "allow", Destination: "10.42.0.1", Protocol: "tcp", DestinationPort: "18789"},
+	} {
+		if !containsACLRule(acl.Egress, wanted) {
+			t.Fatalf("ACL egress rules = %#v, missing %#v", acl.Egress, wanted)
+		}
+	}
+	if !containsACLRule(acl.Ingress, aclRule{Action: "allow", Source: "10.42.0.1", Protocol: "tcp", DestinationPort: "22"}) {
+		t.Fatalf("ACL ingress rules = %#v, missing SSH gateway rule", acl.Ingress)
+	}
+}
+
+func TestBootstrapRefusesUnmanagedACLNameConflict(t *testing.T) {
+	api := newBootstrapAPI()
+	api.resources["project/openbox"] = resource{Name: "openbox", Config: managedConfig("project", map[string]string{
+		"features.images": "false", "features.networks": "false", "features.profiles": "true",
+	})}
+	api.resources["network/openbox0"] = networkResource(BootstrapConfig{Network: "openbox0"})
+	api.resources["network-acl/openbox-default-deny"] = resource{
+		Name: "openbox-default-deny", Config: map[string]string{"user.owner": "someone-else"},
+	}
+	socket := serveUnixHTTP(t, api)
+	adapter, err := New(Options{SocketPath: socket})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = adapter.Bootstrap(context.Background(), BootstrapConfig{Project: "openbox", Network: "openbox0", StoragePool: "default"})
+	var conflict *ConflictError
+	if !errors.As(err, &conflict) || conflict.Kind != "network ACL" {
+		t.Fatalf("error = %v, want network ACL ConflictError", err)
+	}
+	if api.posts != 0 {
+		t.Fatalf("bootstrap mutated resources before ACL conflict: %d POSTs", api.posts)
 	}
 }
 
@@ -303,22 +374,40 @@ func TestBootstrapRejectsLabelledConfigurationDriftBeforeMutation(t *testing.T) 
 	}
 }
 
-func TestRequiredDriftAcceptsExpandedAutoAddresses(t *testing.T) {
+func TestRequiredDriftRequiresManagedBridgeGateway(t *testing.T) {
 	desired := networkResource(BootstrapConfig{Network: "openbox0"})
 	existing := resource{
 		Name: "openbox0",
 		Type: "bridge",
 		Config: map[string]string{
 			ManagedLabel: "true", ResourceLabel: "network",
-			"ipv4.address": "10.84.217.1/24", "ipv4.nat": "true", "ipv6.address": "none",
+			"ipv4.address": ManagedBridgeGateway, "ipv4.nat": "true", "ipv6.address": "none",
 		},
 	}
 	if fields := requiredDrift(existing, desired); len(fields) != 0 {
-		t.Fatalf("expanded auto address reported as drift: %v", fields)
+		t.Fatalf("managed bridge gateway reported as drift: %v", fields)
 	}
-	existing.Config["ipv4.address"] = ""
+	existing.Config["ipv4.address"] = "10.42.1.1/24"
 	if fields := requiredDrift(existing, desired); !containsField(fields, "config.ipv4.address") {
 		t.Fatalf("fields = %v, want config.ipv4.address", fields)
+	}
+}
+
+func TestNetworkResourcePinsManagedBridgeGateway(t *testing.T) {
+	network := networkResource(BootstrapConfig{Network: "openbox0"})
+	if got := network.Config["ipv4.address"]; got != "10.42.0.1/24" {
+		t.Fatalf("ipv4.address = %q, want 10.42.0.1/24", got)
+	}
+}
+
+func TestRequiredDriftDetectsManagedACLRuleChanges(t *testing.T) {
+	desired := networkACLResource()
+	existing := desired
+	existing.Egress = append([]networkACLRule(nil), desired.Egress...)
+	existing.Egress[0].DestinationPort = "5353"
+
+	if fields := requiredDrift(existing, desired); !containsField(fields, "egress") {
+		t.Fatalf("fields = %v, want egress", fields)
 	}
 }
 
@@ -415,16 +504,17 @@ func cleanupIntegrationResources(adapter *Adapter, config BootstrapConfig) {
 }
 
 type bootstrapAPI struct {
-	mu        sync.Mutex
-	resources map[string]resource
-	posts     int
+	mu          sync.Mutex
+	resources   map[string]resource
+	postsByPath map[string]json.RawMessage
+	posts       int
 }
 
 func newBootstrapAPI() *bootstrapAPI {
 	return &bootstrapAPI{resources: map[string]resource{
 		"storage/default":   {Name: "default", Type: "dir"},
 		"project/unrelated": {Name: "unrelated", Config: map[string]string{"user.owner": "someone-else"}},
-	}}
+	}, postsByPath: map[string]json.RawMessage{}}
 }
 
 func (a *bootstrapAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -442,12 +532,18 @@ func (a *bootstrapAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodPost && collection {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		var value resource
-		if err := json.NewDecoder(r.Body).Decode(&value); err != nil {
+		if err := json.Unmarshal(body, &value); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		a.resources[kind+"/"+value.Name] = value
+		a.postsByPath[r.URL.Path] = body
 		a.posts++
 		writeSync(w, nil)
 		return
@@ -481,6 +577,8 @@ func classifyPath(path string) (kind, name string, collection bool) {
 		kind = "profile"
 	case "storage-pools":
 		kind = "storage"
+	case "network-acls":
+		kind = "network-acl"
 	}
 	collection = len(parts) == 2
 	if len(parts) > 2 {
@@ -512,6 +610,27 @@ func cloneDevices(value map[string]map[string]string) map[string]map[string]stri
 func containsField(values []string, wanted string) bool {
 	for _, value := range values {
 		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+type aclRule struct {
+	Action          string `json:"action"`
+	Source          string `json:"source"`
+	Destination     string `json:"destination"`
+	Protocol        string `json:"protocol"`
+	DestinationPort string `json:"destination_port"`
+}
+
+func containsACLRule(rules []aclRule, wanted aclRule) bool {
+	for _, rule := range rules {
+		if rule.Action == wanted.Action &&
+			rule.Source == wanted.Source &&
+			rule.Destination == wanted.Destination &&
+			rule.Protocol == wanted.Protocol &&
+			rule.DestinationPort == wanted.DestinationPort {
 			return true
 		}
 	}
