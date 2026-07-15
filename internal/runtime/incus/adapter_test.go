@@ -563,6 +563,42 @@ func TestRealIncusPreflightAndBootstrap(t *testing.T) {
 	}
 }
 
+func TestApplyNetworkPolicyUpdatesInstanceNICACLs(t *testing.T) {
+	var patched instanceRecord
+	socket := serveUnixHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/1.0/instances/instance-1" {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			writeSync(w, instanceRecord{
+				Name: "instance-1", Type: "container", Status: "Stopped",
+				Devices: map[string]map[string]string{"eth0": {"type": "nic", "network": "openbox0", "name": "eth0"}},
+			})
+		case http.MethodPatch:
+			if err := json.NewDecoder(r.Body).Decode(&patched); err != nil {
+				t.Errorf("decode patch: %v", err)
+			}
+			writeSync(w, nil)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	}))
+	adapter, err := New(Options{SocketPath: socket})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.ApplyNetworkPolicy(context.Background(), domain.Instance{
+		ID: "instance-1", RuntimeRef: "instance-1", EgressMode: domain.EgressStandard,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := patched.Devices["eth0"]["security.acls"]; got != DefaultDenyACLName+","+StandardEgressACLName {
+		t.Fatalf("security.acls=%q", got)
+	}
+}
+
 func cleanupIntegrationResources(adapter *Adapter, config BootstrapConfig) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

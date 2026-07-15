@@ -40,6 +40,13 @@ type InstanceRuntime interface {
 	DeleteInstance(context.Context, string) error
 }
 
+// NetworkPolicy applies and removes the host-side egress policy for one
+// durable instance identity.
+type NetworkPolicy interface {
+	ApplyNetworkPolicy(context.Context, domain.Instance) error
+	RemoveNetworkPolicy(context.Context, domain.Instance) error
+}
+
 // ContainerRuntime is retained as a source-compatible name for slice 03 callers.
 type ContainerRuntime = InstanceRuntime
 
@@ -91,6 +98,7 @@ type Options struct {
 	NewID                    func() string
 	Mode                     *operations.Mode
 	InstanceGatewayPublicKey string
+	NetworkPolicy            NetworkPolicy
 }
 
 type Service struct {
@@ -100,6 +108,7 @@ type Service struct {
 	newID                    func() string
 	mode                     *operations.Mode
 	instanceGatewayPublicKey string
+	networkPolicy            NetworkPolicy
 	mutationGate             chan struct{}
 	execGate                 *sandbox.ExecGate
 }
@@ -117,7 +126,7 @@ func New(runtime InstanceRuntime, repo Repository, options Options) (*Service, e
 	if options.Mode == nil {
 		options.Mode = &operations.Mode{}
 	}
-	service := &Service{runtime: runtime, repo: repo, now: options.Now, newID: options.NewID, mode: options.Mode, instanceGatewayPublicKey: strings.TrimSpace(options.InstanceGatewayPublicKey), mutationGate: make(chan struct{}, 1), execGate: sandbox.NewExecGate(sandbox.DefaultMaxConcurrentExecsPerInstance)}
+	service := &Service{runtime: runtime, repo: repo, now: options.Now, newID: options.NewID, mode: options.Mode, instanceGatewayPublicKey: strings.TrimSpace(options.InstanceGatewayPublicKey), networkPolicy: options.NetworkPolicy, mutationGate: make(chan struct{}, 1), execGate: sandbox.NewExecGate(sandbox.DefaultMaxConcurrentExecsPerInstance)}
 	service.mutationGate <- struct{}{}
 	return service, nil
 }
@@ -130,6 +139,7 @@ type CreateInput struct {
 	RequestedIsolation domain.IsolationRequest
 	Resources          domain.Resources
 	Lifetime           time.Duration // Sandbox only; 0 means kind default
+	EgressMode         domain.EgressMode
 	OwnerPublicKey     string
 	IdempotencyKey     string
 }
@@ -234,6 +244,7 @@ func (s *Service) SubmitCreate(ctx context.Context, input CreateInput) (domain.I
 	instance.ActualIsolation = actualIsolation
 	instance.Resources = input.Resources
 	instance.RuntimeRef = runtimeReference(instanceID)
+	instance.EgressMode = input.EgressMode
 	applyLifetime(&instance, lifetime, now)
 	if err := domain.ValidateInstance(instance); err != nil {
 		return domain.Instance{}, domain.Operation{}, err
@@ -540,6 +551,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 	instance.ActualIsolation = actualIsolation
 	instance.Resources = input.Resources
 	instance.RuntimeRef = runtimeRef
+	instance.EgressMode = input.EgressMode
 	applyLifetime(&instance, lifetime, now)
 	if err := domain.ValidateInstance(instance); err != nil {
 		return domain.Instance{}, err
@@ -615,6 +627,10 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 	}
 	if err := s.repo.UpdateOperationStage(ctx, input.OwnerID, operation.ID, startedStage, 60, s.now()); err != nil {
 		return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, err)
+	}
+	if err := s.applyNetworkPolicy(ctx, instance); err != nil {
+		s.markError(ctx, instance, err)
+		return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, fmt.Errorf("apply network policy: %w", err))
 	}
 	if actualIsolation == domain.IsolationVM {
 		err := s.waitForVMReady(ctx, instance, operation)
@@ -730,6 +746,10 @@ func (s *Service) recoverCreate(ctx context.Context, operation domain.Operation)
 	}
 	if err := s.repo.UpdateOperationStage(ctx, instance.OwnerID, operation.ID, startedStage, 60, s.now()); err != nil {
 		return err
+	}
+	if err := s.applyNetworkPolicy(ctx, instance); err != nil {
+		s.markError(ctx, instance, err)
+		return fmt.Errorf("apply network policy: %w", err)
 	}
 	if instance.ActualIsolation == domain.IsolationVM {
 		if err := s.waitForVMReady(ctx, instance, operation); err != nil {
@@ -1035,6 +1055,9 @@ func (s *Service) Delete(ctx context.Context, ownerID domain.OwnerID, id domain.
 	if err := s.repo.UpdateOperationStage(ctx, ownerID, op.ID, "runtime_deleted", 80, s.now()); err != nil {
 		return err
 	}
+	if err := s.removeNetworkPolicy(ctx, instance); err != nil {
+		return fmt.Errorf("remove network policy: %w", err)
+	}
 	if err := s.repo.UpdateInstanceObservation(ctx, ownerID, id, instance.RuntimeRef, instance.ActualIsolation, domain.ObservedDeleted, "", s.now()); err != nil {
 		return err
 	}
@@ -1186,6 +1209,20 @@ func selectIsolation(request domain.IsolationRequest, capabilities runtimeapi.Ca
 	}
 }
 
+func (s *Service) applyNetworkPolicy(ctx context.Context, instance domain.Instance) error {
+	if s.networkPolicy == nil {
+		return nil
+	}
+	return s.networkPolicy.ApplyNetworkPolicy(ctx, instance)
+}
+
+func (s *Service) removeNetworkPolicy(ctx context.Context, instance domain.Instance) error {
+	if s.networkPolicy == nil {
+		return nil
+	}
+	return s.networkPolicy.RemoveNetworkPolicy(ctx, instance)
+}
+
 func (s *Service) waitForVMReady(ctx context.Context, instance domain.Instance, operation domain.Operation) error {
 	progress := map[string]int{"waiting_for_agent": 65, "waiting_for_ssh": 85}
 	return s.runtime.WaitInstanceReady(ctx, runtimeapi.ReadinessRequest{Ref: instance.RuntimeRef, Stage: func(stage string) error {
@@ -1240,6 +1277,9 @@ func (s *Service) withPartialVMCleanup(instance domain.Instance, created bool, c
 			return errors.Join(cause, fmt.Errorf("partial VM was replaced during cleanup: %w", err))
 		}
 		return errors.Join(cause, fmt.Errorf("partial VM %q still exists after cleanup", instance.RuntimeRef))
+	}
+	if err := s.removeNetworkPolicy(ctx, instance); err != nil {
+		return errors.Join(cause, fmt.Errorf("remove partial VM network policy: %w", err))
 	}
 	return cause
 }
@@ -1321,6 +1361,7 @@ func applyCreateDefaults(input *CreateInput) (time.Duration, error) {
 		RequestedIsolation: input.RequestedIsolation,
 		Resources:          input.Resources,
 		Lifetime:           input.Lifetime,
+		EgressMode:         input.EgressMode,
 	})
 	if err != nil {
 		return 0, err
@@ -1330,6 +1371,7 @@ func applyCreateDefaults(input *CreateInput) (time.Duration, error) {
 	input.RequestedIsolation = applied.RequestedIsolation
 	input.Resources = applied.Resources
 	input.Lifetime = applied.Lifetime
+	input.EgressMode = applied.EgressMode
 	return applied.Lifetime, nil
 }
 

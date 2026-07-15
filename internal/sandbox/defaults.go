@@ -31,6 +31,7 @@ type CreateDefaults struct {
 	RequestedIsolation domain.IsolationRequest
 	Resources          domain.Resources
 	Lifetime           time.Duration
+	EgressMode         domain.EgressMode
 }
 
 // AppliedDefaults is the create policy after gaps are filled.
@@ -39,6 +40,7 @@ type AppliedDefaults struct {
 	RequestedIsolation domain.IsolationRequest
 	Resources          domain.Resources
 	Lifetime           time.Duration // 0 for VPS/Devbox
+	EgressMode         domain.EgressMode
 }
 
 // ApplyDefaults fills empty create fields from the curated catalog and kind
@@ -57,6 +59,7 @@ func ApplyDefaults(in CreateDefaults) (AppliedDefaults, error) {
 		RequestedIsolation: in.RequestedIsolation,
 		Resources:          in.Resources,
 		Lifetime:           in.Lifetime,
+		EgressMode:         in.EgressMode,
 	}
 	if out.Image == "" {
 		out.Image = manifest.Alias
@@ -66,6 +69,13 @@ func ApplyDefaults(in CreateDefaults) (AppliedDefaults, error) {
 	}
 	if out.Resources == (domain.Resources{}) {
 		out.Resources = DefaultResources()
+	}
+	if out.EgressMode == "" {
+		if in.Kind == domain.KindSandbox {
+			out.EgressMode = domain.EgressRestricted
+		} else {
+			out.EgressMode = domain.EgressStandard
+		}
 	}
 	switch in.Kind {
 	case domain.KindSandbox:

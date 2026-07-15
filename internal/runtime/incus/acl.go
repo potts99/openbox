@@ -4,9 +4,13 @@ package incus
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/openbox-dev/openbox/internal/domain"
+	"github.com/openbox-dev/openbox/internal/networkpolicy"
 )
 
 const (
@@ -122,6 +126,58 @@ func RestrictedACL(name string, destinations []string) resource {
 func (a *Adapter) EnsureRestrictedACL(ctx context.Context, name string, destinations []string) error {
 	acl := RestrictedACL(name, destinations)
 	return a.ensure(ctx, "network ACL", "/1.0/network-acls/"+url.PathEscape(acl.Name), "/1.0/network-acls", nil, acl)
+}
+
+// ApplyNetworkPolicy reconciles the instance NIC ACL stack after the runtime
+// starts and before OpenBox reports the instance ready.
+func (a *Adapter) ApplyNetworkPolicy(ctx context.Context, instance domain.Instance) error {
+	if instance.RuntimeRef == "" {
+		return fmt.Errorf("network policy runtime ref is required")
+	}
+	return a.setInstanceNICACLs(ctx, instance.RuntimeRef, NICACLs(instance.EgressMode))
+}
+
+// RemoveNetworkPolicy deletes the per-instance restricted ACL after the
+// runtime resource is gone. Shared ACLs are intentionally retained.
+func (a *Adapter) RemoveNetworkPolicy(ctx context.Context, instance domain.Instance) error {
+	if instance.EgressMode != domain.EgressRestricted {
+		return nil
+	}
+	err := a.request(ctx, http.MethodDelete, "/1.0/network-acls/"+url.PathEscape(networkpolicy.RestrictedACLName(string(instance.ID))), nil, nil, nil)
+	if isNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("delete restricted network ACL: %w", err)
+	}
+	return nil
+}
+
+func (a *Adapter) setInstanceNICACLs(ctx context.Context, ref string, acls []string) error {
+	var instance instanceRecord
+	query := url.Values{"project": {a.project}}
+	if err := a.request(ctx, http.MethodGet, "/1.0/instances/"+url.PathEscape(ref), query, nil, &instance); err != nil {
+		return fmt.Errorf("inspect Incus instance NIC: %w", err)
+	}
+	eth0, ok := instance.Devices["eth0"]
+	if !ok || eth0["type"] != "nic" {
+		return fmt.Errorf("managed instance NIC eth0 is missing")
+	}
+	updated := make(map[string]map[string]string, len(instance.Devices))
+	for name, device := range instance.Devices {
+		copy := make(map[string]string, len(device))
+		for key, value := range device {
+			copy[key] = value
+		}
+		updated[name] = copy
+	}
+	updated["eth0"]["security.acls"] = strings.Join(acls, ",")
+	if err := a.request(ctx, http.MethodPatch, "/1.0/instances/"+url.PathEscape(ref), query, struct {
+		Devices map[string]map[string]string `json:"devices"`
+	}{Devices: updated}, nil); err != nil {
+		return fmt.Errorf("update Incus instance NIC ACLs: %w", err)
+	}
+	return nil
 }
 
 // NICACLs returns the ACL names to attach to an instance NIC. Restricted modes

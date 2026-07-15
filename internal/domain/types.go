@@ -96,6 +96,7 @@ type Instance struct {
 	ImageID               ImageID
 	RequestedIsolation    IsolationRequest
 	ActualIsolation       IsolationType
+	EgressMode            EgressMode
 	DesiredState          DesiredState
 	ObservedState         ObservedState
 	Resources             Resources
