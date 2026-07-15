@@ -27,11 +27,13 @@ export function XtermTerminalSurface({ onData, onResize, onReady }: TerminalSurf
 
     const term = new Terminal({
       cursorBlink: true,
-      fontFamily: 'ui-monospace, "SFMono-Regular", Menlo, monospace',
+      fontFamily: '"IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace',
+      fontSize: 14,
       theme: {
-        background: "#171714",
-        foreground: "#f5f1e7",
+        background: "#0c0c0b",
+        foreground: "#e8e6df",
         cursor: "#e64e20",
+        selectionBackground: "#3a3a36",
       },
     });
     const fit = new FitAddon();
