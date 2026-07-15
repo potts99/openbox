@@ -31,6 +31,8 @@ type Image struct {
 	Fingerprint  string
 	Aliases      []string
 	Architecture string
+	Type         string
+	CloudInit    bool
 }
 
 type InstanceState string
@@ -41,16 +43,29 @@ const (
 )
 
 type Instance struct {
-	Ref       string
-	Image     string
-	State     InstanceState
-	IsVM      bool
-	Snapshots []string
+	Ref        string
+	Image      string
+	State      InstanceState
+	IsVM       bool
+	Metadata   map[string]string
+	Resources  Resources
+	Privileged bool
+	Snapshots  []string
+}
+
+type Resources struct {
+	VCPUs       int
+	MemoryBytes int64
+	DiskBytes   int64
 }
 
 type CreateRequest struct {
-	Ref, Image string
-	VM         bool
+	Ref, Image     string
+	VM             bool
+	Unprivileged   bool
+	OwnerPublicKey string
+	Metadata       map[string]string
+	Resources      Resources
 }
 
 type ExecRequest struct {

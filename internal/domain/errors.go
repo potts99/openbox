@@ -16,6 +16,7 @@ const (
 	CodeNotFound              ErrorCode = "not_found"
 	CodeIdempotencyConflict   ErrorCode = "idempotency_conflict"
 	CodePersistenceCorruption ErrorCode = "persistence_corruption"
+	CodeRuntimeMissing        ErrorCode = "runtime_missing"
 )
 
 // Error carries a code and field without coupling the domain to UI wording.

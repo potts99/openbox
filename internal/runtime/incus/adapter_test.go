@@ -83,9 +83,63 @@ func TestAdapterTimeoutValidation(t *testing.T) {
 	if adapter.timeout != 10*time.Second {
 		t.Fatalf("zero timeout default = %s, want 10s", adapter.timeout)
 	}
+	if adapter.operationTimeout != 2*time.Minute {
+		t.Fatalf("operation timeout default = %s, want 2m", adapter.operationTimeout)
+	}
 	if _, err := New(Options{SocketPath: "/tmp/incus.socket", Timeout: -time.Second}); err == nil || !strings.Contains(err.Error(), "must not be negative") {
 		t.Fatalf("negative timeout error = %v", err)
 	}
+	if _, err := New(Options{SocketPath: "/tmp/incus.socket", OperationTimeout: -time.Second}); err == nil || !strings.Contains(err.Error(), "operation timeout") {
+		t.Fatalf("negative operation timeout error = %v", err)
+	}
+}
+
+func TestAsyncOperationUsesSeparateBoundedTimeout(t *testing.T) {
+	t.Run("longer than request timeout succeeds", func(t *testing.T) {
+		socket := serveUnixHTTP(t, asyncOperationHandler(60*time.Millisecond))
+		adapter, err := New(Options{SocketPath: socket, Timeout: 10 * time.Millisecond, OperationTimeout: 250 * time.Millisecond})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := adapter.StartInstance(context.Background(), "instance"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("operation wait remains bounded", func(t *testing.T) {
+		socket := serveUnixHTTP(t, asyncOperationHandler(250*time.Millisecond))
+		adapter, err := New(Options{SocketPath: socket, Timeout: 10 * time.Millisecond, OperationTimeout: 25 * time.Millisecond})
+		if err != nil {
+			t.Fatal(err)
+		}
+		started := time.Now()
+		err = adapter.StartInstance(context.Background(), "instance")
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("error=%v", err)
+		}
+		if elapsed := time.Since(started); elapsed > 150*time.Millisecond {
+			t.Fatalf("operation timeout took %s", elapsed)
+		}
+	})
+}
+
+func asyncOperationHandler(delay time.Duration) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/state") {
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(apiResponse{Type: "async", StatusCode: http.StatusAccepted, Operation: "/1.0/operations/test"})
+			return
+		}
+		if r.URL.Path == "/1.0/operations/test/wait" {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(delay):
+				writeSync(w, map[string]any{"status_code": 200, "err": ""})
+				return
+			}
+		}
+		writeError(w, http.StatusNotFound, "not found")
+	})
 }
 
 func TestRequestsHonorCancellationAndTimeout(t *testing.T) {
@@ -161,6 +215,9 @@ func TestBootstrapIsIdempotentAndLeavesUnknownResourcesUntouched(t *testing.T) {
 			t.Fatalf("managed resource %s lacks ownership labels: %#v", key, value)
 		}
 	}
+	if second["project/openbox"].Config["features.images"] != "false" {
+		t.Fatalf("OpenBox project does not inherit default-project images: %#v", second["project/openbox"].Config)
+	}
 }
 
 func TestBootstrapRefusesUnknownNameConflict(t *testing.T) {
@@ -181,9 +238,29 @@ func TestBootstrapRefusesUnknownNameConflict(t *testing.T) {
 	}
 }
 
+func TestBootstrapRejectsProjectWithoutImageInheritance(t *testing.T) {
+	api := newBootstrapAPI()
+	api.resources["project/openbox"] = resource{Name: "openbox", Config: managedConfig("project", map[string]string{
+		"features.images": "true", "features.networks": "true", "features.profiles": "true",
+	})}
+	socket := serveUnixHTTP(t, api)
+	adapter, err := New(Options{SocketPath: socket})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = adapter.Bootstrap(context.Background(), BootstrapConfig{Project: "openbox", StoragePool: "default"})
+	var drift *DriftError
+	if !errors.As(err, &drift) || !containsField(drift.Fields, "config.features.images") {
+		t.Fatalf("error=%v drift=%+v", err, drift)
+	}
+	if api.posts != 0 {
+		t.Fatalf("bootstrap mutated before image-inheritance drift: %d posts", api.posts)
+	}
+}
+
 func TestBootstrapChecksAllNamesBeforeMutatingManagedProject(t *testing.T) {
 	api := newBootstrapAPI()
-	api.resources["project/openbox"] = resource{Name: "openbox", Config: managedConfig("project", map[string]string{"features.networks": "true", "features.profiles": "true"})}
+	api.resources["project/openbox"] = resource{Name: "openbox", Config: managedConfig("project", map[string]string{"features.images": "false", "features.networks": "true", "features.profiles": "true"})}
 	api.resources["network/openbox0"] = resource{Name: "openbox0", Config: map[string]string{"user.owner": "someone-else"}}
 	socket := serveUnixHTTP(t, api)
 	adapter, err := New(Options{SocketPath: socket})
@@ -202,7 +279,7 @@ func TestBootstrapChecksAllNamesBeforeMutatingManagedProject(t *testing.T) {
 
 func TestBootstrapRejectsLabelledConfigurationDriftBeforeMutation(t *testing.T) {
 	api := newBootstrapAPI()
-	api.resources["project/openbox"] = resource{Name: "openbox", Config: managedConfig("project", map[string]string{"features.networks": "true", "features.profiles": "true"})}
+	api.resources["project/openbox"] = resource{Name: "openbox", Config: managedConfig("project", map[string]string{"features.images": "false", "features.networks": "true", "features.profiles": "true"})}
 	driftedNetwork := networkResource(BootstrapConfig{Network: "openbox0"})
 	driftedNetwork.Config["ipv4.nat"] = "false"
 	api.resources["network/openbox0"] = driftedNetwork

@@ -13,13 +13,14 @@ import (
 )
 
 type Runtime struct {
-	mu           sync.Mutex
-	capabilities runtimeapi.Capabilities
-	images       map[string]runtimeapi.Image
-	instances    map[string]runtimeapi.Instance
-	execResults  map[string]runtimeapi.ExecResult
-	failures     map[string][]error
-	calls        []string
+	mu             sync.Mutex
+	capabilities   runtimeapi.Capabilities
+	images         map[string]runtimeapi.Image
+	instances      map[string]runtimeapi.Instance
+	execResults    map[string]runtimeapi.ExecResult
+	failures       map[string][]error
+	calls          []string
+	createRequests []runtimeapi.CreateRequest
 }
 
 func New(capabilities runtimeapi.Capabilities) *Runtime {
@@ -38,6 +39,12 @@ func (r *Runtime) AddImage(image runtimeapi.Image) {
 	r.images[image.Fingerprint] = cloneImage(image)
 }
 
+func (r *Runtime) RemoveImage(fingerprint string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.images, fingerprint)
+}
+
 func (r *Runtime) SetExecResult(ref string, result runtimeapi.ExecResult) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -54,6 +61,16 @@ func (r *Runtime) Calls() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]string(nil), r.calls...)
+}
+
+func (r *Runtime) CreateRequests() []runtimeapi.CreateRequest {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]runtimeapi.CreateRequest, len(r.createRequests))
+	for index, request := range r.createRequests {
+		result[index] = cloneCreateRequest(request)
+	}
+	return result
 }
 
 func (r *Runtime) DiscoverCapabilities(ctx context.Context) (runtimeapi.Capabilities, error) {
@@ -108,7 +125,11 @@ func (r *Runtime) CreateInstance(ctx context.Context, request runtimeapi.CreateR
 	if _, exists := r.images[request.Image]; !exists {
 		return runtimeapi.Instance{}, runtimeapi.ErrNotFound
 	}
-	instance := runtimeapi.Instance{Ref: request.Ref, Image: request.Image, State: runtimeapi.StateStopped, IsVM: request.VM}
+	r.createRequests = append(r.createRequests, cloneCreateRequest(request))
+	instance := runtimeapi.Instance{
+		Ref: request.Ref, Image: request.Image, State: runtimeapi.StateStopped, IsVM: request.VM,
+		Metadata: cloneStringMap(request.Metadata), Resources: request.Resources, Privileged: !request.Unprivileged,
+	}
 	r.instances[request.Ref] = instance
 	return cloneInstance(instance), nil
 }
@@ -242,12 +263,24 @@ func cloneMap(value map[string]bool) map[string]bool {
 	return result
 }
 
+func cloneStringMap(value map[string]string) map[string]string {
+	if value == nil {
+		return nil
+	}
+	result := make(map[string]string, len(value))
+	for key, item := range value {
+		result[key] = item
+	}
+	return result
+}
+
 func cloneImage(value runtimeapi.Image) runtimeapi.Image {
 	value.Aliases = append([]string(nil), value.Aliases...)
 	return value
 }
 
 func cloneInstance(value runtimeapi.Instance) runtimeapi.Instance {
+	value.Metadata = cloneStringMap(value.Metadata)
 	value.Snapshots = append([]string(nil), value.Snapshots...)
 	return value
 }
@@ -255,6 +288,11 @@ func cloneInstance(value runtimeapi.Instance) runtimeapi.Instance {
 func cloneExecResult(value runtimeapi.ExecResult) runtimeapi.ExecResult {
 	value.Stdout = append([]byte(nil), value.Stdout...)
 	value.Stderr = append([]byte(nil), value.Stderr...)
+	return value
+}
+
+func cloneCreateRequest(value runtimeapi.CreateRequest) runtimeapi.CreateRequest {
+	value.Metadata = cloneStringMap(value.Metadata)
 	return value
 }
 

@@ -21,16 +21,24 @@ import (
 const DefaultSocket = "/var/lib/incus/unix.socket"
 
 type Options struct {
-	SocketPath string
-	Timeout    time.Duration
-	HostProbe  HostProbe
+	SocketPath       string
+	Timeout          time.Duration
+	OperationTimeout time.Duration
+	HostProbe        HostProbe
+	Project          string
+	ContainerProfile string
+	StoragePool      string
 }
 
 type Adapter struct {
-	socketPath string
-	timeout    time.Duration
-	client     *http.Client
-	hostProbe  HostProbe
+	socketPath       string
+	timeout          time.Duration
+	operationTimeout time.Duration
+	client           *http.Client
+	hostProbe        HostProbe
+	project          string
+	containerProfile string
+	storagePool      string
 }
 
 func New(options Options) (*Adapter, error) {
@@ -48,6 +56,13 @@ func New(options Options) (*Adapter, error) {
 	if timeout == 0 {
 		timeout = 10 * time.Second
 	}
+	operationTimeout := options.OperationTimeout
+	if operationTimeout < 0 {
+		return nil, fmt.Errorf("Incus operation timeout must not be negative")
+	}
+	if operationTimeout == 0 {
+		operationTimeout = 2 * time.Minute
+	}
 	dialer := &net.Dialer{Timeout: timeout}
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -59,11 +74,23 @@ func New(options Options) (*Adapter, error) {
 	if probe == nil {
 		probe = OSHostProbe{}
 	}
+	project := options.Project
+	if project == "" {
+		project = "openbox"
+	}
+	containerProfile := options.ContainerProfile
+	if containerProfile == "" {
+		containerProfile = "openbox-container"
+	}
 	return &Adapter{
-		socketPath: socketPath,
-		timeout:    timeout,
-		client:     &http.Client{Transport: transport},
-		hostProbe:  probe,
+		socketPath:       socketPath,
+		timeout:          timeout,
+		operationTimeout: operationTimeout,
+		client:           &http.Client{Transport: transport},
+		hostProbe:        probe,
+		project:          project,
+		containerProfile: containerProfile,
+		storagePool:      options.StoragePool,
 	}, nil
 }
 
@@ -92,14 +119,25 @@ func isNotFound(err error) bool {
 }
 
 func (a *Adapter) request(ctx context.Context, method, path string, query url.Values, body any, output any) error {
-	ctx, cancel := context.WithTimeout(ctx, a.timeout)
+	envelope, err := a.call(ctx, a.timeout, method, path, query, body, output)
+	if err != nil {
+		return err
+	}
+	if envelope.Type == "async" && envelope.Operation != "" {
+		return a.waitOperation(ctx, envelope.Operation)
+	}
+	return nil
+}
+
+func (a *Adapter) call(ctx context.Context, timeout time.Duration, method, path string, query url.Values, body any, output any) (apiResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("encode Incus request: %w", err)
+			return apiResponse{}, fmt.Errorf("encode Incus request: %w", err)
 		}
 		reader = bytes.NewReader(encoded)
 	}
@@ -109,7 +147,7 @@ func (a *Adapter) request(ctx context.Context, method, path string, query url.Va
 	}
 	request, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
 	if err != nil {
-		return fmt.Errorf("create Incus request: %w", err)
+		return apiResponse{}, fmt.Errorf("create Incus request: %w", err)
 	}
 	request.Header.Set("Accept", "application/json")
 	if body != nil {
@@ -117,14 +155,14 @@ func (a *Adapter) request(ctx context.Context, method, path string, query url.Va
 	}
 	response, err := a.client.Do(request)
 	if err != nil {
-		return fmt.Errorf("call Incus over %s: %w", a.socketPath, err)
+		return apiResponse{}, fmt.Errorf("call Incus over %s: %w", a.socketPath, err)
 	}
 	defer response.Body.Close()
 
 	limited := io.LimitReader(response.Body, 8<<20)
 	var envelope apiResponse
 	if err := json.NewDecoder(limited).Decode(&envelope); err != nil {
-		return fmt.Errorf("decode Incus response: %w", err)
+		return apiResponse{}, fmt.Errorf("decode Incus response: %w", err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 || envelope.Type == "error" {
 		message := envelope.Error
@@ -135,17 +173,14 @@ func (a *Adapter) request(ctx context.Context, method, path string, query url.Va
 		if envelope.ErrorCode != 0 {
 			statusCode = envelope.ErrorCode
 		}
-		return &HTTPError{StatusCode: statusCode, Message: message}
-	}
-	if envelope.Type == "async" && envelope.Operation != "" {
-		return a.waitOperation(ctx, envelope.Operation)
+		return apiResponse{}, &HTTPError{StatusCode: statusCode, Message: message}
 	}
 	if output != nil && len(envelope.Metadata) > 0 && string(envelope.Metadata) != "null" {
 		if err := json.Unmarshal(envelope.Metadata, output); err != nil {
-			return fmt.Errorf("decode Incus metadata: %w", err)
+			return apiResponse{}, fmt.Errorf("decode Incus metadata: %w", err)
 		}
 	}
-	return nil
+	return envelope, nil
 }
 
 func (a *Adapter) waitOperation(ctx context.Context, operation string) error {
@@ -153,8 +188,12 @@ func (a *Adapter) waitOperation(ctx context.Context, operation string) error {
 		StatusCode int    `json:"status_code"`
 		Err        string `json:"err"`
 	}
-	if err := a.request(ctx, http.MethodGet, operation+"/wait", nil, nil, &result); err != nil {
+	envelope, err := a.call(ctx, a.operationTimeout, http.MethodGet, operation+"/wait", nil, nil, &result)
+	if err != nil {
 		return fmt.Errorf("wait for Incus operation: %w", err)
+	}
+	if envelope.Type == "async" {
+		return errors.New("wait for Incus operation returned another async operation")
 	}
 	if result.StatusCode >= 400 || result.Err != "" {
 		return fmt.Errorf("Incus operation failed: %s", result.Err)

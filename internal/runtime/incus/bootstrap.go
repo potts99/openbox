@@ -73,7 +73,7 @@ func (a *Adapter) Bootstrap(ctx context.Context, config BootstrapConfig) error {
 	}
 	project := resource{
 		Name: config.Project, Description: "OpenBox managed project",
-		Config: managedConfig("project", map[string]string{"features.networks": "true", "features.profiles": "true"}),
+		Config: managedConfig("project", map[string]string{"features.images": "false", "features.networks": "true", "features.profiles": "true"}),
 	}
 	projectExists, err := a.checkExisting(ctx, "project", "/1.0/projects/"+url.PathEscape(config.Project), nil, project)
 	if err != nil {

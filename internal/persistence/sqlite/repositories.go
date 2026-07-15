@@ -26,6 +26,32 @@ func (s *Store) CreateOwner(ctx context.Context, owner domain.Owner) error {
 	return mapWriteError(err)
 }
 
+// EnsureImage records the immutable fingerprint selected for a runtime alias.
+func (s *Store) EnsureImage(ctx context.Context, image domain.Image) error {
+	if image.ID == "" || image.OwnerID == "" || image.Alias == "" || image.Digest == "" {
+		return &domain.Error{Code: domain.CodeInvalidArgument, Field: "image"}
+	}
+	release, err := s.acquireWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	_, err = s.db.ExecContext(ctx, `INSERT INTO images(id,owner_id,alias,source,digest,architecture,compatibility,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING`, image.ID, image.OwnerID, image.Alias, image.Source,
+		image.Digest, image.Architecture, image.Compatibility, formatTime(image.CreatedAt), formatTime(image.UpdatedAt))
+	if err != nil {
+		return mapWriteError(err)
+	}
+	var ownerID, alias, digest string
+	if err := s.db.QueryRowContext(ctx, `SELECT owner_id,alias,digest FROM images WHERE id=?`, image.ID).Scan(&ownerID, &alias, &digest); err != nil {
+		return fmt.Errorf("read ensured image: %w", err)
+	}
+	if ownerID != string(image.OwnerID) || alias != image.Alias || digest != image.Digest {
+		return &domain.Error{Code: domain.CodeConflict, Field: "image", Cause: errors.New("immutable image record differs")}
+	}
+	return nil
+}
+
 // CreateInstance atomically creates the durable operation and its target instance.
 // A matching idempotency replay returns the original operation without another write.
 func (s *Store) CreateInstance(ctx context.Context, instance domain.Instance, operation domain.Operation) (domain.Operation, bool, error) {
@@ -84,6 +110,154 @@ func (s *Store) GetInstance(ctx context.Context, ownerID domain.OwnerID, id doma
 		desired_state,observed_state,vcpus,memory_bytes,disk_bytes,expires_at,protected,runtime_ref,error_code,error_stage,
 		error_retryable,created_at,updated_at,deleted_at FROM instances WHERE owner_id=? AND id=?`, ownerID, id)
 	return scanInstance(row)
+}
+
+func (s *Store) GetOperationByIdempotency(ctx context.Context, ownerID domain.OwnerID, key string) (domain.Operation, bool, error) {
+	var op domain.Operation
+	var created, updated string
+	err := s.db.QueryRowContext(ctx, `SELECT id,owner_id,type,target_type,target_id,status,stage,progress,error_code,idempotency_key,request_hash,created_at,updated_at FROM operations WHERE owner_id=? AND idempotency_key=?`, ownerID, key).Scan(
+		&op.ID, &op.OwnerID, &op.Type, &op.TargetType, &op.TargetID, &op.Status, &op.Stage, &op.Progress, &op.ErrorCode, &op.IdempotencyKey, &op.RequestHash, &created, &updated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Operation{}, false, nil
+	}
+	if err != nil {
+		return domain.Operation{}, false, fmt.Errorf("find idempotent operation: %w", err)
+	}
+	op.CreatedAt, err = parseTime(created)
+	if err != nil {
+		return domain.Operation{}, false, err
+	}
+	op.UpdatedAt, err = parseTime(updated)
+	if err != nil {
+		return domain.Operation{}, false, err
+	}
+	return op, true, nil
+}
+
+func (s *Store) CompleteOperation(ctx context.Context, ownerID domain.OwnerID, id domain.OperationID, completedAt time.Time) error {
+	release, err := s.acquireWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	result, err := s.db.ExecContext(ctx, `UPDATE operations SET status=?,stage='complete',progress=100,updated_at=? WHERE owner_id=? AND id=? AND status IN (?,?)`,
+		domain.OperationSucceeded, formatTime(completedAt), ownerID, id, domain.OperationPending, domain.OperationRunning)
+	if err != nil {
+		return mapWriteError(err)
+	}
+	if count, _ := result.RowsAffected(); count == 1 {
+		return nil
+	}
+	var status domain.OperationStatus
+	if err := s.db.QueryRowContext(ctx, `SELECT status FROM operations WHERE owner_id=? AND id=?`, ownerID, id).Scan(&status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return &domain.Error{Code: domain.CodeNotFound, Field: "operation"}
+		}
+		return fmt.Errorf("read completed operation: %w", err)
+	}
+	if status == domain.OperationSucceeded {
+		return nil
+	}
+	return &domain.Error{Code: domain.CodeConflict, Field: "operation.status"}
+}
+
+// UpdateInstanceObservation persists runtime facts while preventing runtime
+// identity changes and invalid lifecycle transitions.
+func (s *Store) UpdateInstanceObservation(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID, runtimeRef string, actual domain.IsolationType, observed domain.ObservedState, errorCode domain.ErrorCode, updatedAt time.Time) error {
+	release, err := s.acquireWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin observation update: %w", err)
+	}
+	defer tx.Rollback()
+	current, err := getInstanceTx(ctx, tx, ownerID, id)
+	if err != nil {
+		return err
+	}
+	if current.RuntimeRef != runtimeRef {
+		return &domain.Error{Code: domain.CodeConflict, Field: "runtime_ref"}
+	}
+	if actual != domain.IsolationContainer {
+		return &domain.Error{Code: domain.CodeInvalidArgument, Field: "actual_isolation"}
+	}
+	if err := domain.ValidateObservedTransition(current.ObservedState, observed); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE instances SET actual_isolation=?,observed_state=?,error_code=?,updated_at=? WHERE owner_id=? AND id=? AND runtime_ref=?`,
+		actual, observed, errorCode, formatTime(updatedAt), ownerID, id, runtimeRef)
+	if err != nil {
+		return mapWriteError(err)
+	}
+	if n, _ := result.RowsAffected(); n != 1 {
+		return &domain.Error{Code: domain.CodeConflict, Field: "runtime_ref"}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) IsInstanceTombstoned(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID) (bool, error) {
+	var found int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM instance_tombstones WHERE owner_id=? AND instance_id=?`, ownerID, id).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read instance tombstone: %w", err)
+	}
+	return true, nil
+}
+
+// FinalizeInstanceDeletion references the already-created delete operation and
+// removes active metadata only after the application verified runtime removal.
+func (s *Store) FinalizeInstanceDeletion(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID, operationID domain.OperationID, deletedAt time.Time) error {
+	release, err := s.acquireWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin deletion finalization: %w", err)
+	}
+	defer tx.Rollback()
+	i, err := getInstanceTx(ctx, tx, ownerID, id)
+	if err != nil {
+		return err
+	}
+	if i.Protected {
+		return &domain.Error{Code: domain.CodeProtectedBase, Field: "instance"}
+	}
+	if i.ObservedState != domain.ObservedDeleted {
+		return &domain.Error{Code: domain.CodeInvalidTransition, Field: "observed_state"}
+	}
+	var operationOwner, targetType, targetID string
+	if err := tx.QueryRowContext(ctx, `SELECT owner_id,target_type,target_id FROM operations WHERE id=?`, operationID).Scan(&operationOwner, &targetType, &targetID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return &domain.Error{Code: domain.CodeNotFound, Field: "operation"}
+		}
+		return fmt.Errorf("read delete operation: %w", err)
+	}
+	if operationOwner != string(ownerID) || targetType != "instance" || targetID != string(id) {
+		return &domain.Error{Code: domain.CodeInvalidArgument, Field: "operation.target"}
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE operations SET status=?,stage='complete',progress=100,updated_at=? WHERE owner_id=? AND id=? AND status IN (?,?)`,
+		domain.OperationSucceeded, formatTime(deletedAt), ownerID, operationID, domain.OperationPending, domain.OperationRunning)
+	if err != nil {
+		return mapWriteError(err)
+	}
+	if count, _ := result.RowsAffected(); count != 1 {
+		return &domain.Error{Code: domain.CodeConflict, Field: "operation.status"}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO instance_tombstones(instance_id,owner_id,name,operation_id,deleted_at) VALUES(?,?,?,?,?)`, id, ownerID, i.Name, operationID, formatTime(deletedAt)); err != nil {
+		return mapWriteError(err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM instances WHERE owner_id=? AND id=?`, ownerID, id); err != nil {
+		return mapWriteError(err)
+	}
+	return tx.Commit()
 }
 
 // UpdateInstanceState validates both lifecycle changes and persists them with an operation atomically.
