@@ -4,6 +4,7 @@ package networkpolicy_test
 
 import (
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -42,6 +43,32 @@ func TestEvaluateConnectivityMatrix(t *testing.T) {
 				t.Fatalf("Evaluate(%q, %q) = %q, want %q", tt.mode, tt.dest, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRestrictedACLNameUsesStableInstanceIdentity(t *testing.T) {
+	t.Parallel()
+
+	const instanceID = "instance_8e063b34-3194-42c1-a968-b9565b1b04f6"
+	first := networkpolicy.RestrictedACLName(instanceID)
+	second := networkpolicy.RestrictedACLName(instanceID)
+
+	if first != second {
+		t.Fatalf("RestrictedACLName(%q) is not stable: %q then %q", instanceID, first, second)
+	}
+	if first == networkpolicy.RestrictedACLName("instance_9e063b34-3194-42c1-a968-b9565b1b04f6") {
+		t.Fatal("different instance IDs produced the same restricted ACL name")
+	}
+	if !regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9-]{0,62}$`).MatchString(first) {
+		t.Fatalf("RestrictedACLName(%q) = %q, want Incus-safe ACL name", instanceID, first)
+	}
+	if strings.HasSuffix(first, "-") {
+		t.Fatalf("RestrictedACLName(%q) = %q, must not have a trailing dash", instanceID, first)
+	}
+	for _, guestIP := range []string{"10.42.0.17", "10.42.0.99"} {
+		if strings.Contains(first, guestIP) {
+			t.Fatalf("RestrictedACLName(%q) = %q contains guest IP %q", instanceID, first, guestIP)
+		}
 	}
 }
 
