@@ -18,7 +18,7 @@ Slice 11 packages:
   is integrity-threatening (`IdentityConflictError`).
 - Provenance is historical text, not a live FK — source deletion is safe.
 - `StorageEfficientCopy` must be true before any copy-on-write claim.
-- Unprotected Devbox clones surface a secrets warning before execution.
+- Unprotected VPS clones with Pi installed surface a secrets warning before execution.
 
 ## Tests to run
 

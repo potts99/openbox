@@ -1,6 +1,6 @@
 ---
 title: "Slice 12 — Shared Pi profile and browser-TUI launcher"
-status: implemented
+status: superseded
 milestone: "M3 Devbox and Pi"
 depends_on: ["09-browser-terminal", "11-images-snapshots-and-devbox-cloning"]
 spec: "../specs/2026-07-14-openbox-design.md"
@@ -8,6 +8,10 @@ spec: "../specs/2026-07-14-openbox-design.md"
 
 # Slice 12 — Shared Pi profile and browser-TUI launcher
 
+> **Superseded for Launch Pi / Devbox kind:** see
+> [VPS software catalog](../superpowers/specs/2026-07-15-vps-software-catalog-design.md).
+> Pi installs via the software catalog on VPS; users run Pi from Terminal.
+> Shared Pi profile preview/apply/rollback remains.
 ## Goal
 
 Ship Pi as the default v0.1 agent with shared non-secret configuration and persistent native-TUI sessions.

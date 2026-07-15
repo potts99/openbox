@@ -1,29 +1,29 @@
-# Pi profile and Launch Pi
-
-Slice 12 packages:
+# Pi profile and software catalog
 
 | Package / path | Role |
 |---|---|
-| `images/devbox/` | Pinned Pi + tmux Devbox image definition |
-| `internal/images` | Loads pins into curated Devbox manifests |
+| `images/devbox/` | Pinned Pi + tmux definition (pin source for the catalog) |
+| `internal/software` | Curated catalog + guest install recipes (`pi` first) |
+| `internal/images` | Curated image manifests; Devbox alias retained as legacy pin carrier |
 | `internal/profiles/pi` | Versioned owner Pi profiles, materialize, project separation |
-| `internal/pi` | Launch Pi tmux argv + Pi-enabled policy |
+| `internal/pi` | tmux/Pi argv helpers for terminal sessions |
 | `web/src/pages/PiProfile.tsx` | Preview, history, apply, rollback |
-| `web/src/components/LaunchPi.tsx` | Dashboard Launch Pi control |
+| `web/src/pages/InstancePage.tsx` | Software Install panel (no Launch Pi) |
 
 ## Profile apply
 
 Apply writes `/root/.pi/agent/settings.json` atomically (temp + rename) inside
 each selected instance via Incus recorded `Exec`. OpenBox never writes
-`trust.json` or project-local `.pi/`.
+`trust.json` or project-local `.pi/`. Install catalog package `pi` before apply
+when the guest does not already have the CLI.
 
-## Launch Pi
+## Running Pi
 
-Browser open with `session_name=pi` runs:
+Use the instance Terminal. A typical persistent session:
 
 ```text
 tmux new-session -A -s pi [-c <workdir>] -- pi
 ```
 
 Detach leaves the tmux session running. Pi session files and local unsupported
-product logins stay under `~/.pi/agent/` on the Devbox disk across stop/start.
+product logins stay under `~/.pi/agent/` on the VPS disk across stop/start.
