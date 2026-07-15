@@ -36,6 +36,7 @@ type InstanceRuntime interface {
 	StartInstance(context.Context, string) error
 	WaitInstanceReady(context.Context, runtimeapi.ReadinessRequest) error
 	StopInstance(context.Context, string) error
+	Exec(context.Context, runtimeapi.ExecRequest) (runtimeapi.ExecResult, error)
 	DeleteInstance(context.Context, string) error
 }
 
@@ -49,6 +50,7 @@ type Repository interface {
 	GetInstance(context.Context, domain.OwnerID, domain.InstanceID) (domain.Instance, error)
 	UpdateInstanceState(context.Context, domain.OwnerID, domain.InstanceID, domain.DesiredState, domain.ObservedState, time.Time, domain.Operation) error
 	UpdateInstanceProtection(context.Context, domain.OwnerID, domain.InstanceID, bool, time.Time) error
+	UpdateInstanceExpiry(context.Context, domain.OwnerID, domain.InstanceID, time.Time, time.Time) error
 	UpdateInstanceObservation(context.Context, domain.OwnerID, domain.InstanceID, string, domain.IsolationType, domain.ObservedState, domain.ErrorCode, time.Time) error
 	IsInstanceTombstoned(context.Context, domain.OwnerID, domain.InstanceID) (bool, error)
 	FinalizeInstanceDeletion(context.Context, domain.OwnerID, domain.InstanceID, domain.OperationID, time.Time) error
@@ -346,6 +348,70 @@ func (s *Service) SetProtection(ctx context.Context, ownerID domain.OwnerID, id 
 		return domain.Instance{}, err
 	}
 	return s.repo.GetInstance(ctx, ownerID, id)
+}
+
+// MarkExpired records desired deleted for an expired Sandbox without removing
+// the runtime yet. Cleanup retries through Delete/reconcile until Incus
+// confirms the resource is gone; observed state stays deleting until then.
+func (s *Service) MarkExpired(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID) error {
+	instance, err := s.repo.GetInstance(ctx, ownerID, id)
+	if err != nil {
+		return err
+	}
+	if instance.Kind != domain.KindSandbox {
+		return &domain.Error{Code: domain.CodeInvalidArgument, Field: "kind"}
+	}
+	if instance.DesiredState == domain.DesiredDeleted {
+		return nil
+	}
+	if instance.ExpiresAt == nil {
+		return &domain.Error{Code: domain.CodeExpiryRequired, Field: "expires_at"}
+	}
+	key := "expiry:" + string(id) + ":" + instance.ExpiresAt.UTC().Format(time.RFC3339Nano)
+	_, err = s.SubmitAction(ctx, ownerID, id, MutationDelete, key)
+	return err
+}
+
+// ExtendExpiry atomically lengthens a Sandbox TTL and rejects extension once
+// irreversible deletion has begun.
+func (s *Service) ExtendExpiry(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID, by time.Duration) (domain.Instance, error) {
+	release, err := s.acquireMutation(ctx)
+	if err != nil {
+		return domain.Instance{}, err
+	}
+	defer release()
+	instance, err := s.repo.GetInstance(ctx, ownerID, id)
+	if err != nil {
+		return domain.Instance{}, err
+	}
+	now := s.now().UTC()
+	extended, err := domain.ExtendSandboxExpiry(instance, by, now)
+	if err != nil {
+		return domain.Instance{}, err
+	}
+	if err := s.repo.UpdateInstanceExpiry(ctx, ownerID, id, *extended.ExpiresAt, extended.UpdatedAt); err != nil {
+		return domain.Instance{}, err
+	}
+	return s.repo.GetInstance(ctx, ownerID, id)
+}
+
+// Exec runs an argv command inside a managed instance and streams framed
+// output through sink. Output is never persisted to SQLite.
+func (s *Service) Exec(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID, req sandbox.ExecRequest, sink sandbox.FrameSink) error {
+	if sink == nil {
+		return &domain.Error{Code: domain.CodeInvalidArgument, Field: "exec"}
+	}
+	instance, err := s.repo.GetInstance(ctx, ownerID, id)
+	if err != nil {
+		return err
+	}
+	if instance.DesiredState == domain.DesiredDeleted || instance.ObservedState == domain.ObservedDeleting || instance.ObservedState == domain.ObservedDeleted {
+		return &domain.Error{Code: domain.CodeInvalidTransition, Field: "instance"}
+	}
+	if instance.ObservedState != domain.ObservedRunning {
+		return &domain.Error{Code: domain.CodeInvalidTransition, Field: "observed_state"}
+	}
+	return sandbox.Run(ctx, s.runtime, instance.RuntimeRef, req, sink)
 }
 
 func (s *Service) Capabilities(ctx context.Context) (runtimeapi.Capabilities, error) {

@@ -134,3 +134,33 @@ func TestRunExecTimesOut(t *testing.T) {
 		t.Fatalf("frame=%#v", sink.frames[0])
 	}
 }
+
+func TestRunExecChunksLargeOutput(t *testing.T) {
+	t.Parallel()
+	huge := bytes.Repeat([]byte("x"), (45<<10)+100)
+	execer := &stubExecer{fn: func(context.Context, runtimeapi.ExecRequest) (runtimeapi.ExecResult, error) {
+		return runtimeapi.ExecResult{ExitCode: 0, Stdout: huge}, nil
+	}}
+	sink := &frameBuf{}
+	if err := sandbox.Run(context.Background(), execer, "obx-1", sandbox.ExecRequest{Argv: []string{"cat"}}, sink); err != nil {
+		t.Fatal(err)
+	}
+	var total int
+	for _, frame := range sink.frames[:len(sink.frames)-1] {
+		out, ok := frame.(execstream.StdoutFrame)
+		if !ok {
+			t.Fatalf("frame=%T", frame)
+		}
+		encoded, err := execstream.Encode(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(encoded) > execstream.MaxFrameBytes {
+			t.Fatalf("encoded frame %d bytes", len(encoded))
+		}
+		total += len(out.Data)
+	}
+	if total != len(huge) {
+		t.Fatalf("total=%d want=%d", total, len(huge))
+	}
+}

@@ -218,6 +218,22 @@ type ErrorEnvelope struct {
 	} `json:"error"`
 }
 
+// ExecInstanceRequest defines model for ExecInstanceRequest.
+type ExecInstanceRequest struct {
+	Argv []string           `json:"argv"`
+	Env  *map[string]string `json:"env,omitempty"`
+
+	// StdinBase64 Optional base64-encoded stdin payload.
+	StdinBase64    *string `json:"stdin_base64,omitempty"`
+	TimeoutSeconds *int    `json:"timeout_seconds,omitempty"`
+	WorkingDir     *string `json:"working_dir,omitempty"`
+}
+
+// ExtendInstanceRequest defines model for ExtendInstanceRequest.
+type ExtendInstanceRequest struct {
+	DurationSeconds int `json:"duration_seconds"`
+}
+
 // Health defines model for Health.
 type Health struct {
 	ApiVersion    HealthApiVersion `json:"api_version"`
@@ -528,6 +544,24 @@ type MutateInstanceParams struct {
 	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
 }
 
+// ExecInstanceParams defines parameters for ExecInstance.
+type ExecInstanceParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+}
+
+// ExtendInstanceExpiryParams defines parameters for ExtendInstanceExpiry.
+type ExtendInstanceExpiryParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+}
+
 // ListSuggestedPortsParams defines parameters for ListSuggestedPorts.
 type ListSuggestedPortsParams struct {
 	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
@@ -704,6 +738,12 @@ type ConsumeBootstrapJSONRequestBody = BootstrapRequest
 
 // CreateInstanceJSONRequestBody defines body for CreateInstance for application/json ContentType.
 type CreateInstanceJSONRequestBody = CreateInstanceRequest
+
+// ExecInstanceJSONRequestBody defines body for ExecInstance for application/json ContentType.
+type ExecInstanceJSONRequestBody = ExecInstanceRequest
+
+// ExtendInstanceExpiryJSONRequestBody defines body for ExtendInstanceExpiry for application/json ContentType.
+type ExtendInstanceExpiryJSONRequestBody = ExtendInstanceRequest
 
 // CreateRouteJSONRequestBody defines body for CreateRoute for application/json ContentType.
 type CreateRouteJSONRequestBody = CreateRouteRequest

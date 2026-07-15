@@ -117,6 +117,37 @@ func TestCreateInstanceIsTransactionalAndIdempotent(t *testing.T) {
 	}
 }
 
+func TestUpdateInstanceExpiryIsAtomic(t *testing.T) {
+	store := openStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	createOwner(t, store, now)
+	i, err := domain.NewInstance("instance-1", "owner-1", "sandbox", domain.KindSandbox, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.CreateInstance(ctx, i, operation("op-1", "key-1", "hash-1", now)); err != nil {
+		t.Fatal(err)
+	}
+	extended := now.Add(2 * time.Hour)
+	if err := store.UpdateInstanceExpiry(ctx, "owner-1", "instance-1", extended, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetInstance(ctx, "owner-1", "instance-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ExpiresAt == nil || !got.ExpiresAt.Equal(extended) {
+		t.Fatalf("expires_at=%v", got.ExpiresAt)
+	}
+	deleting := operation("op-2", "key-2", "hash-2", now)
+	if err := store.UpdateInstanceState(ctx, "owner-1", "instance-1", domain.DesiredDeleted, domain.ObservedDeleting, now.Add(2*time.Minute), deleting); err != nil {
+		t.Fatal(err)
+	}
+	err = store.UpdateInstanceExpiry(ctx, "owner-1", "instance-1", now.Add(3*time.Hour), now.Add(3*time.Minute))
+	assertCode(t, err, domain.CodeInvalidTransition)
+}
+
 func TestCreateRollsBackOperationWhenTargetFails(t *testing.T) {
 	store := openStore(t)
 	now := time.Now().UTC()
