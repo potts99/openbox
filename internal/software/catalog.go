@@ -11,9 +11,10 @@ import (
 
 // Pin declares one package a catalog recipe installs at an exact version.
 type Pin struct {
-	Manager string // apt or npm
+	Manager string // apt, npm, or github-release
 	Name    string
-	Version string // exact version, never a range or tag
+	Version string         // exact version, never a range or tag
+	Assets  []ReleaseAsset // required when Manager == "github-release"; Name is owner/repo
 }
 
 // Package is one installable catalog entry with pins and guest argv recipes.
@@ -71,7 +72,7 @@ func (p Package) Validate() error {
 	if p.Name == "" {
 		return fmt.Errorf("package %q name is required", p.ID)
 	}
-	if len(p.Install) == 0 {
+	if len(p.Install) == 0 && !hasGitHubReleasePin(p.Pins) {
 		return fmt.Errorf("package %q must declare install steps", p.ID)
 	}
 	if len(p.Verify) == 0 {
@@ -95,7 +96,12 @@ func (p Package) Validate() error {
 }
 
 func validatePin(pin Pin) error {
-	if pin.Manager != "apt" && pin.Manager != "npm" {
+	switch pin.Manager {
+	case "github-release":
+		return validateGitHubReleasePin(pin)
+	case "apt", "npm":
+		// continue
+	default:
 		return fmt.Errorf("package %q uses unsupported manager %q", pin.Name, pin.Manager)
 	}
 	if pin.Name == "" {
