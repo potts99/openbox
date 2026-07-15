@@ -18,6 +18,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/images"
 	"github.com/openbox-dev/openbox/internal/operations"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
+	"github.com/openbox-dev/openbox/internal/sandbox"
 )
 
 const (
@@ -35,6 +36,7 @@ type InstanceRuntime interface {
 	StartInstance(context.Context, string) error
 	WaitInstanceReady(context.Context, runtimeapi.ReadinessRequest) error
 	StopInstance(context.Context, string) error
+	Exec(context.Context, runtimeapi.ExecRequest) (runtimeapi.ExecResult, error)
 	DeleteInstance(context.Context, string) error
 }
 
@@ -48,6 +50,7 @@ type Repository interface {
 	GetInstance(context.Context, domain.OwnerID, domain.InstanceID) (domain.Instance, error)
 	UpdateInstanceState(context.Context, domain.OwnerID, domain.InstanceID, domain.DesiredState, domain.ObservedState, time.Time, domain.Operation) error
 	UpdateInstanceProtection(context.Context, domain.OwnerID, domain.InstanceID, bool, time.Time) error
+	UpdateInstanceExpiry(context.Context, domain.OwnerID, domain.InstanceID, time.Time, time.Time) error
 	UpdateInstanceObservation(context.Context, domain.OwnerID, domain.InstanceID, string, domain.IsolationType, domain.ObservedState, domain.ErrorCode, time.Time) error
 	IsInstanceTombstoned(context.Context, domain.OwnerID, domain.InstanceID) (bool, error)
 	FinalizeInstanceDeletion(context.Context, domain.OwnerID, domain.InstanceID, domain.OperationID, time.Time) error
@@ -98,6 +101,7 @@ type Service struct {
 	mode                     *operations.Mode
 	instanceGatewayPublicKey string
 	mutationGate             chan struct{}
+	execGate                 *sandbox.ExecGate
 }
 
 func New(runtime InstanceRuntime, repo Repository, options Options) (*Service, error) {
@@ -113,7 +117,7 @@ func New(runtime InstanceRuntime, repo Repository, options Options) (*Service, e
 	if options.Mode == nil {
 		options.Mode = &operations.Mode{}
 	}
-	service := &Service{runtime: runtime, repo: repo, now: options.Now, newID: options.NewID, mode: options.Mode, instanceGatewayPublicKey: strings.TrimSpace(options.InstanceGatewayPublicKey), mutationGate: make(chan struct{}, 1)}
+	service := &Service{runtime: runtime, repo: repo, now: options.Now, newID: options.NewID, mode: options.Mode, instanceGatewayPublicKey: strings.TrimSpace(options.InstanceGatewayPublicKey), mutationGate: make(chan struct{}, 1), execGate: sandbox.NewExecGate(sandbox.DefaultMaxConcurrentExecsPerInstance)}
 	service.mutationGate <- struct{}{}
 	return service, nil
 }
@@ -125,6 +129,7 @@ type CreateInput struct {
 	Image              string
 	RequestedIsolation domain.IsolationRequest
 	Resources          domain.Resources
+	Lifetime           time.Duration // Sandbox only; 0 means kind default
 	OwnerPublicKey     string
 	IdempotencyKey     string
 }
@@ -152,7 +157,7 @@ type mutationRecoveryPayload struct {
 // SubmitCreate validates and durably records a create without performing a
 // runtime mutation. Durable workers execute the returned operation separately.
 func (s *Service) SubmitCreate(ctx context.Context, input CreateInput) (domain.Instance, domain.Operation, error) {
-	if input.OwnerID == "" || input.Image == "" || input.OwnerPublicKey == "" || input.IdempotencyKey == "" {
+	if input.OwnerID == "" || input.OwnerPublicKey == "" || input.IdempotencyKey == "" {
 		return domain.Instance{}, domain.Operation{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "create"}
 	}
 	release, err := s.acquireMutation(ctx)
@@ -160,11 +165,9 @@ func (s *Service) SubmitCreate(ctx context.Context, input CreateInput) (domain.I
 		return domain.Instance{}, domain.Operation{}, err
 	}
 	defer release()
-	if input.Kind == "" {
-		input.Kind = domain.KindVPS
-	}
-	if input.RequestedIsolation == "" {
-		input.RequestedIsolation = domain.IsolationBestAvailable
+	lifetime, err := applyCreateDefaults(&input)
+	if err != nil {
+		return domain.Instance{}, domain.Operation{}, err
 	}
 	requestHash, err := hashCreateInput(input)
 	if err != nil {
@@ -231,6 +234,7 @@ func (s *Service) SubmitCreate(ctx context.Context, input CreateInput) (domain.I
 	instance.ActualIsolation = actualIsolation
 	instance.Resources = input.Resources
 	instance.RuntimeRef = runtimeReference(instanceID)
+	applyLifetime(&instance, lifetime, now)
 	if err := domain.ValidateInstance(instance); err != nil {
 		return domain.Instance{}, domain.Operation{}, err
 	}
@@ -347,6 +351,76 @@ func (s *Service) SetProtection(ctx context.Context, ownerID domain.OwnerID, id 
 	return s.repo.GetInstance(ctx, ownerID, id)
 }
 
+// MarkExpired records desired deleted for an expired Sandbox without removing
+// the runtime yet. Cleanup retries through Delete/reconcile until Incus
+// confirms the resource is gone; observed state stays deleting until then.
+func (s *Service) MarkExpired(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID) error {
+	instance, err := s.repo.GetInstance(ctx, ownerID, id)
+	if err != nil {
+		return err
+	}
+	if instance.Kind != domain.KindSandbox {
+		return &domain.Error{Code: domain.CodeInvalidArgument, Field: "kind"}
+	}
+	if instance.DesiredState == domain.DesiredDeleted {
+		return nil
+	}
+	if instance.ExpiresAt == nil {
+		return &domain.Error{Code: domain.CodeExpiryRequired, Field: "expires_at"}
+	}
+	key := "expiry:" + string(id) + ":" + instance.ExpiresAt.UTC().Format(time.RFC3339Nano)
+	_, err = s.SubmitAction(ctx, ownerID, id, MutationDelete, key)
+	return err
+}
+
+// ExtendExpiry atomically lengthens a Sandbox TTL and rejects extension once
+// irreversible deletion has begun.
+func (s *Service) ExtendExpiry(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID, by time.Duration) (domain.Instance, error) {
+	release, err := s.acquireMutation(ctx)
+	if err != nil {
+		return domain.Instance{}, err
+	}
+	defer release()
+	instance, err := s.repo.GetInstance(ctx, ownerID, id)
+	if err != nil {
+		return domain.Instance{}, err
+	}
+	now := s.now().UTC()
+	extended, err := domain.ExtendSandboxExpiry(instance, by, now)
+	if err != nil {
+		return domain.Instance{}, err
+	}
+	if err := s.repo.UpdateInstanceExpiry(ctx, ownerID, id, *extended.ExpiresAt, extended.UpdatedAt); err != nil {
+		return domain.Instance{}, err
+	}
+	return s.repo.GetInstance(ctx, ownerID, id)
+}
+
+// Exec runs an argv command inside a managed instance and streams framed
+// output through sink. Output is never persisted to SQLite.
+func (s *Service) Exec(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID, req sandbox.ExecRequest, sink sandbox.FrameSink) error {
+	if sink == nil {
+		return &domain.Error{Code: domain.CodeInvalidArgument, Field: "exec"}
+	}
+	release, err := s.execGate.Acquire(string(id))
+	if err != nil {
+		return err
+	}
+	defer release()
+	instance, err := s.repo.GetInstance(ctx, ownerID, id)
+	if err != nil {
+		return err
+	}
+	if instance.DesiredState == domain.DesiredDeleted || instance.ObservedState == domain.ObservedDeleting || instance.ObservedState == domain.ObservedDeleted {
+		return &domain.Error{Code: domain.CodeInvalidTransition, Field: "instance"}
+	}
+	if instance.ObservedState != domain.ObservedRunning {
+		return &domain.Error{Code: domain.CodeInvalidTransition, Field: "observed_state"}
+	}
+	limited := sandbox.NewRateLimitedSink(sink, sandbox.DefaultMaxOutputBytesPerWindow, sandbox.DefaultOutputRateWindow, s.now)
+	return sandbox.Run(ctx, s.runtime, instance.RuntimeRef, req, limited)
+}
+
 func (s *Service) Capabilities(ctx context.Context) (runtimeapi.Capabilities, error) {
 	return s.runtime.DiscoverCapabilities(ctx)
 }
@@ -381,7 +455,7 @@ func (s *Service) ListOperationEventsAfter(ctx context.Context, ownerID domain.O
 }
 
 func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instance, error) {
-	if input.OwnerID == "" || input.Image == "" || input.OwnerPublicKey == "" || input.IdempotencyKey == "" {
+	if input.OwnerID == "" || input.OwnerPublicKey == "" || input.IdempotencyKey == "" {
 		return domain.Instance{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "create"}
 	}
 	release, err := s.acquireMutation(ctx)
@@ -389,11 +463,9 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 		return domain.Instance{}, err
 	}
 	defer release()
-	if input.Kind == "" {
-		input.Kind = domain.KindVPS
-	}
-	if input.RequestedIsolation == "" {
-		input.RequestedIsolation = domain.IsolationBestAvailable
+	lifetime, err := applyCreateDefaults(&input)
+	if err != nil {
+		return domain.Instance{}, err
 	}
 	requestHash, err := hashCreateInput(input)
 	if err != nil {
@@ -468,6 +540,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 	instance.ActualIsolation = actualIsolation
 	instance.Resources = input.Resources
 	instance.RuntimeRef = runtimeRef
+	applyLifetime(&instance, lifetime, now)
 	if err := domain.ValidateInstance(instance); err != nil {
 		return domain.Instance{}, err
 	}
@@ -1233,6 +1306,46 @@ func hashCreateInput(input CreateInput) (string, error) {
 	}
 	sum := sha256.Sum256(encoded)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+// applyCreateDefaults fills kind-specific image, isolation, resource, and
+// lifetime gaps. Curated aliases are identical across arch/runtime, so a
+// container/x86_64 catalog lookup is enough before capabilities are known.
+func applyCreateDefaults(input *CreateInput) (time.Duration, error) {
+	applied, err := sandbox.ApplyDefaults(sandbox.CreateDefaults{
+		Kind:               input.Kind,
+		Architecture:       "x86_64",
+		Runtime:            "container",
+		Catalog:            images.DefaultCatalog(),
+		Image:              input.Image,
+		RequestedIsolation: input.RequestedIsolation,
+		Resources:          input.Resources,
+		Lifetime:           input.Lifetime,
+	})
+	if err != nil {
+		return 0, err
+	}
+	input.Kind = coalesceKind(input.Kind)
+	input.Image = applied.Image
+	input.RequestedIsolation = applied.RequestedIsolation
+	input.Resources = applied.Resources
+	input.Lifetime = applied.Lifetime
+	return applied.Lifetime, nil
+}
+
+func coalesceKind(kind domain.InstanceKind) domain.InstanceKind {
+	if kind == "" {
+		return domain.KindVPS
+	}
+	return kind
+}
+
+func applyLifetime(instance *domain.Instance, lifetime time.Duration, now time.Time) {
+	if lifetime <= 0 || instance.Kind != domain.KindSandbox {
+		return
+	}
+	expires := now.Add(lifetime)
+	instance.ExpiresAt = &expires
 }
 
 func randomID() string {

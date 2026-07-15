@@ -16,7 +16,9 @@ import (
 
 	"github.com/openbox-dev/openbox/internal/app/instances"
 	"github.com/openbox-dev/openbox/internal/domain"
+	"github.com/openbox-dev/openbox/internal/execstream"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
+	"github.com/openbox-dev/openbox/internal/sandbox"
 )
 
 func TestHealthAndCompatibilityNegotiation(t *testing.T) {
@@ -350,7 +352,11 @@ type fakeService struct {
 	operations   []domain.Operation
 	created      domain.Instance
 	operation    domain.Operation
+	extended     domain.Instance
 	err          error
+	execFrames   []execstream.Frame
+	execReq      sandbox.ExecRequest
+	extendBy     time.Duration
 
 	lastOwner      domain.OwnerID
 	lastInstanceID domain.InstanceID
@@ -423,6 +429,32 @@ func (f *fakeService) CancelOperation(_ context.Context, owner domain.OwnerID, _
 	f.lastOwner = owner
 	f.canceled = true
 	return f.operation, f.err
+}
+func (f *fakeService) Exec(_ context.Context, owner domain.OwnerID, id domain.InstanceID, req sandbox.ExecRequest, sink sandbox.FrameSink) error {
+	f.lastOwner = owner
+	f.lastInstanceID = id
+	f.execReq = req
+	if f.err != nil {
+		return f.err
+	}
+	for _, frame := range f.execFrames {
+		if err := sink.Emit(frame); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (f *fakeService) ExtendExpiry(_ context.Context, owner domain.OwnerID, id domain.InstanceID, by time.Duration) (domain.Instance, error) {
+	f.lastOwner = owner
+	f.lastInstanceID = id
+	f.extendBy = by
+	if f.err != nil {
+		return domain.Instance{}, f.err
+	}
+	if f.extended.ID != "" {
+		return f.extended, nil
+	}
+	return f.GetInstance(context.Background(), owner, id)
 }
 
 var _ Service = (*fakeService)(nil)

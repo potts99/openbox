@@ -35,6 +35,8 @@ Commands:
   stop ID                Stop an instance
   restart ID             Restart an instance
   rm ID                  Delete an instance
+  sandbox exec ID -- CMD Run argv inside an instance (streamed)
+  sandbox extend ID      Extend a Sandbox TTL
   route                  Manage HTTPS routes
   forward INSTANCE PORT  SSH-tunnel an instance port to localhost
   operation watch ID     Stream operation progress
@@ -108,6 +110,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runOperation(ctx, api, rest, options.json, stdout, stderr)
 	case "route":
 		return runRoute(ctx, api, rest, options.json, stdout, stderr)
+	case "sandbox":
+		return runSandbox(ctx, api, rest, options.json, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", command, usage)
 		return 2
@@ -260,9 +264,7 @@ func runInspect(ctx context.Context, api *openbox.Client, args []string, jsonOut
 	if jsonOutput {
 		return encodeJSON(stdout, stderr, instance)
 	}
-	fmt.Fprintf(stdout, "Name: %s\nID: %s\nKind: %s\nImage: %s\nState: %s\nIsolation: %s\nCPUs: %d\nMemory: %s\nDisk: %s\n",
-		instance.Name, instance.ID, instance.Kind, instance.ImageID, instance.ObservedState, instance.ActualIsolation,
-		instance.Resources.VCPUs, formatBytes(instance.Resources.MemoryBytes), formatBytes(instance.Resources.DiskBytes))
+	printInstanceStatus(stdout, instance, time.Now().UTC())
 	return 0
 }
 
