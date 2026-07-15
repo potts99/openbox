@@ -21,6 +21,15 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// historicalMigrationChecksums permits the one released unsafe form of 009 to
+// remain readable after its forward-safe replacement. All other checksum
+// mismatches still indicate corruption or tampering.
+var historicalMigrationChecksums = map[string]map[string]struct{}{
+	"009_instance_software": {
+		"c2ec2fec361cc8ddd55f2554c4b1174404d370d15d39736673f0c12c9946a615": {},
+	},
+}
+
 type Store struct {
 	db        *sql.DB
 	writeGate chan struct{}
@@ -105,7 +114,10 @@ func (s *Store) migrate(ctx context.Context) (err error) {
 		scanErr := conn.QueryRowContext(ctx, `SELECT checksum FROM schema_migrations WHERE version = ?`, version).Scan(&existing)
 		switch {
 		case scanErr == nil && existing != checksum:
-			return &domain.Error{Code: domain.CodePersistenceCorruption, Field: "migration_checksum"}
+			if _, allowed := historicalMigrationChecksums[version][existing]; !allowed {
+				return &domain.Error{Code: domain.CodePersistenceCorruption, Field: "migration_checksum"}
+			}
+			continue
 		case scanErr == nil:
 			continue
 		case !errors.Is(scanErr, sql.ErrNoRows):

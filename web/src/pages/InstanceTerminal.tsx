@@ -89,8 +89,8 @@ export function InstanceTerminal({
 
   useEffect(() => {
     if (connection.status !== "connected") {
-      setChromeRevealed(true);
-      return;
+		const timer = window.setTimeout(() => setChromeRevealed(true), 0);
+		return () => window.clearTimeout(timer);
     }
     if (chromeFocusRef.current) return;
     const timer = window.setTimeout(() => {

@@ -12,8 +12,8 @@ import (
 
 	"github.com/openbox-dev/openbox/internal/domain"
 	"github.com/openbox-dev/openbox/internal/execstream"
-	"github.com/openbox-dev/openbox/internal/sandbox"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
+	"github.com/openbox-dev/openbox/internal/sandbox"
 )
 
 type stubExecer struct {

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"strings"
 )
 
@@ -103,6 +104,17 @@ type ExecResult struct {
 	Stderr   []byte
 }
 
+// WriteFileRequest writes raw bytes into a managed guest filesystem path.
+// Prefer this over Exec Stdin for any non-trivial payload (binaries, configs).
+type WriteFileRequest struct {
+	Ref  string
+	Path string // absolute path inside the guest
+	Body io.Reader
+	Mode os.FileMode // guest file mode; 0 defaults to 0o644
+	UID  int         // guest uid (default 0)
+	GID  int         // guest gid (default 0)
+}
+
 type CopyRequest struct {
 	SourceRef, Snapshot, TargetRef string
 	Metadata                       map[string]string
@@ -136,12 +148,12 @@ type ConsoleOpener interface {
 // UsageSnapshot is a point-in-time reading from the runtime's instance state.
 // Counter fields are cumulative; callers derive rates (CPU %, B/s) across samples.
 type UsageSnapshot struct {
-	Status        InstanceState
-	CPUNanos      int64
-	MemoryBytes   int64
-	DiskBytes     int64
-	NetRxBytes    int64
-	NetTxBytes    int64
+	Status      InstanceState
+	CPUNanos    int64
+	MemoryBytes int64
+	DiskBytes   int64
+	NetRxBytes  int64
+	NetTxBytes  int64
 }
 
 // InstanceUsageReader reads live resource counters for a managed instance.
@@ -162,6 +174,7 @@ type Runtime interface {
 	WaitInstanceReady(context.Context, ReadinessRequest) error
 	StopInstance(context.Context, string) error
 	Exec(context.Context, ExecRequest) (ExecResult, error)
+	WriteFile(context.Context, WriteFileRequest) error
 	OpenConsole(context.Context, ConsoleRequest) (ConsoleSession, error)
 	CreateSnapshot(context.Context, string, string) error
 	DeleteSnapshot(context.Context, string, string) error

@@ -48,7 +48,7 @@ func TestApplyDefaultsPreservesExplicitOverrides(t *testing.T) {
 		Image:              "custom:image",
 		RequestedIsolation: domain.IsolationStrong,
 		Resources:          custom,
-		Lifetime:            2 * time.Hour,
+		Lifetime:           2 * time.Hour,
 	})
 	if err != nil {
 		t.Fatal(err)

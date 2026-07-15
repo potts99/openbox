@@ -113,27 +113,23 @@ func TestCookieCSRFSessionRefreshAndBearerRevocation(t *testing.T) {
 	if rw.Code != http.StatusOK {
 		t.Fatalf("refresh=%d body=%s", rw.Code, rw.Body.String())
 	}
-	var rotated auth.Session
-	if err := json.Unmarshal(rw.Body.Bytes(), &rotated); err != nil {
+	var inspected auth.Session
+	if err := json.Unmarshal(rw.Body.Bytes(), &inspected); err != nil {
 		t.Fatal(err)
 	}
-	newCookie := rw.Result().Cookies()[0].Value
-	if newCookie == cookie || rotated.CSRFToken == session.CSRFToken {
-		t.Fatal("refresh did not rotate session and CSRF")
+	if inspected.OwnerID != session.OwnerID || len(rw.Result().Cookies()) != 0 {
+		t.Fatal("session inspection unexpectedly changed credentials")
 	}
 	logout := func(csrf string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodDelete, "/v1/session", nil)
-		r.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: newCookie})
+		r.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: cookie})
 		r.Header.Set(auth.CSRFHeader, csrf)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		return w
 	}
-	if w := logout(session.CSRFToken); w.Code != http.StatusForbidden {
-		t.Fatalf("old CSRF status=%d", w.Code)
-	}
-	if w := logout(rotated.CSRFToken); w.Code != http.StatusNoContent {
-		t.Fatalf("new CSRF logout=%d body=%s", w.Code, w.Body.String())
+	if w := logout(session.CSRFToken); w.Code != http.StatusNoContent {
+		t.Fatalf("logout=%d body=%s", w.Code, w.Body.String())
 	}
 	if err := m.RevokeToken(context.Background(), "owner-local", bearer.ID); err != nil {
 		t.Fatal(err)

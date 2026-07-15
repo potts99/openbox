@@ -78,7 +78,7 @@ func (h *Handler) routeBootstrap(w http.ResponseWriter, r *http.Request, request
 		}
 		h.writeJSON(w, http.StatusOK, status)
 	case http.MethodPost:
-		if !safeCredentialTransport(r) {
+		if !h.safeCredentialTransport(r) {
 			h.writeError(w, requestID, http.StatusForbidden, "insecure_transport", "transport")
 			return true
 		}
@@ -90,7 +90,7 @@ func (h *Handler) routeBootstrap(w http.ResponseWriter, r *http.Request, request
 			h.writeError(w, requestID, http.StatusBadRequest, string(domain.CodeInvalidArgument), "body")
 			return true
 		}
-		session, secret, err := h.auth.Bootstrap(r.Context(), clientAddress(r), input.Secret, input.Password)
+		session, secret, err := h.auth.Bootstrap(r.Context(), h.clientAddress(r), input.Secret, input.Password)
 		if err != nil {
 			h.writeAuthError(w, requestID, err)
 			return true
@@ -109,7 +109,7 @@ func (h *Handler) routeSessions(w http.ResponseWriter, r *http.Request, requestI
 	if !h.requireMethod(w, r, requestID, http.MethodPost) {
 		return true
 	}
-	if !safeCredentialTransport(r) {
+	if !h.safeCredentialTransport(r) {
 		h.writeError(w, requestID, http.StatusForbidden, "insecure_transport", "transport")
 		return true
 	}
@@ -120,7 +120,7 @@ func (h *Handler) routeSessions(w http.ResponseWriter, r *http.Request, requestI
 		h.writeError(w, requestID, http.StatusBadRequest, string(domain.CodeInvalidArgument), "body")
 		return true
 	}
-	session, secret, err := h.auth.Login(r.Context(), clientAddress(r), input.Password)
+	session, secret, err := h.auth.Login(r.Context(), h.clientAddress(r), input.Password)
 	if err != nil {
 		h.writeAuthError(w, requestID, err)
 		return true
@@ -143,19 +143,18 @@ func (h *Handler) routeSession(w http.ResponseWriter, r *http.Request, requestID
 			h.writeError(w, requestID, http.StatusUnauthorized, "unauthenticated", "authorization")
 			return true
 		}
-		session, secret, err := h.auth.RotateSession(r.Context(), cookie.Value, h.requestOwner(r))
+		owner, err := h.auth.AuthenticateSession(r.Context(), cookie.Value, "", false)
 		if err != nil {
 			h.writeAuthError(w, requestID, err)
 			return true
 		}
-		h.setSessionCookie(w, r, secret, session.ExpiresAt)
-		h.writeJSON(w, http.StatusOK, session)
+		h.writeJSON(w, http.StatusOK, auth.Session{OwnerID: owner})
 	case http.MethodDelete:
 		c, _ := r.Cookie(auth.SessionCookie)
 		if c != nil {
 			_ = h.auth.Logout(r.Context(), c.Value)
 		}
-		http.SetCookie(w, &http.Cookie{Name: auth.SessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil})
+		http.SetCookie(w, &http.Cookie{Name: auth.SessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: h.requestIsSecure(r)})
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		h.methodNotAllowed(w, requestID, http.MethodGet, http.MethodDelete)
@@ -279,10 +278,10 @@ func (h *Handler) routeSSHKeys(w http.ResponseWriter, r *http.Request, requestID
 }
 
 func (h *Handler) setSessionCookie(w http.ResponseWriter, r *http.Request, value string, expires time.Time) {
-	http.SetCookie(w, &http.Cookie{Name: auth.SessionCookie, Value: value, Path: "/", Expires: expires, MaxAge: h.auth.CookieMaxAge(expires), HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: auth.SessionCookie, Value: value, Path: "/", Expires: expires, MaxAge: h.auth.CookieMaxAge(expires), HttpOnly: true, Secure: h.requestIsSecure(r), SameSite: http.SameSiteStrictMode})
 }
-func safeCredentialTransport(r *http.Request) bool {
-	if r.TLS != nil {
+func (h *Handler) safeCredentialTransport(r *http.Request) bool {
+	if h.requestIsSecure(r) {
 		return true
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -292,12 +291,41 @@ func safeCredentialTransport(r *http.Request) bool {
 	ip := net.ParseIP(host)
 	return host == "localhost" || (ip != nil && ip.IsLoopback())
 }
-func clientAddress(r *http.Request) string {
+func (h *Handler) clientAddress(r *http.Request) string {
+	if h.isTrustedProxy(r) {
+		if forwarded := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]); net.ParseIP(forwarded) != nil {
+			return forwarded
+		}
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err == nil {
 		return host
 	}
 	return r.RemoteAddr
+}
+
+func (h *Handler) requestIsSecure(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	return h.isTrustedProxy(r) && strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
+}
+
+func (h *Handler) isTrustedProxy(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	for _, network := range h.trustedProxies {
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 func (h *Handler) writeAuthError(w http.ResponseWriter, id string, err error) {
 	switch {

@@ -37,6 +37,10 @@ func main() {
 	flag.StringVar(&config.SSHKnownHostsPath, "ssh-known-hosts", "/var/lib/openbox/ssh/known_instances", "pinned instance SSH host keys")
 	flag.StringVar(&config.OwnerID, "owner-id", "owner-local", "stable local owner identifier")
 	flag.StringVar(&config.OwnerName, "owner-name", "Local owner", "local owner display name")
+	flag.Func("trusted-proxy-cidr", "CIDR permitted to provide X-Forwarded-* headers (repeatable)", func(value string) error {
+		config.TrustedProxyCIDRs = append(config.TrustedProxyCIDRs, value)
+		return nil
+	})
 	flag.IntVar(&config.WorkerConcurrency, "worker-concurrency", 2, "maximum concurrent durable operations")
 	flag.DurationVar(&config.OperationInterval, "operation-interval", time.Second, "durable operation polling interval")
 	flag.DurationVar(&config.ReconcileInterval, "reconcile-interval", 30*time.Second, "desired-state reconciliation interval")

@@ -11,7 +11,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -94,6 +96,9 @@ type Options struct {
 	// Metrics is the in-memory sample hub for instance monitoring WebSockets.
 	// When nil, /metrics returns not_implemented.
 	Metrics *metrics.Hub
+	// TrustedProxyCIDRs identifies direct peers allowed to supply forwarded
+	// client/protocol headers. Empty means proxy headers are ignored.
+	TrustedProxyCIDRs []string
 }
 
 type Handler struct {
@@ -113,6 +118,7 @@ type Handler struct {
 	piProfiles         *pi.Service
 	piApplier          *pi.Applier
 	metrics            *metrics.Hub
+	trustedProxies     []*net.IPNet
 }
 
 func New(service Service, options Options) (*Handler, error) {
@@ -135,6 +141,14 @@ func New(service Service, options Options) (*Handler, error) {
 		options.EventBatchSize = defaultEventLimit
 	}
 	limits := options.TerminalLimits.WithDefaults()
+	trustedProxies := make([]*net.IPNet, 0, len(options.TrustedProxyCIDRs))
+	for _, raw := range options.TrustedProxyCIDRs {
+		_, network, err := net.ParseCIDR(strings.TrimSpace(raw))
+		if err != nil {
+			return nil, fmt.Errorf("invalid trusted proxy CIDR %q: %w", raw, err)
+		}
+		trustedProxies = append(trustedProxies, network)
+	}
 	return &Handler{
 		service: service, fixedOwnerID: options.OwnerID, auth: options.Auth, routes: options.Routes,
 		pollInterval: options.PollInterval, heartbeatInterval: options.HeartbeatInterval, maxBodyBytes: options.MaxBodyBytes,
@@ -146,6 +160,7 @@ func New(service Service, options Options) (*Handler, error) {
 		piProfiles:         options.PiProfiles,
 		piApplier:          options.PiApplier,
 		metrics:            options.Metrics,
+		trustedProxies:     trustedProxies,
 	}, nil
 }
 

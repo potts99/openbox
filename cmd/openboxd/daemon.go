@@ -47,6 +47,7 @@ type daemonConfig struct {
 	APIAddress, APITLSCertificate, APITLSKey                                     string
 	SSHAddress, SSHHostKeyPath, SSHInstanceKeyPath, SSHKnownHostsPath            string
 	OwnerID, OwnerName                                                           string
+	TrustedProxyCIDRs                                                            []string
 	WorkerConcurrency                                                            int
 	OperationInterval, ReconcileInterval, MetricsInterval, Lease                 time.Duration
 }
@@ -173,7 +174,7 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
-	piApplier := piprofile.NewApplier(piProfiles, piprofile.NewExecGuestWriter(func(ctx context.Context, runtimeRef string, command []string, stdin []byte) error {
+	guestExec := func(ctx context.Context, runtimeRef string, command []string, stdin []byte) error {
 		var stdinReader io.Reader
 		if len(stdin) > 0 {
 			stdinReader = bytes.NewReader(stdin)
@@ -193,7 +194,18 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 			return fmt.Errorf("guest command failed: %s", msg)
 		}
 		return nil
-	}, piprofile.DefaultGuestHome))
+	}
+	guestWrite := func(ctx context.Context, runtimeRef, path string, content []byte, mode os.FileMode) error {
+		return runtime.WriteFile(ctx, runtimeapi.WriteFileRequest{
+			Ref:  runtimeRef,
+			Path: path,
+			Body: bytes.NewReader(content),
+			Mode: mode,
+			UID:  0,
+			GID:  0,
+		})
+	}
+	piApplier := piprofile.NewApplier(piProfiles, piprofile.NewFileGuestWriter(guestWrite, guestExec, piprofile.DefaultGuestHome))
 	worker, err := operations.NewWorker(store, recovery.Executor{Instances: service, Snapshots: snapshotService, Clones: cloneService}, operations.Config{WorkerID: "openboxd-local", Concurrency: config.WorkerConcurrency, Lease: config.Lease, Mode: mode})
 	if err != nil {
 		return fail(err)
@@ -238,13 +250,14 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 		return targets, nil
 	}, runtime.InstanceUsage)
 	handler, err := httpapi.New(service, httpapi.Options{
-		Auth:          authManager,
-		Routes:        routeService,
-		Console:       runtime,
-		TerminalAudit: durableTerminalAuditor{store: store, fallbackOwner: domain.OwnerID(config.OwnerID)},
-		PiProfiles:    piProfiles,
-		PiApplier:     piApplier,
-		Metrics:       metricsHub,
+		Auth:              authManager,
+		Routes:            routeService,
+		Console:           runtime,
+		TerminalAudit:     durableTerminalAuditor{store: store, fallbackOwner: domain.OwnerID(config.OwnerID)},
+		PiProfiles:        piProfiles,
+		PiApplier:         piApplier,
+		Metrics:           metricsHub,
+		TrustedProxyCIDRs: config.TrustedProxyCIDRs,
 	})
 	if err != nil {
 		return fail(err)

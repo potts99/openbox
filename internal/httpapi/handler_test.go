@@ -387,20 +387,20 @@ func assertJSONContains(t *testing.T, body []byte, fragments ...string) {
 }
 
 type fakeService struct {
-	capabilities       runtimeapi.Capabilities
-	images             []domain.Image
-	instances          []domain.Instance
-	operations         []domain.Operation
-	created            domain.Instance
-	operation          domain.Operation
-	extended           domain.Instance
-	software           []domain.InstanceSoftware
-	installedSoftware  domain.InstanceSoftware
-	err                error
-	execFrames         []execstream.Frame
-	execReq            sandbox.ExecRequest
-	extendBy           time.Duration
-	installPackageID   string
+	capabilities      runtimeapi.Capabilities
+	images            []domain.Image
+	instances         []domain.Instance
+	operations        []domain.Operation
+	created           domain.Instance
+	operation         domain.Operation
+	extended          domain.Instance
+	software          []domain.InstanceSoftware
+	installedSoftware domain.InstanceSoftware
+	err               error
+	execFrames        []execstream.Frame
+	execReq           sandbox.ExecRequest
+	extendBy          time.Duration
+	installPackageID  string
 
 	lastOwner      domain.OwnerID
 	lastInstanceID domain.InstanceID
