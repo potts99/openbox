@@ -40,6 +40,7 @@ func main() {
 	flag.IntVar(&config.WorkerConcurrency, "worker-concurrency", 2, "maximum concurrent durable operations")
 	flag.DurationVar(&config.OperationInterval, "operation-interval", time.Second, "durable operation polling interval")
 	flag.DurationVar(&config.ReconcileInterval, "reconcile-interval", 30*time.Second, "desired-state reconciliation interval")
+	flag.DurationVar(&config.MetricsInterval, "metrics-interval", 10*time.Second, "instance usage sampling interval")
 	flag.DurationVar(&config.Lease, "operation-lease", time.Minute, "durable operation claim lease")
 	flag.Parse()
 	if err := config.validate(); err != nil {

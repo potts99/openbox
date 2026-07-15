@@ -358,7 +358,7 @@ func (noopReconciler) RunOnce(context.Context) (reconcile.Report, error) {
 }
 
 func testDaemonConfig() daemonConfig {
-	return daemonConfig{DatabasePath: "/tmp/openbox-test.db", IncusSocket: "/tmp/incus.sock", APIAddress: "127.0.0.1:8443", SSHAddress: ":2222", SSHHostKeyPath: "/tmp/openbox-test-host", SSHInstanceKeyPath: "/tmp/openbox-test-instance", SSHKnownHostsPath: "/tmp/openbox-test-known", OwnerID: "owner-local", OwnerName: "Local owner", WorkerConcurrency: 1, OperationInterval: time.Hour, ReconcileInterval: time.Hour, Lease: time.Minute}
+	return daemonConfig{DatabasePath: "/tmp/openbox-test.db", IncusSocket: "/tmp/incus.sock", APIAddress: "127.0.0.1:8443", SSHAddress: ":2222", SSHHostKeyPath: "/tmp/openbox-test-host", SSHInstanceKeyPath: "/tmp/openbox-test-instance", SSHKnownHostsPath: "/tmp/openbox-test-known", OwnerID: "owner-local", OwnerName: "Local owner", WorkerConcurrency: 1, OperationInterval: time.Hour, ReconcileInterval: time.Hour, MetricsInterval: time.Hour, Lease: time.Minute}
 }
 
 func waitCall(t *testing.T, called <-chan struct{}) {
