@@ -635,6 +635,7 @@ type recordingNetworkPolicy struct {
 	status                 domain.NetworkPolicyStatus
 	calls                  []string
 	observe                func(domain.Instance)
+	verify                 func(domain.Instance)
 	observedWhenApplied    domain.ObservedState
 	runtimeGoneWhenRemoved bool
 }
@@ -654,7 +655,10 @@ func (p *recordingNetworkPolicy) ApplyNetworkPolicy(_ context.Context, instance 
 	return p.applyErr
 }
 
-func (p *recordingNetworkPolicy) VerifyNetworkPolicy(context.Context, domain.Instance) error {
+func (p *recordingNetworkPolicy) VerifyNetworkPolicy(_ context.Context, instance domain.Instance) error {
+	if p.verify != nil {
+		p.verify(instance)
+	}
 	return p.verifyErr
 }
 
@@ -714,6 +718,15 @@ type failureRuntime struct {
 	operation  string
 	nth, calls int
 	failure    error
+}
+
+type failingObservationRepository struct {
+	Repository
+	err error
+}
+
+func (r failingObservationRepository) UpdateInstanceObservation(context.Context, domain.OwnerID, domain.InstanceID, string, domain.IsolationType, domain.ObservedState, domain.ErrorCode, time.Time) error {
+	return r.err
 }
 
 func (r *failureRuntime) fail(operation string) error {
@@ -944,7 +957,7 @@ func TestPolicyVerificationFailurePreventsReadyAndMarksDriftOnInspect(t *testing
 	runtime := fake.New(testCapabilities())
 	runtime.AddImage(testImage())
 	policy := &recordingNetworkPolicy{verifyErr: errors.New("ACL mismatch")}
-	service, _, store := newPolicyTestService(t, runtime, policy)
+	service, fakeRuntime, store := newPolicyTestService(t, runtime, policy)
 
 	if _, err := service.Create(context.Background(), createInput()); !errors.Is(err, policy.verifyErr) {
 		t.Fatalf("create error=%v", err)
@@ -967,7 +980,23 @@ func TestPolicyVerificationFailurePreventsReadyAndMarksDriftOnInspect(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := service.Stop(context.Background(), created.OwnerID, created.ID, "prepare-policy-drift"); err != nil {
+		t.Fatal(err)
+	}
+	if err := fakeRuntime.StartInstance(context.Background(), created.RuntimeRef); err != nil {
+		t.Fatal(err)
+	}
 	policy.verifyErr = errors.New("NIC ACLs drifted")
+	policy.verify = func(instance domain.Instance) {
+		stored, err := store.GetInstance(context.Background(), created.OwnerID, created.ID)
+		if err != nil {
+			t.Errorf("read instance while verifying policy: %v", err)
+			return
+		}
+		if stored.ObservedState == domain.ObservedRunning {
+			t.Error("policy verification ran after instance was persisted running")
+		}
+	}
 	if _, err := service.Refresh(context.Background(), created.OwnerID, created.ID); !errors.Is(err, policy.verifyErr) {
 		t.Fatalf("refresh error=%v", err)
 	}
@@ -977,6 +1006,30 @@ func TestPolicyVerificationFailurePreventsReadyAndMarksDriftOnInspect(t *testing
 	}
 	if stored.ObservedState != domain.ObservedError {
 		t.Fatalf("inspect policy drift left instance ready: %+v", stored)
+	}
+}
+
+func TestRefreshReturnsPersistenceFailureWhenRecordingPolicyDrift(t *testing.T) {
+	service, runtime, store := newTestService(t, nil)
+	created, err := service.Create(context.Background(), createInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	driftErr := errors.New("NIC ACLs drifted")
+	writeErr := errors.New("database unavailable")
+	policy := &recordingNetworkPolicy{verifyErr: driftErr}
+	failingService, err := New(runtime, failingObservationRepository{Repository: store, err: writeErr}, Options{
+		Now:           func() time.Time { return time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC) },
+		NewID:         newIDs("unused"),
+		NetworkPolicy: policy,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = failingService.Refresh(context.Background(), created.OwnerID, created.ID)
+	if !errors.Is(err, driftErr) || !errors.Is(err, writeErr) {
+		t.Fatalf("refresh error=%v, want policy and persistence failures", err)
 	}
 }
 
