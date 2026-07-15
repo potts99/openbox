@@ -33,9 +33,8 @@ not require `Origin`.
 ### Limits
 
 The daemon enforces frame size, inbound rate, concurrent sessions per owner and
-per instance, idle timeout, and pending buffer caps. Exceeding a limit closes
-the WebSocket with a typed error frame (`frame_too_large`, `rate_limited`,
-`idle_timeout`, `buffer_limit`).
+per instance, and idle timeout. Exceeding a limit closes the WebSocket with a
+typed error frame (`frame_too_large`, `rate_limited`, `idle_timeout`).
 
 ## Persistent sessions (tmux)
 

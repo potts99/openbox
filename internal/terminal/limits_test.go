@@ -28,9 +28,6 @@ func TestDefaultLimitsAreDocumentedAndPositive(t *testing.T) {
 	if l.IdleTimeout <= 0 {
 		t.Fatalf("IdleTimeout=%v", l.IdleTimeout)
 	}
-	if l.MaxTotalBufferBytes <= 0 {
-		t.Fatalf("MaxTotalBufferBytes=%d", l.MaxTotalBufferBytes)
-	}
 }
 
 func TestInboundLimiterAllowsWithinWindowThenRejects(t *testing.T) {
@@ -144,26 +141,6 @@ func TestIdleWatchExpiresWithoutTraffic(t *testing.T) {
 	watch.Touch(now.Add(6 * time.Second))
 	if watch.Expired(now.Add(10 * time.Second)) {
 		t.Fatal("touch should extend idle deadline")
-	}
-}
-
-func TestBufferBudgetRejectsWhenFull(t *testing.T) {
-	t.Parallel()
-	b := NewBufferBudget(100)
-	if err := b.Acquire(60); err != nil {
-		t.Fatal(err)
-	}
-	if err := b.Acquire(50); !errors.Is(err, ErrBufferLimit) {
-		t.Fatalf("err=%v want ErrBufferLimit", err)
-	}
-	b.Release(60)
-	if err := b.Acquire(100); err != nil {
-		t.Fatal(err)
-	}
-	b.Release(100)
-	b.Release(10) // over-release must not go negative / panic
-	if got := b.Used(); got != 0 {
-		t.Fatalf("used=%d want 0", got)
 	}
 }
 

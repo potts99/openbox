@@ -1,12 +1,56 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useEffect, useRef, type ReactElement } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InstanceTerminal } from "./InstanceTerminal";
 import { encodeFrame } from "../terminal/protocol";
-import { TestTerminalSurface } from "../terminal/TerminalSurface";
+import type { TerminalSurfaceHandle, TerminalSurfaceProps } from "../terminal/TerminalSurface";
+
+/** Lightweight surface used in unit tests (no canvas / xterm). */
+function TestTerminalSurface({ onData, onResize, onReady }: TerminalSurfaceProps): ReactElement {
+  const handleRef = useRef<TerminalSurfaceHandle>({
+    write() { /* test surface ignores PTY output */ },
+    focus() { /* focus is handled by the host element */ },
+    dispose() { /* nothing to dispose */ },
+  });
+
+  useEffect(() => {
+    onResize(80, 24);
+    onReady?.(handleRef.current);
+    const onWindowResize = () => onResize(100, 30);
+    window.addEventListener("resize", onWindowResize);
+    return () => window.removeEventListener("resize", onWindowResize);
+  }, [onData, onReady, onResize]);
+
+  return (
+    <div
+      className="terminal-surface"
+      role="application"
+      aria-label="Instance terminal"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+          event.preventDefault();
+          onData(event.key);
+        } else if (event.key === "Enter") {
+          event.preventDefault();
+          onData("\r");
+        } else if (event.key === "Backspace") {
+          event.preventDefault();
+          onData("\x7f");
+        }
+      }}
+      onPaste={(event) => {
+        event.preventDefault();
+        const text = event.clipboardData?.getData("text") ?? "";
+        if (text) onData(text);
+      }}
+    />
+  );
+}
 
 class FakeWebSocket {
   static OPEN = 1;

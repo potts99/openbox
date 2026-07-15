@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package terminal defines the browser-terminal WebSocket frame protocol and
-// session limit helpers (frame size, inbound rate, concurrent sessions, idle,
-// and buffer budgets).
+// session limit helpers (frame size, inbound rate, concurrent sessions, idle).
 //
 // Frames are JSON text messages with a discriminant "type" field. Input and
 // output payloads are base64-encoded so arbitrary PTY bytes round-trip safely.
@@ -18,7 +17,7 @@ import (
 )
 
 // MaxFrameBytes is the maximum accepted encoded frame size. Connection-level
-// rate, idle, session, and buffer limits build on this hard decode bound.
+// rate, idle, and session limits build on this hard decode bound.
 const MaxFrameBytes = 64 << 10
 
 // Frame type discriminants.

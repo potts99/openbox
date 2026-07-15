@@ -160,19 +160,6 @@ func (s *persistentConsoleStore) markDetached(id string) {
 	}
 }
 
-func (s *persistentConsoleStore) remove(id string) *persistentConsole {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	entry := s.byID[id]
-	if entry == nil {
-		return nil
-	}
-	delete(s.byID, id)
-	delete(s.byName, persistentNameKey(entry.ownerID, entry.instanceID, entry.sessionName))
-	entry.detachOutput()
-	return entry
-}
-
 // purgeAndClose drops a persistent entry and closes its console. Invoked when the
 // guest PTY ends (stdout EOF) so reconnect by session_name opens a fresh console.
 func (s *persistentConsoleStore) purgeAndClose(id string) {
