@@ -84,4 +84,22 @@ describe("InstancePage", () => {
     await user.click(screen.getByRole("button", { name: "← Instances" }));
     expect(onBack).toHaveBeenCalled();
   });
+
+  it("hides Launch Pi on plain VPS images", async () => {
+    render(<InstancePage api={createApi()} instanceId="box-1" onBack={() => undefined} onOpenTerminal={() => undefined} />);
+    await screen.findByRole("heading", { name: "demo" });
+    expect(screen.queryByRole("button", { name: "Launch Pi" })).toBeNull();
+  });
+
+  it("shows Launch Pi for Devboxes", async () => {
+    const user = userEvent.setup();
+    const onOpenTerminal = vi.fn();
+    const api = createApi({
+      getInstance: vi.fn().mockResolvedValue({ ...detail, kind: "devbox" }),
+    });
+    render(<InstancePage api={api} instanceId="box-1" onBack={() => undefined} onOpenTerminal={onOpenTerminal} />);
+    await screen.findByRole("heading", { name: "demo" });
+    await user.click(screen.getByRole("button", { name: "Launch Pi" }));
+    expect(onOpenTerminal).toHaveBeenCalledWith({ id: "box-1", name: "demo", launchPi: true });
+  });
 });
