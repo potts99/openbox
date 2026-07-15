@@ -4,6 +4,8 @@
 package networkpolicy
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/netip"
@@ -29,6 +31,44 @@ const (
 	Allow Decision = "allow"
 	Deny  Decision = "deny"
 )
+
+const (
+	restrictedACLPrefix     = "obx-egr-"
+	restrictedACLHashLength = 12
+	incusACLNameMaxLength   = 63
+)
+
+// RestrictedACLName returns the deterministic, Incus-safe ACL name for an
+// instance's restricted egress policy. InstanceID, rather than guest IP, is
+// the canonical policy identity because guest IPs can change across restarts.
+func RestrictedACLName(instanceID string) string {
+	sanitizedID := sanitizeACLNameComponent(instanceID)
+	hash := sha256.Sum256([]byte(instanceID))
+	hashSuffix := hex.EncodeToString(hash[:])[:restrictedACLHashLength]
+	maxIDLength := incusACLNameMaxLength - len(restrictedACLPrefix) - len(hashSuffix) - 1
+	if len(sanitizedID) > maxIDLength {
+		sanitizedID = sanitizedID[:maxIDLength]
+	}
+	return restrictedACLPrefix + sanitizedID + "-" + hashSuffix
+}
+
+func sanitizeACLNameComponent(value string) string {
+	var builder strings.Builder
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' ||
+			character >= 'A' && character <= 'Z' ||
+			character >= '0' && character <= '9' {
+			builder.WriteRune(character)
+		} else {
+			builder.WriteByte('-')
+		}
+	}
+	sanitized := strings.Trim(builder.String(), "-")
+	if sanitized == "" {
+		return "instance"
+	}
+	return sanitized
+}
 
 func Evaluate(mode domain.EgressMode, dest DestinationClass) Decision {
 	switch mode {
