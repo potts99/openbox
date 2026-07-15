@@ -80,6 +80,7 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
       <InstancePage
         api={api}
         instanceId={view.instanceId}
+        csrfToken={session.csrfToken || api.getCsrfToken()}
         onBack={() => setView({ kind: "list" })}
         onOpenTerminal={(instance) => setView({
           kind: "terminal",
