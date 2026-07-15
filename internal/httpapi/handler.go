@@ -220,6 +220,11 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 			h.certificateAllow(response, request, requestID)
 			return
 		}
+	case "gateway":
+		if len(segments) == 3 && segments[2] == "auth" && h.requireMethod(response, request, requestID, http.MethodGet) {
+			h.gatewayAuth(response, request, requestID)
+			return
+		}
 	case "operations":
 		if h.routeOperations(response, request, requestID, segments[2:]) {
 			return
@@ -497,6 +502,12 @@ func classifyError(err error) (int, string, string) {
 			return http.StatusBadRequest, string(domainError.Code), domainError.Field
 		case domain.CodeNotFound:
 			return http.StatusNotFound, string(domainError.Code), domainError.Field
+		case domain.CodeUnauthenticated:
+			return http.StatusUnauthorized, string(domainError.Code), domainError.Field
+		case domain.CodeForbidden:
+			return http.StatusForbidden, string(domainError.Code), domainError.Field
+		case domain.CodeNotImplemented:
+			return http.StatusNotImplemented, string(domainError.Code), domainError.Field
 		case domain.CodeConflict, domain.CodeInvalidTransition, domain.CodeProtectedBase, domain.CodeIdempotencyConflict, domain.CodeRuntimeMissing, domain.CodeCancellationUnsafe:
 			return http.StatusConflict, string(domainError.Code), domainError.Field
 		case domain.CodeUnavailable:

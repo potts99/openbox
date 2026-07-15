@@ -20,6 +20,9 @@ const (
 	CodeOperationCanceled     ErrorCode = "operation_canceled"
 	CodeCancellationUnsafe    ErrorCode = "cancellation_unsafe"
 	CodeUnavailable           ErrorCode = "unavailable"
+	CodeUnauthenticated       ErrorCode = "unauthenticated"
+	CodeForbidden             ErrorCode = "forbidden"
+	CodeNotImplemented        ErrorCode = "not_implemented"
 )
 
 // Error carries a code and field without coupling the domain to UI wording.

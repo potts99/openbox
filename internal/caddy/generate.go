@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package caddy generates and atomically applies HTTPS gateway configuration
-// from approved OpenBox routes. Certificate ask endpoints and private-route
-// auth middleware belong to later slice tasks; this package only emits markers.
+// from approved OpenBox routes. Private routes emit forward_auth to
+// /v1/gateway/auth; public routes reverse_proxy without OpenBox login.
 package caddy
 
 import (
@@ -80,6 +80,11 @@ func Generate(approved []domain.Route, resolver UpstreamResolver) ([]byte, error
 		body.WriteByte('\n')
 		fmt.Fprintf(&body, "# openbox:route_id=%s visibility=%s auth=%s\n", route.ID, route.Visibility, authMarker)
 		fmt.Fprintf(&body, "%s {\n", route.Hostname)
+		if route.Visibility == domain.RoutePrivate {
+			body.WriteString("\tforward_auth 127.0.0.1:8443 {\n")
+			body.WriteString("\t\turi /v1/gateway/auth\n")
+			body.WriteString("\t}\n")
+		}
 		fmt.Fprintf(&body, "\treverse_proxy %s:%d\n", addr, route.TargetPort)
 		body.WriteString("}\n")
 	}

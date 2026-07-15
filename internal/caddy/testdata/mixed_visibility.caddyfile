@@ -3,6 +3,9 @@
 
 # openbox:route_id=rt-private visibility=private auth=required
 private.example.com {
+	forward_auth 127.0.0.1:8443 {
+		uri /v1/gateway/auth
+	}
 	reverse_proxy 10.42.0.12:3000
 }
 

@@ -376,6 +376,27 @@ paths:
           headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
         "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/gateway/auth:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+    get:
+      operationId: gatewayAuth
+      summary: Authorize access to an HTTPS route hostname
+      description: >
+        Caddy forward_auth endpoint. Uses the request Host (or X-Forwarded-Host)
+        to select a route. Public routes return 200 without credentials. Private
+        routes require an owner session cookie, owner API bearer token, or a
+        route-scoped bearer token (obr_…). Unauthenticated by design at the HTTP
+        middleware layer; bind the API privately.
+      security: []
+      responses:
+        "200":
+          description: Access allowed.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/operations:
     parameters:
       - { $ref: "#/components/parameters/APIVersion" }
