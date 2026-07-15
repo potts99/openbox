@@ -85,7 +85,16 @@ func Generate(approved []domain.Route, resolver UpstreamResolver) ([]byte, error
 			body.WriteString("\t\turi /v1/gateway/auth\n")
 			body.WriteString("\t}\n")
 		}
-		fmt.Fprintf(&body, "\treverse_proxy %s:%d\n", addr, route.TargetPort)
+		// reverse_proxy preserves WebSockets by default. flush_interval -1 keeps
+		// SSE/streaming responses from being buffered. Explicit X-Forwarded-*
+		// and Host keep upstream views of the original client request canonical.
+		fmt.Fprintf(&body, "\treverse_proxy %s:%d {\n", addr, route.TargetPort)
+		body.WriteString("\t\theader_up Host {host}\n")
+		body.WriteString("\t\theader_up X-Forwarded-Host {host}\n")
+		body.WriteString("\t\theader_up X-Forwarded-Proto {scheme}\n")
+		body.WriteString("\t\theader_up X-Forwarded-For {remote_host}\n")
+		body.WriteString("\t\tflush_interval -1\n")
+		body.WriteString("\t}\n")
 		body.WriteString("}\n")
 	}
 	return []byte(body.String()), nil

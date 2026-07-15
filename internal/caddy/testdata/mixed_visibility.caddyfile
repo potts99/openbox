@@ -6,10 +6,22 @@ private.example.com {
 	forward_auth 127.0.0.1:8443 {
 		uri /v1/gateway/auth
 	}
-	reverse_proxy 10.42.0.12:3000
+	reverse_proxy 10.42.0.12:3000 {
+		header_up Host {host}
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-For {remote_host}
+		flush_interval -1
+	}
 }
 
 # openbox:route_id=rt-public visibility=public auth=none
 public.example.com {
-	reverse_proxy 10.42.0.5:8080
+	reverse_proxy 10.42.0.5:8080 {
+		header_up Host {host}
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-For {remote_host}
+		flush_interval -1
+	}
 }
