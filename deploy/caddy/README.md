@@ -35,4 +35,13 @@ API to loopback so only the local Caddy process can request certificates.
 4. Reload Caddy
 5. On reload failure, restore the previous file and reload again
 
-Private-route auth is not configured here (later slice task).
+Private-route auth uses `forward_auth` to `http://127.0.0.1:8443/v1/gateway/auth`.
+
+## Failure independence
+
+If Caddy validate/reload fails, OpenBox rolls back the generated snippet and
+leaves instances running. Instance lifecycle and host SSH (port 22) are not
+driven by the HTTPS gateway process. Keep the OpenBox SSH gateway on port 2222
+(default) so host recovery SSH remains available when either OpenBox gateway
+fails.
+
