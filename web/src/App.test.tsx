@@ -49,7 +49,7 @@ describe("App", () => {
     resolveBootstrap({ required: true });
     resolveSession({ authenticated: false });
 
-    expect(await screen.findByRole("heading", { name: "Claim this OpenBox" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Set up" })).toBeInTheDocument();
     expect(screen.getByLabelText("One-time setup secret")).toHaveAttribute("autocomplete", "one-time-code");
   });
 
@@ -66,8 +66,8 @@ describe("App", () => {
 
     render(<App api={createHttpApi({ fetcher })} />);
 
-    expect(await screen.findByRole("heading", { name: "Claim this OpenBox" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Return to your OpenBox" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Set up" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Sign in" })).not.toBeInTheDocument();
   });
 
   it("submits setup without storing secrets in browser storage", async () => {
@@ -84,7 +84,7 @@ describe("App", () => {
     await user.type(await screen.findByLabelText("One-time setup secret"), "setup-secret");
     await user.type(screen.getByLabelText("New password"), "correct horse battery staple");
     await user.type(screen.getByLabelText("Confirm password"), "correct horse battery staple");
-    await user.click(screen.getByRole("button", { name: "Claim OpenBox" }));
+    await user.click(screen.getByRole("button", { name: "Create owner" }));
 
     await waitFor(() => expect(setup).toHaveBeenCalledWith({
       secret: "setup-secret",
@@ -107,11 +107,11 @@ describe("App", () => {
     await user.type(await screen.findByLabelText("One-time setup secret"), "expired-setup-secret");
     await user.type(screen.getByLabelText("New password"), "correct horse battery staple");
     await user.type(screen.getByLabelText("Confirm password"), "correct horse battery staple");
-    await user.click(screen.getByRole("button", { name: "Claim OpenBox" }));
+    await user.click(screen.getByRole("button", { name: "Create owner" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(message);
-    expect(screen.getByRole("heading", { name: "Claim this OpenBox" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Return to your OpenBox" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Set up" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Sign in" })).not.toBeInTheDocument();
   });
 
   it("shows login and announces invalid credentials", async () => {
@@ -123,7 +123,7 @@ describe("App", () => {
 
     render(<App api={api} />);
     await user.type(await screen.findByLabelText("Password"), "wrong-password");
-    await user.click(screen.getByRole("button", { name: "Unlock console" }));
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Invalid credentials");
   });
@@ -134,9 +134,9 @@ describe("App", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Instances" })).toBeInTheDocument();
     const capability = await screen.findByRole("status", { name: "Runtime capability status" });
-    expect(capability).toHaveTextContent("Virtual machines unavailable");
+    expect(capability).toHaveTextContent("VMs unavailable");
     expect(capability).toHaveTextContent("/dev/kvm is not available");
-    expect(screen.getByText("No instances yet")).toBeInTheDocument();
+    expect(screen.getByText("No instances")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Show operations" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("complementary", { name: "Operations" })).not.toBeInTheDocument();
   });
@@ -181,18 +181,18 @@ describe("App", () => {
     const api = createApi({ logout });
 
     render(<App api={api} />);
-    await user.click(await screen.findByRole("button", { name: "Lock" }));
+    await user.click(await screen.findByRole("button", { name: "Sign out" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("OpenBox could not lock this session. Try again.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not sign out. Try again.");
     expect(screen.getByRole("heading", { level: 1, name: "Instances" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Return to your OpenBox" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Sign in" })).not.toBeInTheDocument();
     expect(logout).toHaveBeenCalledOnce();
   });
 
   it("has no automated accessibility violations on auth and console views", async () => {
     const loginApi = createApi({ getSession: vi.fn().mockResolvedValue({ authenticated: false }) });
     const loginView = render(<App api={loginApi} />);
-    await screen.findByRole("heading", { name: "Return to your OpenBox" });
+    await screen.findByRole("heading", { name: "Sign in" });
     expect((await axe.run(loginView.container)).violations).toEqual([]);
     loginView.unmount();
 

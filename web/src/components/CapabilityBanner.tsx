@@ -10,13 +10,10 @@ export function CapabilityBanner({ capabilities }: { capabilities: Capabilities 
       role="status"
       aria-label="Runtime capability status"
     >
-      <div className="capability-signal" aria-hidden="true">{virtualMachinesAvailable ? "●" : "!"}</div>
-      <div>
-        <strong>{virtualMachinesAvailable ? "Container and virtual-machine runtime ready" : "Virtual machines unavailable"}</strong>
-        <p>{virtualMachinesAvailable
-          ? `${capabilities.architecture} host reports both isolation modes ready.`
-          : `${capabilities.vmReason ?? "KVM support was not detected."} Containers remain ${capabilities.containers ? "available" : "unavailable"}.`}</p>
-      </div>
+      <strong>{virtualMachinesAvailable ? "Runtime ready" : "VMs unavailable"}</strong>
+      <p>{virtualMachinesAvailable
+        ? "Containers and VMs available."
+        : `${capabilities.vmReason ?? "KVM not detected."} Containers ${capabilities.containers ? "ok" : "unavailable"}.`}</p>
       <code>{capabilities.architecture}</code>
     </section>
   );
