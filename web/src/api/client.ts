@@ -49,6 +49,20 @@ export interface OperationSummary {
 
 export type InstanceAction = "start" | "stop" | "restart";
 
+export interface PiProfileSummary {
+  id: string;
+  name: string;
+  version: number;
+  settingsJson: string;
+  updatedAt: string;
+}
+
+export interface PiProfileVersion {
+  version: number;
+  settingsJson: string;
+  createdAt: string;
+}
+
 export interface OpenBoxApi {
   getBootstrapStatus(): Promise<BootstrapStatus>;
   getSession(): Promise<Session>;
@@ -58,6 +72,10 @@ export interface OpenBoxApi {
   getInstance(id: string): Promise<InstanceDetail>;
   mutateInstance(id: string, action: InstanceAction): Promise<OperationSummary>;
   listOperations(): Promise<OperationSummary[]>;
+  listPiProfiles(): Promise<PiProfileSummary[]>;
+  getPiProfileHistory(id: string): Promise<PiProfileVersion[]>;
+  rollbackPiProfile(id: string, version: number): Promise<PiProfileSummary>;
+  applyPiProfile(id: string, instanceIds: string[]): Promise<void>;
   setup(input: { secret: string; password: string }): Promise<Session>;
   login(input: { password: string }): Promise<Session>;
   logout(): Promise<void>;
@@ -219,6 +237,51 @@ export function createHttpApi(options: HttpApiOptions = {}): OpenBoxApi {
       const body = asRecord(await request("/v1/operations"));
       const items = Array.isArray(body.items) ? body.items : Array.isArray(body.operations) ? body.operations : [];
       return items.map((item) => normalizeOperation(item));
+    },
+    async listPiProfiles() {
+      const body = asRecord(await request("/v1/pi-profiles"));
+      const items = Array.isArray(body.items) ? body.items : [];
+      return items.map((item): PiProfileSummary => {
+        const row = asRecord(item);
+        return {
+          id: text(row.id),
+          name: text(row.name),
+          version: number(row.version),
+          settingsJson: typeof row.settings_json === "string" ? row.settings_json : JSON.stringify(row.settings ?? {}),
+          updatedAt: text(row.updated_at),
+        };
+      });
+    },
+    async getPiProfileHistory(id) {
+      const body = asRecord(await request(`/v1/pi-profiles/${encodeURIComponent(id)}/versions`));
+      const items = Array.isArray(body.items) ? body.items : [];
+      return items.map((item): PiProfileVersion => {
+        const row = asRecord(item);
+        return {
+          version: number(row.version),
+          settingsJson: typeof row.settings_json === "string" ? row.settings_json : JSON.stringify(row.settings ?? {}),
+          createdAt: text(row.created_at),
+        };
+      });
+    },
+    async rollbackPiProfile(id, version) {
+      const body = asRecord(await request(`/v1/pi-profiles/${encodeURIComponent(id)}/rollback`, {
+        method: "POST",
+        body: JSON.stringify({ version }),
+      }));
+      return {
+        id: text(body.id),
+        name: text(body.name),
+        version: number(body.version),
+        settingsJson: typeof body.settings_json === "string" ? body.settings_json : JSON.stringify(body.settings ?? {}),
+        updatedAt: text(body.updated_at),
+      };
+    },
+    async applyPiProfile(id, instanceIds) {
+      await request(`/v1/pi-profiles/${encodeURIComponent(id)}/apply`, {
+        method: "POST",
+        body: JSON.stringify({ instance_ids: instanceIds }),
+      });
     },
     async setup(input) {
       return normalizeSession(await request("/v1/bootstrap", { method: "POST", body: JSON.stringify(input) }), csrfToken);

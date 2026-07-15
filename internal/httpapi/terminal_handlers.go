@@ -15,6 +15,7 @@ import (
 
 	"github.com/openbox-dev/openbox/internal/auth"
 	"github.com/openbox-dev/openbox/internal/domain"
+	"github.com/openbox-dev/openbox/internal/pi"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 	"github.com/openbox-dev/openbox/internal/terminal"
 )
@@ -263,7 +264,7 @@ func (h *Handler) resolveTerminalConsole(
 			if existing := h.persistentConsoles.getByName(string(target.OwnerID), string(target.InstanceID), sessionName); existing != nil {
 				return h.claimPersistentConsole(existing, cols, rows, true)
 			}
-			return h.openPersistentConsole(ctx, target, sessionName, cols, rows)
+			return h.openPersistentConsole(ctx, target, sessionName, f.WorkingDirectory, cols, rows)
 		}
 		command, cmdErr := terminal.CommandForSession("")
 		if cmdErr != nil {
@@ -320,9 +321,10 @@ func (h *Handler) openPersistentConsole(
 	ctx context.Context,
 	target authorizedTerminal,
 	sessionName string,
+	workingDirectory string,
 	cols, rows uint16,
 ) (runtimeapi.ConsoleSession, string, string, uint16, uint16, *persistentConsole, error) {
-	command, err := terminal.CommandForSession(sessionName)
+	command, err := consoleCommandForSession(sessionName, workingDirectory)
 	if err != nil {
 		return nil, "", "", 0, 0, nil, err
 	}
@@ -349,6 +351,13 @@ func (h *Handler) openPersistentConsole(
 	})
 	h.persistentConsoles.put(entry)
 	return session, sessionName, sessionID, cols, rows, entry, nil
+}
+
+func consoleCommandForSession(sessionName, workingDirectory string) ([]string, error) {
+	if pi.IsLaunchSession(sessionName) {
+		return pi.AttachOrCreateCommand(workingDirectory)
+	}
+	return terminal.CommandForSession(sessionName)
 }
 
 func terminalResolveError(err error) (code, message string) {

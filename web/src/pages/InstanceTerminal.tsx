@@ -12,6 +12,10 @@ export interface InstanceTerminalProps {
   instanceName: string;
   csrfToken: string;
   onBack(): void;
+  /** Start or attach the named Pi tmux session. */
+  launchPi?: boolean;
+  /** Absolute guest working directory for Launch Pi (optional). */
+  workingDirectory?: string;
   WebSocketImpl?: typeof WebSocket;
   /** Override the PTY surface (tests inject a lightweight stub). */
   Surface?: (props: TerminalSurfaceProps) => ReactElement;
@@ -41,23 +45,25 @@ export function InstanceTerminal({
   instanceName,
   csrfToken,
   onBack,
+  launchPi = false,
+  workingDirectory,
   WebSocketImpl,
   Surface = XtermTerminalSurface,
 }: InstanceTerminalProps) {
   const [connection, setConnection] = useState<ConnectionState>({ status: "connecting" });
-  const [persistent, setPersistent] = useState(false);
-  const [sessionName, setSessionName] = useState("");
+  const [persistent, setPersistent] = useState(launchPi);
+  const [sessionName, setSessionName] = useState(launchPi ? "pi" : "");
   const sessionRef = useRef<TerminalSession | null>(null);
   const surfaceRef = useRef<TerminalSurfaceHandle | null>(null);
   const colsRef = useRef(80);
   const rowsRef = useRef(24);
-  const persistentRef = useRef(false);
-  const sessionNameRef = useRef("");
+  const persistentRef = useRef(launchPi);
+  const sessionNameRef = useRef(launchPi ? "pi" : "");
   const openedSessionNameRef = useRef<string | undefined>(undefined);
 
   const attachSession = useCallback(() => {
     sessionRef.current?.dispose();
-    const named = persistentRef.current ? sessionNameRef.current.trim() : "";
+    const named = launchPi ? "pi" : (persistentRef.current ? sessionNameRef.current.trim() : "");
     openedSessionNameRef.current = named || undefined;
     const session = new TerminalSession({
       instanceId,
@@ -65,13 +71,14 @@ export function InstanceTerminal({
       cols: colsRef.current,
       rows: rowsRef.current,
       sessionName: named || undefined,
+      workingDirectory: launchPi ? workingDirectory : undefined,
       WebSocketImpl,
       onStateChange: setConnection,
       onOutput: (data) => surfaceRef.current?.write(data),
     });
     sessionRef.current = session;
     session.connect();
-  }, [WebSocketImpl, csrfToken, instanceId]);
+  }, [WebSocketImpl, csrfToken, instanceId, launchPi, workingDirectory]);
 
   useEffect(() => {
     attachSession();
@@ -124,34 +131,36 @@ export function InstanceTerminal({
       <header className="terminal-toolbar">
         <button type="button" onClick={onBack}>Back to instance</button>
         <div>
-          <p className="eyebrow">Instance terminal</p>
+          <p className="eyebrow">{launchPi ? "Launch Pi" : "Instance terminal"}</p>
           <h1 id="terminal-heading">{instanceName}</h1>
         </div>
         <div className="terminal-actions">
-          <fieldset className="terminal-session-opts">
-            <legend className="visually-hidden">Persistent session</legend>
-            <label className="terminal-persistent">
-              <input
-                type="checkbox"
-                checked={persistent}
-                onChange={(event) => onPersistentChange(event.target.checked)}
-              />
-              Persistent session
-            </label>
-            <label className="terminal-session-name">
-              <span className="visually-hidden">Session name</span>
-              <input
-                type="text"
-                value={sessionName}
-                onChange={(event) => onSessionNameChange(event.target.value)}
-                disabled={!persistent}
-                placeholder="session name"
-                autoComplete="off"
-                spellCheck={false}
-                aria-label="Session name"
-              />
-            </label>
-          </fieldset>
+          {launchPi ? null : (
+            <fieldset className="terminal-session-opts">
+              <legend className="visually-hidden">Persistent session</legend>
+              <label className="terminal-persistent">
+                <input
+                  type="checkbox"
+                  checked={persistent}
+                  onChange={(event) => onPersistentChange(event.target.checked)}
+                />
+                Persistent session
+              </label>
+              <label className="terminal-session-name">
+                <span className="visually-hidden">Session name</span>
+                <input
+                  type="text"
+                  value={sessionName}
+                  onChange={(event) => onSessionNameChange(event.target.value)}
+                  disabled={!persistent}
+                  placeholder="session name"
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-label="Session name"
+                />
+              </label>
+            </fieldset>
+          )}
           <p
             className="terminal-connection"
             role="status"

@@ -16,6 +16,8 @@ export interface TerminalSessionOptions {
   rows: number;
   /** Named tmux session inside the guest; omitted for ephemeral shells. */
   sessionName?: string;
+  /** Absolute guest working directory for Launch Pi. */
+  workingDirectory?: string;
   WebSocketImpl?: typeof WebSocket;
   location?: Pick<Location, "protocol" | "host">;
   onStateChange?: (state: ConnectionState) => void;
@@ -114,6 +116,7 @@ export class TerminalSession {
         cols: this.cols,
         rows: this.rows,
         sessionName: this.options.sessionName,
+        workingDirectory: this.options.workingDirectory,
       });
     };
 

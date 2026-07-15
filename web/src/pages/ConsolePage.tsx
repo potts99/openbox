@@ -6,6 +6,7 @@ import { CapabilityBanner } from "../components/CapabilityBanner";
 import { OperationDrawer } from "../components/OperationDrawer";
 import { InstancePage } from "./InstancePage";
 import { InstanceTerminal } from "./InstanceTerminal";
+import { PiProfilePage } from "./PiProfile";
 
 interface ConsolePageProps {
   api: OpenBoxApi;
@@ -21,7 +22,8 @@ type ConsoleData =
 type View =
   | { kind: "list" }
   | { kind: "detail"; instanceId: string }
-  | { kind: "terminal"; instanceId: string; instanceName: string };
+  | { kind: "terminal"; instanceId: string; instanceName: string; launchPi?: boolean }
+  | { kind: "pi-profile" };
 
 export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
   const [data, setData] = useState<ConsoleData>({ status: "loading" });
@@ -67,6 +69,7 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
         instanceId={view.instanceId}
         instanceName={view.instanceName}
         csrfToken={session.csrfToken || api.getCsrfToken()}
+        launchPi={view.launchPi}
         onBack={() => setView({ kind: "detail", instanceId: view.instanceId })}
       />
     );
@@ -82,9 +85,14 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
           kind: "terminal",
           instanceId: instance.id,
           instanceName: instance.name,
+          launchPi: instance.launchPi,
         })}
       />
     );
+  }
+
+  if (view.kind === "pi-profile") {
+    return <PiProfilePage api={api} onBack={() => setView({ kind: "list" })} />;
   }
 
   const operations = data.status === "ready" ? data.operations : [];
@@ -95,6 +103,9 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
         <a className="wordmark" href="/" aria-label="OpenBox home"><span>OB</span> OpenBox</a>
         <nav aria-label="Primary navigation">
           <a href="#instances" aria-current="page">Instances</a>
+          <button className="nav-button" type="button" onClick={() => setView({ kind: "pi-profile" })}>
+            Pi profile
+          </button>
           <button
             className="nav-button"
             type="button"

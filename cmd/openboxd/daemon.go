@@ -27,6 +27,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/httpapi"
 	"github.com/openbox-dev/openbox/internal/operations"
 	"github.com/openbox-dev/openbox/internal/persistence/sqlite"
+	piprofile "github.com/openbox-dev/openbox/internal/profiles/pi"
 	"github.com/openbox-dev/openbox/internal/reconcile"
 	"github.com/openbox-dev/openbox/internal/routes"
 	"github.com/openbox-dev/openbox/internal/runtime/incus"
@@ -160,6 +161,10 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
+	piProfiles, err := piprofile.New(store, piprofile.Options{})
+	if err != nil {
+		return fail(err)
+	}
 	worker, err := operations.NewWorker(store, recovery.Executor{Instances: service, Snapshots: snapshotService, Clones: cloneService}, operations.Config{WorkerID: "openboxd-local", Concurrency: config.WorkerConcurrency, Lease: config.Lease, Mode: mode})
 	if err != nil {
 		return fail(err)
@@ -173,6 +178,7 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 		Routes:        routeService,
 		Console:       runtime,
 		TerminalAudit: durableTerminalAuditor{store: store, fallbackOwner: domain.OwnerID(config.OwnerID)},
+		PiProfiles:    piProfiles,
 	})
 	if err != nil {
 		return fail(err)
