@@ -733,7 +733,7 @@ func TestTerminalDetachDoesNotTerminateNamedSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Detach closes the WebSocket without an exit frame (session stays alive for reconnect/task 7).
+	// Detach closes the WebSocket without an exit frame (session stays alive for reconnect).
 	readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	for {
@@ -760,6 +760,210 @@ func TestTerminalDetachDoesNotTerminateNamedSession(t *testing.T) {
 			_ = s.Close()
 		}
 	})
+}
+
+func TestTerminalNamedOpenUsesTmuxHelper(t *testing.T) {
+	rt := newRunningFakeRuntime(t, "incus-owned-ref")
+	_, conn, ctx, ack := dialOpenTerminalWithAck(t, rt, terminal.DefaultLimits(), terminal.OpenFrame{
+		InstanceID:  "inst-owned",
+		Cols:        80,
+		Rows:        24,
+		SessionName: "pi",
+	})
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	_ = ctx
+
+	want, err := terminal.CommandForSession("pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rt.LastConsoleCommand(); !slicesEqual(got, want) {
+		t.Fatalf("console command=%v want %v", got, want)
+	}
+	if ack.SessionName != "pi" {
+		t.Fatalf("ack session_name=%q want pi", ack.SessionName)
+	}
+	if ack.SessionID == "" {
+		t.Fatal("named open ack must include session_id for reconnect")
+	}
+	t.Cleanup(func() {
+		if s := rt.ActiveConsole("incus-owned-ref"); s != nil {
+			_ = s.Close()
+		}
+	})
+}
+
+func TestTerminalUnnamedOpenDoesNotInvokeTmux(t *testing.T) {
+	rt := newRunningFakeRuntime(t, "incus-owned-ref")
+	_, conn, _, ack := dialOpenTerminalWithAck(t, rt, terminal.DefaultLimits(), terminal.OpenFrame{
+		InstanceID: "inst-owned",
+		Cols:       80,
+		Rows:       24,
+	})
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	got := rt.LastConsoleCommand()
+	if slicesContains(got, "tmux") {
+		t.Fatalf("unnamed shell command %v must not invoke tmux", got)
+	}
+	want, err := terminal.CommandForSession("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slicesEqual(got, want) {
+		t.Fatalf("console command=%v want %v", got, want)
+	}
+	if ack.SessionID != "" {
+		t.Fatalf("ephemeral open must not assign session_id, got %q", ack.SessionID)
+	}
+}
+
+func TestTerminalReconnectBySessionIDReattaches(t *testing.T) {
+	rt := newRunningFakeRuntime(t, "incus-owned-ref")
+	env := newTerminalTestEnv(t, rt, terminal.DefaultLimits())
+	conn, ctx, ack := env.dialOpen(t, terminal.OpenFrame{
+		InstanceID:  "inst-owned",
+		Cols:        80,
+		Rows:        24,
+		SessionName: "main",
+	})
+
+	if err := conn.Write(ctx, websocket.MessageText, mustEncodeTerminal(t, terminal.InputFrame{Data: []byte("keep")})); err != nil {
+		t.Fatal(err)
+	}
+	_ = readTerminalFrameUntil(t, conn, ctx, func(f terminal.Frame) bool {
+		out, ok := f.(terminal.OutputFrame)
+		return ok && string(out.Data) == "keep"
+	})
+
+	if err := conn.Write(ctx, websocket.MessageText, mustEncodeTerminal(t, terminal.DetachFrame{})); err != nil {
+		t.Fatal(err)
+	}
+	waitTerminalClosed(t, conn)
+	time.Sleep(50 * time.Millisecond)
+	if rt.ConsoleClosed("incus-owned-ref") {
+		t.Fatal("named detach must leave console open")
+	}
+	opensBefore := countFakeCalls(rt, "console.open")
+
+	conn2, ctx2 := env.dial(t)
+	defer conn2.Close(websocket.StatusNormalClosure, "")
+	if err := conn2.Write(ctx2, websocket.MessageText, mustEncodeTerminal(t, terminal.ReconnectFrame{SessionID: ack.SessionID})); err != nil {
+		t.Fatal(err)
+	}
+	reack := readOpenAck(t, conn2, ctx2)
+	if reack.SessionID != ack.SessionID {
+		t.Fatalf("reconnect ack session_id=%q want %q", reack.SessionID, ack.SessionID)
+	}
+	if countFakeCalls(rt, "console.open") != opensBefore {
+		t.Fatal("reconnect by session_id must reattach without OpenConsole")
+	}
+
+	if err := conn2.Write(ctx2, websocket.MessageText, mustEncodeTerminal(t, terminal.InputFrame{Data: []byte("again")})); err != nil {
+		t.Fatal(err)
+	}
+	_ = readTerminalFrameUntil(t, conn2, ctx2, func(f terminal.Frame) bool {
+		out, ok := f.(terminal.OutputFrame)
+		return ok && string(out.Data) == "again"
+	})
+
+	t.Cleanup(func() {
+		if s := rt.ActiveConsole("incus-owned-ref"); s != nil {
+			_ = s.Close()
+		}
+	})
+}
+
+func TestTerminalOpenSameSessionNameReattaches(t *testing.T) {
+	rt := newRunningFakeRuntime(t, "incus-owned-ref")
+	env := newTerminalTestEnv(t, rt, terminal.DefaultLimits())
+	conn, ctx, ack := env.dialOpen(t, terminal.OpenFrame{
+		InstanceID:  "inst-owned",
+		Cols:        80,
+		Rows:        24,
+		SessionName: "main",
+	})
+	if err := conn.Write(ctx, websocket.MessageText, mustEncodeTerminal(t, terminal.DetachFrame{})); err != nil {
+		t.Fatal(err)
+	}
+	waitTerminalClosed(t, conn)
+	time.Sleep(50 * time.Millisecond)
+	opensBefore := countFakeCalls(rt, "console.open")
+
+	conn2, ctx2 := env.dial(t)
+	defer conn2.Close(websocket.StatusNormalClosure, "")
+	if err := conn2.Write(ctx2, websocket.MessageText, mustEncodeTerminal(t, terminal.OpenFrame{
+		InstanceID:  "inst-owned",
+		Cols:        100,
+		Rows:        40,
+		SessionName: "main",
+	})); err != nil {
+		t.Fatal(err)
+	}
+	reack := readOpenAck(t, conn2, ctx2)
+	if reack.SessionID != ack.SessionID {
+		t.Fatalf("session_name reattach session_id=%q want %q", reack.SessionID, ack.SessionID)
+	}
+	if countFakeCalls(rt, "console.open") != opensBefore {
+		t.Fatal("open with same session_name must reattach without OpenConsole")
+	}
+	cols, rows := rt.LastConsoleSize("incus-owned-ref")
+	if cols != 100 || rows != 40 {
+		t.Fatalf("reattach resize = %dx%d want 100x40", cols, rows)
+	}
+
+	t.Cleanup(func() {
+		if s := rt.ActiveConsole("incus-owned-ref"); s != nil {
+			_ = s.Close()
+		}
+	})
+}
+
+func TestTerminalRejectsInvalidSessionName(t *testing.T) {
+	rt := newRunningFakeRuntime(t, "incus-owned-ref")
+	h, m, bootstrap := newAuthHandlerWithOptions(t, Options{Console: rt, TerminalLimits: terminal.DefaultLimits()})
+	session, cookie, err := m.Bootstrap(context.Background(), "loopback", bootstrap, "a sufficiently long password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := h.service.(*fakeService)
+	svc.instances = []domain.Instance{{
+		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+		RuntimeRef: "incus-owned-ref",
+	}}
+	server := httptest.NewServer(h)
+	t.Cleanup(server.Close)
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/instances/inst-owned/terminal?" +
+		auth.CSRFQuery + "=" + url.QueryEscape(session.CSRFToken)
+	conn, err := dialTerminal(t, wsURL, http.Header{
+		"Cookie": []string{auth.SessionCookie + "=" + cookie},
+		"Origin": []string{server.URL},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := conn.Write(ctx, websocket.MessageText, mustEncodeTerminal(t, terminal.OpenFrame{
+		InstanceID:  "inst-owned",
+		Cols:        80,
+		Rows:        24,
+		SessionName: "bad:name",
+	})); err != nil {
+		t.Fatal(err)
+	}
+	frame := readTerminalFrameUntil(t, conn, ctx, func(f terminal.Frame) bool {
+		_, ok := f.(terminal.ErrorFrame)
+		return ok
+	})
+	errFrame := frame.(terminal.ErrorFrame)
+	if errFrame.Code != "invalid_argument" {
+		t.Fatalf("error code=%q want invalid_argument", errFrame.Code)
+	}
+	if rt.LastConsoleCommand() != nil {
+		t.Fatalf("invalid session_name must not open console, got %v", rt.LastConsoleCommand())
+	}
 }
 
 func TestTerminalDetachTerminatesEphemeralSession(t *testing.T) {
@@ -833,6 +1037,56 @@ func newRunningFakeRuntime(t *testing.T, ref string) *fake.Runtime {
 	return rt
 }
 
+type terminalTestEnv struct {
+	handler *Handler
+	server  *httptest.Server
+	cookie  string
+	csrf    string
+}
+
+func newTerminalTestEnv(t *testing.T, rt *fake.Runtime, limits terminal.Limits) *terminalTestEnv {
+	t.Helper()
+	h, m, bootstrap := newAuthHandlerWithOptions(t, Options{Console: rt, TerminalLimits: limits})
+	session, cookie, err := m.Bootstrap(context.Background(), "loopback", bootstrap, "a sufficiently long password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := h.service.(*fakeService)
+	svc.instances = []domain.Instance{{
+		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+		RuntimeRef: "incus-owned-ref",
+	}}
+	server := httptest.NewServer(h)
+	t.Cleanup(server.Close)
+	return &terminalTestEnv{handler: h, server: server, cookie: cookie, csrf: session.CSRFToken}
+}
+
+func (e *terminalTestEnv) dial(t *testing.T) (*websocket.Conn, context.Context) {
+	t.Helper()
+	wsURL := "ws" + strings.TrimPrefix(e.server.URL, "http") + "/v1/instances/inst-owned/terminal?" +
+		auth.CSRFQuery + "=" + url.QueryEscape(e.csrf)
+	conn, err := dialTerminal(t, wsURL, http.Header{
+		"Cookie": []string{auth.SessionCookie + "=" + e.cookie},
+		"Origin": []string{e.server.URL},
+	})
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(websocket.StatusNormalClosure, "") })
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	t.Cleanup(cancel)
+	return conn, ctx
+}
+
+func (e *terminalTestEnv) dialOpen(t *testing.T, open terminal.OpenFrame) (*websocket.Conn, context.Context, terminal.OpenFrame) {
+	t.Helper()
+	conn, ctx := e.dial(t)
+	if err := conn.Write(ctx, websocket.MessageText, mustEncodeTerminal(t, open)); err != nil {
+		t.Fatal(err)
+	}
+	return conn, ctx, readOpenAck(t, conn, ctx)
+}
+
 func dialOpenTerminal(t *testing.T, rt *fake.Runtime, limits terminal.Limits) (*Handler, *websocket.Conn, context.Context) {
 	t.Helper()
 	return dialOpenTerminalWithOpen(t, rt, limits, terminal.OpenFrame{
@@ -847,45 +1101,84 @@ func dialOpenTerminalWithOpen(
 	open terminal.OpenFrame,
 ) (*Handler, *websocket.Conn, context.Context) {
 	t.Helper()
-	h, m, bootstrap := newAuthHandlerWithOptions(t, Options{Console: rt, TerminalLimits: limits})
-	session, cookie, err := m.Bootstrap(context.Background(), "loopback", bootstrap, "a sufficiently long password")
-	if err != nil {
-		t.Fatal(err)
-	}
-	svc := h.service.(*fakeService)
-	svc.instances = []domain.Instance{{
-		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
-		RuntimeRef: "incus-owned-ref",
-	}}
-
-	server := httptest.NewServer(h)
-	t.Cleanup(server.Close)
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/instances/inst-owned/terminal?" +
-		auth.CSRFQuery + "=" + url.QueryEscape(session.CSRFToken)
-
-	conn, err := dialTerminal(t, wsURL, http.Header{
-		"Cookie": []string{auth.SessionCookie + "=" + cookie},
-		"Origin": []string{server.URL},
-	})
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close(websocket.StatusNormalClosure, "") })
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	t.Cleanup(cancel)
-
-	openPayload, err := terminal.Encode(open)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := conn.Write(ctx, websocket.MessageText, openPayload); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := conn.Read(ctx); err != nil {
-		t.Fatalf("open ack: %v", err)
-	}
+	h, conn, ctx, _ := dialOpenTerminalWithAck(t, rt, limits, open)
 	return h, conn, ctx
+}
+
+func dialOpenTerminalWithAck(
+	t *testing.T,
+	rt *fake.Runtime,
+	limits terminal.Limits,
+	open terminal.OpenFrame,
+) (*Handler, *websocket.Conn, context.Context, terminal.OpenFrame) {
+	t.Helper()
+	env := newTerminalTestEnv(t, rt, limits)
+	conn, ctx, ack := env.dialOpen(t, open)
+	return env.handler, conn, ctx, ack
+}
+
+func readOpenAck(t *testing.T, conn *websocket.Conn, ctx context.Context) terminal.OpenFrame {
+	t.Helper()
+	frame := readTerminalFrameUntil(t, conn, ctx, func(f terminal.Frame) bool {
+		_, ok := f.(terminal.OpenFrame)
+		return ok
+	})
+	ack, ok := frame.(terminal.OpenFrame)
+	if !ok {
+		t.Fatalf("frame type %T, want OpenFrame", frame)
+	}
+	return ack
+}
+
+func mustEncodeTerminal(t *testing.T, frame terminal.Frame) []byte {
+	t.Helper()
+	payload, err := terminal.Encode(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
+
+func waitTerminalClosed(t *testing.T, conn *websocket.Conn) {
+	t.Helper()
+	readCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	for {
+		if _, _, err := conn.Read(readCtx); err != nil {
+			return
+		}
+	}
+}
+
+func countFakeCalls(rt *fake.Runtime, op string) int {
+	n := 0
+	for _, call := range rt.Calls() {
+		if call == op {
+			n++
+		}
+	}
+	return n
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func slicesContains(a []string, want string) bool {
+	for _, v := range a {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
 
 func readTerminalFrameUntil(

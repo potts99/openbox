@@ -98,39 +98,39 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 	budget := terminal.NewBufferBudget(limits.MaxTotalBufferBytes)
 	idle.Touch(time.Now())
 
-	open, err := h.readTerminalOpen(ctx, conn, rate, idle, limits.MaxFrameBytes)
+	start, err := h.readTerminalStart(ctx, conn, rate, idle, limits.MaxFrameBytes)
 	if err != nil {
 		h.closeTerminalLimit(ctx, conn, err)
 		return
 	}
-	sessionName := strings.TrimSpace(open.SessionName)
 
-	session, err := h.console.OpenConsole(ctx, runtimeapi.ConsoleRequest{
-		Ref:     target.RuntimeRef,
-		Command: []string{"/bin/bash"},
-		Cols:    open.Cols,
-		Rows:    open.Rows,
-	})
+	session, sessionName, sessionID, cols, rows, persisted, err := h.resolveTerminalConsole(ctx, target, start)
 	if err != nil {
-		code, message := terminalConsoleError(err)
+		code, message := terminalResolveError(err)
 		h.writeTerminalError(ctx, conn, code, message)
 		_ = conn.Close(websocket.StatusNormalClosure, "")
 		return
 	}
-	// Named detach leaves the console open for reconnect (task 7). Ephemeral
-	// sessions and explicit terminate always Close.
+
+	// Named detach / reconnect leaves the console open in persistentConsoles.
+	// Ephemeral sessions and explicit terminate always Close.
 	closeConsole := true
 	defer func() {
-		if closeConsole {
-			_ = session.Close()
+		if !closeConsole {
+			return
 		}
+		if sessionID != "" {
+			h.persistentConsoles.remove(sessionID)
+		}
+		_ = session.Close()
 	}()
 
 	ack, err := terminal.Encode(terminal.OpenFrame{
 		InstanceID:  string(target.InstanceID),
-		Cols:        open.Cols,
-		Rows:        open.Rows,
+		Cols:        cols,
+		Rows:        rows,
 		SessionName: sessionName,
+		SessionID:   sessionID,
 	})
 	if err != nil {
 		_ = conn.Close(websocket.StatusInternalError, "encode")
@@ -140,6 +140,12 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 		return
 	}
 	idle.Touch(time.Now())
+
+	stdout := io.Reader(session.Stdout())
+	if persisted != nil {
+		stdout = persisted.attachOutput()
+		defer persisted.detachOutput()
+	}
 
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -156,7 +162,7 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 
 	errCh := make(chan error, 2)
 	go func() {
-		errCh <- pipeConsoleOutput(sessionCtx, conn, session.Stdout(), idle, budget, limits.MaxTotalBufferBytes)
+		errCh <- pipeConsoleOutput(sessionCtx, conn, stdout, idle, budget, limits.MaxTotalBufferBytes)
 	}()
 	go func() {
 		errCh <- pumpTerminalInput(sessionCtx, conn, session, sessionName, rate, idle, budget, limits.MaxFrameBytes)
@@ -171,9 +177,13 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 	case err := <-errCh:
 		cancel()
 		if errors.Is(err, errTerminalDetached) {
-			// Named persistent session: close the WebSocket only. Console stays
-			// open; full reconnect/tmux ownership is task 7.
+			// Named persistent session: close the WebSocket only; console stays
+			// registered for session_id / session_name reattach. detachOutput
+			// (deferred) returns the stdout pump to discard mode.
 			closeConsole = false
+			if sessionID != "" {
+				h.persistentConsoles.markDetached(sessionID)
+			}
 			_ = conn.Close(websocket.StatusNormalClosure, "detached")
 			return
 		}
@@ -202,16 +212,143 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 }
 
 // errTerminalDetached is returned by the input pump when the client detaches a
-// named session. The bridge must close the WebSocket without terminating the console.
+// named session (or the WebSocket ends without terminate). The bridge must close
+// the WebSocket without terminating the console.
 var errTerminalDetached = errors.New("terminal detached")
 
-func (h *Handler) readTerminalOpen(
+var (
+	errTerminalSessionNotFound = errors.New("terminal session not found")
+	errTerminalSessionBusy     = errors.New("terminal session busy")
+	errTerminalInvalidSession  = errors.New("invalid terminal session_name")
+)
+
+func (h *Handler) resolveTerminalConsole(
+	ctx context.Context,
+	target authorizedTerminal,
+	start terminal.Frame,
+) (session runtimeapi.ConsoleSession, sessionName, sessionID string, cols, rows uint16, persisted *persistentConsole, err error) {
+	switch f := start.(type) {
+	case terminal.ReconnectFrame:
+		return h.reattachPersistentConsole(target, f.SessionID, 0, 0, false)
+	case terminal.OpenFrame:
+		cols, rows = f.Cols, f.Rows
+		sessionName = strings.TrimSpace(f.SessionName)
+		if sid := strings.TrimSpace(f.SessionID); sid != "" {
+			return h.reattachPersistentConsole(target, sid, cols, rows, true)
+		}
+		if sessionName != "" {
+			if !terminal.ValidSessionName(sessionName) {
+				return nil, "", "", 0, 0, nil, errTerminalInvalidSession
+			}
+			if existing := h.persistentConsoles.getByName(string(target.OwnerID), string(target.InstanceID), sessionName); existing != nil {
+				return h.claimPersistentConsole(existing, cols, rows, true)
+			}
+			return h.openPersistentConsole(ctx, target, sessionName, cols, rows)
+		}
+		command, cmdErr := terminal.CommandForSession("")
+		if cmdErr != nil {
+			return nil, "", "", 0, 0, nil, cmdErr
+		}
+		session, err = h.console.OpenConsole(ctx, runtimeapi.ConsoleRequest{
+			Ref: target.RuntimeRef, Command: command, Cols: cols, Rows: rows,
+		})
+		return session, "", "", cols, rows, nil, err
+	default:
+		return nil, "", "", 0, 0, nil, errors.New("first frame must be open or reconnect")
+	}
+}
+
+func (h *Handler) reattachPersistentConsole(
+	target authorizedTerminal,
+	sessionID string,
+	cols, rows uint16,
+	resize bool,
+) (runtimeapi.ConsoleSession, string, string, uint16, uint16, *persistentConsole, error) {
+	entry := h.persistentConsoles.getByID(sessionID)
+	if entry == nil ||
+		entry.ownerID != string(target.OwnerID) ||
+		entry.instanceID != string(target.InstanceID) {
+		return nil, "", "", 0, 0, nil, errTerminalSessionNotFound
+	}
+	return h.claimPersistentConsole(entry, cols, rows, resize)
+}
+
+func (h *Handler) claimPersistentConsole(
+	entry *persistentConsole,
+	cols, rows uint16,
+	resize bool,
+) (runtimeapi.ConsoleSession, string, string, uint16, uint16, *persistentConsole, error) {
+	if !h.persistentConsoles.claimAttached(entry) {
+		return nil, "", "", 0, 0, nil, errTerminalSessionBusy
+	}
+	if resize {
+		if err := entry.console.Resize(cols, rows); err != nil {
+			h.persistentConsoles.markDetached(entry.id)
+			return nil, "", "", 0, 0, nil, err
+		}
+	} else {
+		cols, rows = 0, 0
+	}
+	// Keep ack dimensions meaningful when reconnect omits resize.
+	if cols == 0 && rows == 0 {
+		cols, rows = 80, 24
+	}
+	return entry.console, entry.sessionName, entry.id, cols, rows, entry, nil
+}
+
+func (h *Handler) openPersistentConsole(
+	ctx context.Context,
+	target authorizedTerminal,
+	sessionName string,
+	cols, rows uint16,
+) (runtimeapi.ConsoleSession, string, string, uint16, uint16, *persistentConsole, error) {
+	command, err := terminal.CommandForSession(sessionName)
+	if err != nil {
+		return nil, "", "", 0, 0, nil, err
+	}
+	sessionID, err := newTerminalSessionID()
+	if err != nil {
+		return nil, "", "", 0, 0, nil, err
+	}
+	session, err := h.console.OpenConsole(ctx, runtimeapi.ConsoleRequest{
+		Ref: target.RuntimeRef, Command: command, Cols: cols, Rows: rows,
+	})
+	if err != nil {
+		return nil, "", "", 0, 0, nil, err
+	}
+	entry := &persistentConsole{
+		id:          sessionID,
+		sessionName: sessionName,
+		ownerID:     string(target.OwnerID),
+		instanceID:  string(target.InstanceID),
+		console:     session,
+		attached:    true,
+	}
+	entry.startStdoutPump()
+	h.persistentConsoles.put(entry)
+	return session, sessionName, sessionID, cols, rows, entry, nil
+}
+
+func terminalResolveError(err error) (code, message string) {
+	switch {
+	case errors.Is(err, errTerminalInvalidSession), errors.Is(err, terminal.ErrInvalidFrame):
+		return "invalid_argument", "invalid session_name"
+	case errors.Is(err, errTerminalSessionNotFound):
+		return "not_found", "terminal session not found"
+	case errors.Is(err, errTerminalSessionBusy):
+		return "conflict", "terminal session is already attached"
+	default:
+		return terminalConsoleError(err)
+	}
+}
+
+func (h *Handler) readTerminalStart(
 	ctx context.Context,
 	conn *websocket.Conn,
 	rate *terminal.InboundLimiter,
 	idle *terminal.IdleWatch,
 	maxFrameBytes int,
-) (terminal.OpenFrame, error) {
+) (terminal.Frame, error) {
 	// Hard bound waiting for the first frame. coder/websocket closes the
 	// connection when a Read context expires — acceptable before a session starts.
 	readCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -219,26 +356,27 @@ func (h *Handler) readTerminalOpen(
 	_, data, err := conn.Read(readCtx)
 	if err != nil {
 		if errors.Is(err, websocket.ErrMessageTooBig) {
-			return terminal.OpenFrame{}, terminal.ErrFrameTooLarge
+			return nil, terminal.ErrFrameTooLarge
 		}
-		return terminal.OpenFrame{}, err
+		return nil, err
 	}
 	if err := terminal.CheckFrameSize(len(data), maxFrameBytes); err != nil {
-		return terminal.OpenFrame{}, err
+		return nil, err
 	}
 	if err := rate.Allow(time.Now(), len(data)); err != nil {
-		return terminal.OpenFrame{}, err
+		return nil, err
 	}
 	frame, err := terminal.Decode(data)
 	if err != nil {
-		return terminal.OpenFrame{}, err
+		return nil, err
 	}
-	open, ok := frame.(terminal.OpenFrame)
-	if !ok {
-		return terminal.OpenFrame{}, errors.New("first frame must be open")
+	switch frame.(type) {
+	case terminal.OpenFrame, terminal.ReconnectFrame:
+		idle.Touch(time.Now())
+		return frame, nil
+	default:
+		return nil, errors.New("first frame must be open or reconnect")
 	}
-	idle.Touch(time.Now())
-	return open, nil
 }
 
 // watchTerminalIdle invokes onExpire once when the idle watch expires.
@@ -337,6 +475,11 @@ func pumpTerminalInput(
 		if err != nil {
 			// Do not Close the console here: limit errors must win the bridge
 			// select before stdout EOF from a premature session.Close.
+			// Named sessions treat WebSocket loss as detach so tab close keeps
+			// the guest tmux session (and daemon-side console) alive.
+			if sessionName != "" && !isTerminalLimitError(err) {
+				return errTerminalDetached
+			}
 			return err
 		}
 		if err := terminal.CheckFrameSize(len(data), maxFrameBytes); err != nil {
@@ -367,8 +510,8 @@ func pumpTerminalInput(
 				return err
 			}
 		case terminal.DetachFrame:
-			// Named sessions survive detach for reconnect (task 7). Ephemeral
-			// sessions have no reconnect target yet, so detach terminates.
+			// Named sessions survive detach for reconnect. Ephemeral sessions
+			// have no reconnect target, so detach terminates.
 			if sessionName != "" {
 				return errTerminalDetached
 			}
