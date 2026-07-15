@@ -47,6 +47,12 @@ type NetworkPolicy interface {
 	RemoveNetworkPolicy(context.Context, domain.Instance) error
 }
 
+// NetworkPolicyVerifier confirms that the policy attached to the runtime still
+// matches the instance's desired policy.
+type NetworkPolicyVerifier interface {
+	VerifyNetworkPolicy(context.Context, domain.Instance) error
+}
+
 // NetworkPolicyStatusProvider supplies non-payload policy observability for
 // instance inspect and status responses.
 type NetworkPolicyStatusProvider interface {
@@ -838,6 +844,12 @@ func (s *Service) Refresh(ctx context.Context, ownerID domain.OwnerID, id domain
 	if err := s.syncObserved(ctx, instance, target); err != nil {
 		return domain.Instance{}, err
 	}
+	if target == domain.ObservedRunning {
+		if err := s.verifyNetworkPolicy(ctx, instance); err != nil {
+			s.markError(ctx, instance, err)
+			return domain.Instance{}, fmt.Errorf("verify network policy: %w", err)
+		}
+	}
 	refreshed, err := s.repo.GetInstance(ctx, ownerID, id)
 	if err != nil {
 		return domain.Instance{}, err
@@ -1256,7 +1268,18 @@ func (s *Service) applyNetworkPolicy(ctx context.Context, instance domain.Instan
 	if s.networkPolicy == nil {
 		return nil
 	}
-	return s.networkPolicy.ApplyNetworkPolicy(ctx, instance)
+	if err := s.networkPolicy.ApplyNetworkPolicy(ctx, instance); err != nil {
+		return err
+	}
+	return s.verifyNetworkPolicy(ctx, instance)
+}
+
+func (s *Service) verifyNetworkPolicy(ctx context.Context, instance domain.Instance) error {
+	verifier, ok := s.networkPolicy.(NetworkPolicyVerifier)
+	if !ok {
+		return nil
+	}
+	return verifier.VerifyNetworkPolicy(ctx, instance)
 }
 
 func (s *Service) withNetworkPolicyStatus(instance domain.Instance) domain.Instance {

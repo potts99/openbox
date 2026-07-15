@@ -586,6 +586,10 @@ func TestRealIncusPreflightAndBootstrap(t *testing.T) {
 
 func TestApplyNetworkPolicyUpdatesInstanceNICACLs(t *testing.T) {
 	var patched instanceRecord
+	current := instanceRecord{
+		Name: "instance-1", Type: "container", Status: "Stopped",
+		Devices: map[string]map[string]string{"eth0": {"type": "nic", "network": "openbox0", "name": "eth0"}},
+	}
 	socket := serveUnixHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/1.0/instances/instance-1" {
 			writeError(w, http.StatusNotFound, "not found")
@@ -593,14 +597,12 @@ func TestApplyNetworkPolicyUpdatesInstanceNICACLs(t *testing.T) {
 		}
 		switch r.Method {
 		case http.MethodGet:
-			writeSync(w, instanceRecord{
-				Name: "instance-1", Type: "container", Status: "Stopped",
-				Devices: map[string]map[string]string{"eth0": {"type": "nic", "network": "openbox0", "name": "eth0"}},
-			})
+			writeSync(w, current)
 		case http.MethodPatch:
 			if err := json.NewDecoder(r.Body).Decode(&patched); err != nil {
 				t.Errorf("decode patch: %v", err)
 			}
+			current.Devices = patched.Devices
 			writeSync(w, nil)
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -617,6 +619,39 @@ func TestApplyNetworkPolicyUpdatesInstanceNICACLs(t *testing.T) {
 	}
 	if got := patched.Devices["eth0"]["security.acls"]; got != DefaultDenyACLName+","+StandardEgressACLName {
 		t.Fatalf("security.acls=%q", got)
+	}
+}
+
+func TestApplyNetworkPolicyRejectsUnchangedNICACLs(t *testing.T) {
+	socket := serveUnixHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/1.0/instances/instance-1" {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			writeSync(w, instanceRecord{
+				Name: "instance-1", Type: "container", Status: "Stopped",
+				Devices: map[string]map[string]string{
+					"eth0": {"type": "nic", "network": "openbox0", "name": "eth0", "security.acls": DefaultDenyACLName},
+				},
+			})
+		case http.MethodPatch:
+			writeSync(w, nil)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	}))
+	adapter, err := New(Options{SocketPath: socket})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = adapter.ApplyNetworkPolicy(context.Background(), domain.Instance{
+		ID: "instance-1", RuntimeRef: "instance-1", EgressMode: domain.EgressStandard,
+	})
+	if err == nil || !strings.Contains(err.Error(), "NIC ACL mismatch") {
+		t.Fatalf("apply error=%v", err)
 	}
 }
 
