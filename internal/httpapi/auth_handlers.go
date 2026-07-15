@@ -39,9 +39,9 @@ func (h *Handler) authenticate(r *http.Request) (*http.Request, error) {
 	if err != nil {
 		return r, auth.ErrUnauthenticated
 	}
-	// Cookie-authenticated WebSocket upgrades are state-changing: require CSRF
+	// Cookie-authenticated WebSocket handshakes are state-changing: require CSRF
 	// even though the handshake uses GET.
-	mutation := (r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions) || isWebSocketUpgrade(r)
+	mutation := (r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions) || isWebSocketHandshake(r)
 	owner, err := h.auth.AuthenticateSession(r.Context(), cookie.Value, sessionCSRFToken(r), mutation)
 	if err != nil {
 		return r, err

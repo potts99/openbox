@@ -167,6 +167,22 @@ func TestCookieMutationIgnoresCSRFQueryParameter(t *testing.T) {
 	}
 }
 
+func TestCookieMutationIgnoresCSRFQueryWithWebSocketUpgradeHeader(t *testing.T) {
+	h, m, bootstrap := newAuthHandler(t)
+	session, cookie, err := m.Bootstrap(context.Background(), "loopback", bootstrap, "a sufficiently long password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/tokens?"+auth.CSRFQuery+"="+url.QueryEscape(session.CSRFToken), strings.NewReader(`{"name":"q"}`))
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: cookie})
+	req.Header.Set("Upgrade", "websocket")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("POST with Upgrade: websocket must not accept query CSRF without header: status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestTerminalWebSocketCrossInstanceAuthorization(t *testing.T) {
 	h, m, bootstrap := newAuthHandler(t)
 	session, cookie, err := m.Bootstrap(context.Background(), "loopback", bootstrap, "a sufficiently long password")
