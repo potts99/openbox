@@ -5,6 +5,7 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -40,18 +41,18 @@ func TestConcurrentBootstrapConsumeCreatesExactlyOneCredential(t *testing.T) {
 	var winners atomic.Int32
 	var wg sync.WaitGroup
 	errorsSeen := make(chan error, contenders)
-	for range contenders {
+	for i := range contenders {
 		wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer wg.Done()
 			<-start
-			_, _, err := manager.Bootstrap(ctx, secret, "a sufficiently long password")
+			_, _, err := manager.Bootstrap(ctx, fmt.Sprintf("contender-%d", i), secret, "a sufficiently long password")
 			if err == nil {
 				winners.Add(1)
 				return
 			}
 			errorsSeen <- err
-		}()
+		}(i)
 	}
 	close(start)
 	wg.Wait()
@@ -71,7 +72,7 @@ func TestConcurrentBootstrapConsumeCreatesExactlyOneCredential(t *testing.T) {
 	if credentialCount != 1 {
 		t.Fatalf("credential count=%d, want 1", credentialCount)
 	}
-	if _, _, err := manager.Bootstrap(ctx, secret, "a sufficiently long password"); !errors.Is(err, auth.ErrBootstrapUnavailable) {
+	if _, _, err := manager.Bootstrap(ctx, "loopback", secret, "a sufficiently long password"); !errors.Is(err, auth.ErrBootstrapUnavailable) {
 		t.Fatalf("repeat consume error=%v", err)
 	}
 }

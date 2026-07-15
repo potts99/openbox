@@ -50,6 +50,53 @@ func TestReconcileSafetyDiagnosticsAndDegradedMode(t *testing.T) {
 	}
 }
 
+func TestReconcileConvergesDesiredStateWithoutRecreatingMissing(t *testing.T) {
+	now := time.Date(2026, 7, 15, 3, 0, 0, 0, time.UTC)
+	meta := map[string]string{instances.MetadataManaged: "true", instances.MetadataInstanceID: "box"}
+	cases := []struct {
+		name     string
+		desired  domain.DesiredState
+		actual   runtimeapi.InstanceState
+		wantCall string
+	}{
+		{name: "start stopped instance", desired: domain.DesiredRunning, actual: runtimeapi.StateStopped, wantCall: "start"},
+		{name: "stop running instance", desired: domain.DesiredStopped, actual: runtimeapi.StateRunning, wantCall: "stop"},
+		{name: "delete present instance", desired: domain.DesiredDeleted, actual: runtimeapi.StateRunning, wantCall: "delete"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &repositoryFake{instances: []domain.Instance{{
+				ID: "box", OwnerID: "owner", RuntimeRef: "obx-box", ActualIsolation: domain.IsolationContainer,
+				DesiredState: tc.desired, ObservedState: domain.ObservedRunning,
+			}}}
+			mutator := &mutatorFake{}
+			runtime := &runtimeFake{instances: []runtimeapi.Instance{{Ref: "obx-box", State: tc.actual, Metadata: meta}}}
+			reconciler, err := New(runtime, repo, mutator, Options{Now: func() time.Time { return now }, NewID: func() string { return "cycle" }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			report, err := reconciler.RunOnce(context.Background())
+			if err != nil || report.Mutations != 1 || mutator.last != tc.wantCall || len(report.Diagnostics) != 0 {
+				t.Fatalf("report=%+v err=%v mutator=%+v", report, err, mutator)
+			}
+		})
+	}
+
+	repo := &repositoryFake{instances: []domain.Instance{{
+		ID: "gone", OwnerID: "owner", RuntimeRef: "obx-gone", ActualIsolation: domain.IsolationContainer,
+		DesiredState: domain.DesiredRunning, ObservedState: domain.ObservedRunning,
+	}}}
+	mutator := &mutatorFake{}
+	reconciler, err := New(&runtimeFake{}, repo, mutator, Options{Now: func() time.Time { return now }, NewID: func() string { return "cycle" }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := reconciler.RunOnce(context.Background())
+	if err != nil || report.Mutations != 0 || mutator.calls != 0 || repo.lastError != domain.CodeRuntimeMissing {
+		t.Fatalf("missing runtime must not recreate: report=%+v err=%v mutator=%+v lastError=%s", report, err, mutator, repo.lastError)
+	}
+}
+
 type runtimeFake struct {
 	instances []runtimeapi.Instance
 	err       error
@@ -72,17 +119,23 @@ func (f *repositoryFake) UpdateInstanceObservation(_ context.Context, _ domain.O
 	return nil
 }
 
-type mutatorFake struct{ calls int }
+type mutatorFake struct {
+	calls int
+	last  string
+}
 
 func (f *mutatorFake) Start(context.Context, domain.OwnerID, domain.InstanceID, string) (domain.Instance, error) {
 	f.calls++
+	f.last = "start"
 	return domain.Instance{}, nil
 }
 func (f *mutatorFake) Stop(context.Context, domain.OwnerID, domain.InstanceID, string) (domain.Instance, error) {
 	f.calls++
+	f.last = "stop"
 	return domain.Instance{}, nil
 }
 func (f *mutatorFake) Delete(context.Context, domain.OwnerID, domain.InstanceID, string) error {
 	f.calls++
+	f.last = "delete"
 	return nil
 }

@@ -127,6 +127,14 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
+	if config.StoragePool == "" {
+		log.Printf("openboxd: skipping Incus managed bootstrap because --storage-pool is unset")
+	} else if err := runtime.Bootstrap(ctx, incus.BootstrapConfig{
+		Project: config.Project, StoragePool: config.StoragePool,
+		ContainerProfile: config.ContainerProfile, VMProfile: config.VMProfile,
+	}); err != nil {
+		return fail(fmt.Errorf("bootstrap Incus resources: %w", err))
+	}
 	instanceSigner, err := sshgateway.LoadOrCreateHostKey(config.SSHInstanceKeyPath)
 	if err != nil {
 		return fail(fmt.Errorf("load internal instance SSH key: %w", err))

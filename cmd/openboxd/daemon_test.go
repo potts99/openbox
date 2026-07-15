@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/url"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/reconcile"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 	"github.com/openbox-dev/openbox/internal/runtime/fake"
+	"github.com/openbox-dev/openbox/internal/sshgateway"
 )
 
 func TestDaemonRunsStartupRecoveryReconciliationAndCloses(t *testing.T) {
@@ -114,6 +116,22 @@ func TestDaemonTreatsUnexpectedSSHStopAsFatal(t *testing.T) {
 	err := runDaemon(context.Background(), testDaemonConfig(), factory)
 	if err == nil || !strings.Contains(err.Error(), "stopped unexpectedly") {
 		t.Fatalf("unexpected SSH stop error=%v", err)
+	}
+}
+
+func TestDurableSSHAuditorStoresOnlySafeStructuredMetadata(t *testing.T) {
+	writer := &auditCapture{}
+	auditor := durableSSHAuditor{store: writer, fallbackOwner: "owner-local"}
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	if err := auditor.Record(context.Background(), sshgateway.AuditEvent{At: now, RemoteIP: "192.0.2.3", Fingerprint: "SHA256:key", Command: "new", Target: "dev", Outcome: "success"}); err != nil {
+		t.Fatal(err)
+	}
+	var metadata map[string]string
+	if err := json.Unmarshal(writer.event.MetadataJSON, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if writer.event.OwnerID != "owner-local" || writer.event.Actor != "SHA256:key" || writer.event.TargetID != "dev" || writer.event.Outcome != "success" || metadata["command"] != "new" || metadata["remote_ip"] != "192.0.2.3" {
+		t.Fatalf("audit event=%+v metadata=%v", writer.event, metadata)
 	}
 }
 
@@ -218,6 +236,13 @@ func (immediateSSH) ListenAndServe(context.Context) error { return nil }
 type orderedCloser struct {
 	sshDone         chan struct{}
 	closedBeforeSSH atomic.Bool
+}
+
+type auditCapture struct{ event domain.AuditEvent }
+
+func (a *auditCapture) CreateAuditEvent(_ context.Context, event domain.AuditEvent) error {
+	a.event = event
+	return nil
 }
 
 func (c *orderedCloser) Close() error {

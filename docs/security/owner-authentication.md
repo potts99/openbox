@@ -28,20 +28,31 @@ parallelism one, a random 16-byte salt, and a 32-byte result. Verification uses
 a constant-time comparison and upgrades a wholly weaker supported parameter set
 after a successful login. Mixed or stronger parameters are never downgraded.
 
-Interactive login attempts use a bounded in-memory limiter. This limits both
-guessing and unbounded attacker-controlled state; restarting the daemon clears
-the limiter, so upstream connection controls remain useful for exposed hosts.
+Interactive login and bootstrap consume attempts use a bounded in-memory
+limiter keyed by client address. This limits both guessing and unbounded
+attacker-controlled Argon2id work; restarting the daemon clears the limiter, so
+upstream connection controls remain useful for exposed hosts. Bootstrap verifies
+the one-time secret digest before hashing the password so rejected secrets do
+not pay the Argon2id cost.
 
 ## Browser sessions and CSRF
 
 Browser sessions use random opaque cookie values whose SHA-256 digests are the
 only values stored in SQLite. Authentication issues a fresh session rather than
 accepting any pre-authentication identifier. Cookies are host-only, `HttpOnly`,
-`SameSite=Strict`, and `Secure` on TLS connections. Sessions have an absolute
-expiry. Restoring a browser session rotates both the opaque session identifier
-and CSRF token in one database transaction, allowing reload continuity without
-browser storage; the previous values stop working immediately. Logout revokes
-the server-side record before clearing the cookie.
+`SameSite=Strict`, and `Secure` when the daemon itself terminates TLS
+(`r.TLS != nil`). Sessions have an absolute expiry. Restoring a browser session
+rotates both the opaque session identifier and CSRF token in one database
+transaction, allowing reload continuity without browser storage; the previous
+values stop working immediately. Logout revokes the server-side record before
+clearing the cookie.
+
+If TLS terminates on a reverse proxy in front of a loopback HTTP listener, the
+daemon does not see TLS and therefore issues `Secure=false` cookies. That
+deployment is unsupported in v0.1: terminate TLS on `openboxd`, or keep the
+listener on loopback and browse only through a tunnel that presents a local
+HTTP origin. A future trusted-proxy mode must make `Secure` and forwarded-proto
+trust explicit before non-loopback proxy deployments are recommended.
 
 Every cookie-authenticated state-changing request must include the unpredictable
 per-session CSRF value in `X-CSRF-Token`. The server stores only its digest and

@@ -13,6 +13,7 @@ import (
 
 	"github.com/openbox-dev/openbox/internal/app/instances"
 	"github.com/openbox-dev/openbox/internal/app/recovery"
+	"github.com/openbox-dev/openbox/internal/clock"
 	"github.com/openbox-dev/openbox/internal/domain"
 	"github.com/openbox-dev/openbox/internal/operations"
 	"github.com/openbox-dev/openbox/internal/persistence/sqlite"
@@ -50,7 +51,7 @@ func TestRealServiceSubmissionLostResponseAndWorkerCompletion(t *testing.T) {
 		t.Fatalf("first=%+v second=%+v runtime creates=%d", first, second, len(runtime.CreateRequests()))
 	}
 
-	worker, err := operations.NewWorker(store, recovery.Executor{Instances: service}, operations.Config{WorkerID: "api-integration", Concurrency: 1, Lease: time.Minute})
+	worker, err := operations.NewWorker(store, recovery.Executor{Instances: service}, operations.Config{WorkerID: "api-integration", Concurrency: 1, Lease: time.Minute, Clock: clock.NewFake(now)})
 	if err != nil {
 		t.Fatal(err)
 	}

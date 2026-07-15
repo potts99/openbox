@@ -75,6 +75,19 @@ func (s *Store) BootstrapStatus(ctx context.Context, now time.Time) (auth.Bootst
 	return auth.BootstrapStatus{Required: true, ExpiresAt: &expires}, nil
 }
 
+func (s *Store) MatchBootstrap(ctx context.Context, secretHash []byte, now time.Time) error {
+	var credentials int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM owner_credentials`).Scan(&credentials); err != nil || credentials != 0 {
+		return auth.ErrBootstrapUnavailable
+	}
+	var stored []byte
+	err := s.db.QueryRowContext(ctx, `SELECT secret_hash FROM bootstrap_challenges WHERE consumed_at IS NULL AND expires_at>? LIMIT 1`, formatTime(now)).Scan(&stored)
+	if err != nil || !constantBytes(stored, secretHash) {
+		return auth.ErrBootstrapUnavailable
+	}
+	return nil
+}
+
 func (s *Store) ConsumeBootstrap(ctx context.Context, secretHash []byte, passwordHash string, now time.Time) (domain.OwnerID, error) {
 	release, err := s.acquireWrite(ctx)
 	if err != nil {

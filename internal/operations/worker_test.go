@@ -94,6 +94,21 @@ func TestWorkerRecoversExpiredAbandonedClaim(t *testing.T) {
 	}
 }
 
+func TestExpiredClaimCannotWriteBeforeReplacement(t *testing.T) {
+	store, now := operationStore(t)
+	op := addOperation(t, store, "instance-1", "op-1", now)
+	if _, claimed, _, err := store.ClaimOperation(context.Background(), op.ID, "worker-a", "token-a", now, time.Second); err != nil || !claimed {
+		t.Fatalf("claim=%v err=%v", claimed, err)
+	}
+	ctx := operations.WithClaim(context.Background(), operations.Claim{OwnerID: op.OwnerID, OperationID: op.ID, WorkerID: "worker-a", Token: "token-a"})
+	if err := store.UpdateOperationStage(ctx, op.OwnerID, op.ID, "still-valid", 10, now.Add(500*time.Millisecond)); err != nil {
+		t.Fatalf("write within lease: %v", err)
+	}
+	if err := store.UpdateOperationStage(ctx, op.OwnerID, op.ID, "after-expiry", 20, now.Add(2*time.Second)); err == nil {
+		t.Fatal("expired claim wrote after lease expiry")
+	}
+}
+
 func TestExpiredClaimCannotOverwriteReplacementClaim(t *testing.T) {
 	store, now := operationStore(t)
 	op := addOperation(t, store, "instance-1", "op-1", now)

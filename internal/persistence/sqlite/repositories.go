@@ -260,7 +260,7 @@ func (s *Store) CompleteOperation(ctx context.Context, ownerID domain.OwnerID, i
 		return err
 	}
 	defer tx.Rollback()
-	if err := enforceClaimTx(ctx, tx, ownerID, "", id); err != nil {
+	if err := enforceClaimTx(ctx, tx, ownerID, "", id, completedAt); err != nil {
 		return err
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE operations SET status=?,stage='complete',progress=100,error_code='',next_attempt_at=NULL,claimed_by='',claim_token='',claim_expires_at=NULL,error_class='',updated_at=? WHERE owner_id=? AND id=? AND status IN (?,?)`,
@@ -301,7 +301,7 @@ func (s *Store) UpdateOperationStage(ctx context.Context, ownerID domain.OwnerID
 		return err
 	}
 	defer tx.Rollback()
-	if err := enforceClaimTx(ctx, tx, ownerID, "", id); err != nil {
+	if err := enforceClaimTx(ctx, tx, ownerID, "", id, updatedAt); err != nil {
 		return err
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE operations SET status=?,stage=?,progress=?,updated_at=? WHERE owner_id=? AND id=? AND status IN (?,?)`,
@@ -331,7 +331,7 @@ func (s *Store) UpdateInstanceObservation(ctx context.Context, ownerID domain.Ow
 		return fmt.Errorf("begin observation update: %w", err)
 	}
 	defer tx.Rollback()
-	if err := enforceClaimTx(ctx, tx, ownerID, string(id), ""); err != nil {
+	if err := enforceClaimTx(ctx, tx, ownerID, string(id), "", updatedAt); err != nil {
 		return err
 	}
 	current, err := getInstanceTx(ctx, tx, ownerID, id)
@@ -386,7 +386,7 @@ func (s *Store) FinalizeInstanceDeletion(ctx context.Context, ownerID domain.Own
 		return fmt.Errorf("begin deletion finalization: %w", err)
 	}
 	defer tx.Rollback()
-	if err := enforceClaimTx(ctx, tx, ownerID, string(id), operationID); err != nil {
+	if err := enforceClaimTx(ctx, tx, ownerID, string(id), operationID, deletedAt); err != nil {
 		return err
 	}
 	i, err := getInstanceTx(ctx, tx, ownerID, id)
@@ -441,7 +441,7 @@ func (s *Store) UpdateInstanceState(ctx context.Context, ownerID domain.OwnerID,
 		return fmt.Errorf("begin state update: %w", err)
 	}
 	defer tx.Rollback()
-	if err := enforceClaimTx(ctx, tx, ownerID, string(id), operation.ID); err != nil {
+	if err := enforceClaimTx(ctx, tx, ownerID, string(id), operation.ID, updatedAt); err != nil {
 		return err
 	}
 	current, err := getInstanceTx(ctx, tx, ownerID, id)
@@ -612,7 +612,7 @@ func mapWriteError(err error) error {
 	return err
 }
 
-func enforceClaimTx(ctx context.Context, tx *sql.Tx, ownerID domain.OwnerID, targetID string, operationID domain.OperationID) error {
+func enforceClaimTx(ctx context.Context, tx *sql.Tx, ownerID domain.OwnerID, targetID string, operationID domain.OperationID, now time.Time) error {
 	claim, fenced := operations.ClaimFromContext(ctx)
 	if !fenced {
 		return nil
@@ -622,11 +622,22 @@ func enforceClaimTx(ctx context.Context, tx *sql.Tx, ownerID domain.OwnerID, tar
 	}
 	var worker, token, storedTarget string
 	var status domain.OperationStatus
-	err := tx.QueryRowContext(ctx, `SELECT claimed_by,claim_token,status,target_id FROM operations WHERE owner_id=? AND id=?`, claim.OwnerID, claim.OperationID).Scan(&worker, &token, &status, &storedTarget)
+	var expiresRaw sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT claimed_by,claim_token,status,target_id,claim_expires_at FROM operations WHERE owner_id=? AND id=?`, claim.OwnerID, claim.OperationID).Scan(&worker, &token, &status, &storedTarget, &expiresRaw)
 	if err != nil {
 		return err
 	}
 	if worker != claim.WorkerID || token != claim.Token || status != domain.OperationRunning || (targetID != "" && storedTarget != targetID) {
+		return &domain.Error{Code: domain.CodeConflict, Field: "operation.claim"}
+	}
+	if !expiresRaw.Valid || expiresRaw.String == "" {
+		return &domain.Error{Code: domain.CodeConflict, Field: "operation.claim"}
+	}
+	expires, err := parseTime(expiresRaw.String)
+	if err != nil {
+		return err
+	}
+	if !expires.After(now) {
 		return &domain.Error{Code: domain.CodeConflict, Field: "operation.claim"}
 	}
 	return nil

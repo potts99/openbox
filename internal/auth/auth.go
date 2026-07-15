@@ -31,7 +31,7 @@ const (
 var ErrUnauthenticated = errors.New("authentication required")
 var ErrForbidden = errors.New("authentication forbidden")
 var ErrBootstrapUnavailable = errors.New("bootstrap unavailable")
-var ErrRateLimited = errors.New("login rate limited")
+var ErrRateLimited = errors.New("authentication rate limited")
 
 type BootstrapStatus struct {
 	Required  bool       `json:"required"`
@@ -63,6 +63,7 @@ type SSHKey struct {
 type Store interface {
 	EnsureBootstrap(context.Context, []byte, time.Time, time.Time) (bool, error)
 	BootstrapStatus(context.Context, time.Time) (BootstrapStatus, error)
+	MatchBootstrap(context.Context, []byte, time.Time) error
 	ConsumeBootstrap(context.Context, []byte, string, time.Time) (domain.OwnerID, error)
 	OwnerCredential(context.Context) (domain.OwnerID, string, error)
 	UpdateCredential(context.Context, domain.OwnerID, string, time.Time) error
@@ -81,18 +82,25 @@ type Store interface {
 }
 
 type Manager struct {
-	store   Store
-	now     func() time.Time
-	limiter *Limiter
+	store        Store
+	now          func() time.Time
+	limiter      *Limiter
+	hashPassword func(string, PasswordParams) (string, error)
 }
 
 func New(store Store) (*Manager, error) {
 	if store == nil {
 		return nil, errors.New("auth store is required")
 	}
-	return &Manager{store: store, now: func() time.Time { return time.Now().UTC() }, limiter: NewLimiter(5, 15*time.Minute, 1024)}, nil
+	return &Manager{store: store, now: func() time.Time { return time.Now().UTC() }, limiter: NewLimiter(5, 15*time.Minute, 1024), hashPassword: HashPassword}, nil
 }
 func (m *Manager) WithClock(now func() time.Time) *Manager { m.now = now; return m }
+func (m *Manager) WithPasswordHasher(hash func(string, PasswordParams) (string, error)) *Manager {
+	if hash != nil {
+		m.hashPassword = hash
+	}
+	return m
+}
 
 func (m *Manager) EnsureBootstrap(ctx context.Context) (string, error) {
 	secret, raw, err := randomSecret(32)
@@ -109,7 +117,10 @@ func (m *Manager) EnsureBootstrap(ctx context.Context) (string, error) {
 func (m *Manager) BootstrapStatus(ctx context.Context) (BootstrapStatus, error) {
 	return m.store.BootstrapStatus(ctx, m.now())
 }
-func (m *Manager) Bootstrap(ctx context.Context, secret, password string) (Session, string, error) {
+func (m *Manager) Bootstrap(ctx context.Context, key, secret, password string) (Session, string, error) {
+	if !m.limiter.Allow(key, m.now()) {
+		return Session{}, "", ErrRateLimited
+	}
 	if err := validatePassword(password); err != nil {
 		return Session{}, "", err
 	}
@@ -117,7 +128,10 @@ func (m *Manager) Bootstrap(ctx context.Context, secret, password string) (Sessi
 	if err != nil {
 		return Session{}, "", ErrBootstrapUnavailable
 	}
-	hash, err := HashPassword(password, DefaultPasswordParams)
+	if err := m.store.MatchBootstrap(ctx, digest(raw), m.now()); err != nil {
+		return Session{}, "", err
+	}
+	hash, err := m.hashPassword(password, DefaultPasswordParams)
 	if err != nil {
 		return Session{}, "", err
 	}
@@ -125,6 +139,7 @@ func (m *Manager) Bootstrap(ctx context.Context, secret, password string) (Sessi
 	if err != nil {
 		return Session{}, "", err
 	}
+	m.limiter.Reset(key)
 	return m.issueSession(ctx, owner)
 }
 func (m *Manager) Login(ctx context.Context, key, password string) (Session, string, error) {
