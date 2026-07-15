@@ -29,7 +29,7 @@ func TestTerminalWebSocketRejectsUnauthorizedUpgrades(t *testing.T) {
 	}
 	svc := h.service.(*fakeService)
 	svc.instances = []domain.Instance{{
-		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindVPS,
 		RuntimeRef: "incus-owned-ref",
 	}}
 
@@ -125,7 +125,7 @@ func TestTerminalWebSocketBearerSkipsOriginCookieStillRequires(t *testing.T) {
 	}
 	svc := h.service.(*fakeService)
 	svc.instances = []domain.Instance{{
-		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindVPS,
 		RuntimeRef: "incus-owned-ref",
 	}}
 
@@ -178,7 +178,7 @@ func TestTerminalWebSocketAcceptsCSRFQueryWithoutHeader(t *testing.T) {
 	}
 	svc := h.service.(*fakeService)
 	svc.instances = []domain.Instance{{
-		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindVPS,
 		RuntimeRef: "incus-owned-ref",
 	}}
 
@@ -251,7 +251,7 @@ func TestTerminalWebSocketCrossInstanceAuthorization(t *testing.T) {
 	}
 	svc := h.service.(*fakeService)
 	svc.instances = []domain.Instance{{
-		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindVPS,
 		RuntimeRef: "incus-secret-ref",
 	}}
 
@@ -367,7 +367,7 @@ func TestTerminalRejectsUnmanagedAndHostRuntimeRefs(t *testing.T) {
 			}
 			svc := h.service.(*fakeService)
 			svc.instances = []domain.Instance{{
-				ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+				ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindVPS,
 				RuntimeRef: tc.runtimeRef,
 			}}
 
@@ -409,7 +409,7 @@ func TestTerminalOpensPTYThroughRuntimeAdapterUsingStoredRef(t *testing.T) {
 	}
 	svc := h.service.(*fakeService)
 	svc.instances = []domain.Instance{{
-		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindVPS,
 		RuntimeRef: "incus-owned-ref",
 	}}
 
@@ -520,7 +520,7 @@ func TestTerminalRejectsConcurrentSessionsAtCapacity(t *testing.T) {
 	}
 	svc := h.service.(*fakeService)
 	svc.instances = []domain.Instance{{
-		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindVPS,
 		RuntimeRef: "incus-owned-ref",
 	}}
 
@@ -1040,7 +1040,7 @@ func TestTerminalRejectsInvalidSessionName(t *testing.T) {
 	}
 	svc := h.service.(*fakeService)
 	svc.instances = []domain.Instance{{
-		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindVPS,
 		RuntimeRef: "incus-owned-ref",
 	}}
 	server := httptest.NewServer(h)
@@ -1165,7 +1165,7 @@ func newTerminalTestEnv(t *testing.T, rt *fake.Runtime, limits terminal.Limits) 
 	}
 	svc := h.service.(*fakeService)
 	svc.instances = []domain.Instance{{
-		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindVPS,
 		RuntimeRef: "incus-owned-ref",
 	}}
 	server := httptest.NewServer(h)

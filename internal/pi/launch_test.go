@@ -50,11 +50,10 @@ func TestLaunchAvailable(t *testing.T) {
 		pi   bool
 		want bool
 	}{
-		{domain.KindDevbox, true, true},
+		{domain.KindVPS, true, true},
 		{domain.KindSandbox, true, true},
 		{domain.KindSandbox, false, false},
 		{domain.KindVPS, false, false},
-		{domain.KindVPS, true, false}, // plain VPS stays clean even if mis-flagged
 	}
 	for _, tc := range cases {
 		if got := pi.LaunchAvailable(tc.kind, tc.pi); got != tc.want {

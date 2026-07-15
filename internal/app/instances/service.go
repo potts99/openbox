@@ -339,7 +339,7 @@ func (s *Service) SetProtection(ctx context.Context, ownerID domain.OwnerID, id 
 	if err != nil {
 		return domain.Instance{}, err
 	}
-	if protected && instance.Kind != domain.KindDevbox {
+	if protected && instance.Kind != domain.KindVPS {
 		return domain.Instance{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "protected"}
 	}
 	if instance.Protected == protected {

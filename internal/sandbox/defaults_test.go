@@ -87,7 +87,7 @@ func TestApplyDefaultsRejectsLifetimeAboveMax(t *testing.T) {
 
 func TestApplyDefaultsLeavesPersistentKindsWithoutLifetime(t *testing.T) {
 	t.Parallel()
-	for _, kind := range []domain.InstanceKind{domain.KindVPS, domain.KindDevbox} {
+	for _, kind := range []domain.InstanceKind{domain.KindVPS} {
 		got, err := sandbox.ApplyDefaults(sandbox.CreateDefaults{
 			Kind:         kind,
 			Architecture: "x86_64",

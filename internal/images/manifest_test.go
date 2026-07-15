@@ -12,7 +12,7 @@ import (
 func TestCuratedManifestsCoverKindsAndArchitectures(t *testing.T) {
 	t.Parallel()
 	catalog := images.DefaultCatalog()
-	for _, kind := range []domain.InstanceKind{domain.KindVPS, domain.KindSandbox, domain.KindDevbox} {
+	for _, kind := range []domain.InstanceKind{domain.KindVPS, domain.KindSandbox} {
 		for _, arch := range []string{"x86_64", "aarch64"} {
 			for _, runtime := range []string{"container", "virtual-machine"} {
 				entry, err := catalog.DefaultFor(kind, arch, runtime)
@@ -41,14 +41,22 @@ func TestCuratedDefaultsDifferByWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	devbox, err := catalog.DefaultFor(domain.KindDevbox, "x86_64", "container")
-	if err != nil {
-		t.Fatal(err)
+	var legacyDevbox images.Manifest
+	found := false
+	for _, entry := range catalog.List() {
+		if entry.Name == "devbox" && entry.Architecture == "x86_64" && entry.Runtime == "container" {
+			legacyDevbox = entry
+			found = true
+			break
+		}
 	}
-	if general.Alias == sandbox.Alias || general.Alias == devbox.Alias || sandbox.Alias == devbox.Alias {
-		t.Fatalf("workflow defaults must be distinct: general=%q sandbox=%q devbox=%q", general.Alias, sandbox.Alias, devbox.Alias)
+	if !found {
+		t.Fatal("expected legacy curated devbox image entry")
 	}
-	if !devbox.IncludesPi {
+	if general.Alias == sandbox.Alias || general.Alias == legacyDevbox.Alias || sandbox.Alias == legacyDevbox.Alias {
+		t.Fatalf("workflow defaults must be distinct: general=%q sandbox=%q devbox=%q", general.Alias, sandbox.Alias, legacyDevbox.Alias)
+	}
+	if !legacyDevbox.IncludesPi {
 		t.Fatal("devbox curated image must include Pi")
 	}
 	if sandbox.IncludesPi || general.IncludesPi {

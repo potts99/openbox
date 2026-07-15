@@ -59,7 +59,7 @@ func TestCapabilitiesImagesAndInstancesUseFixedOwner(t *testing.T) {
 	service := &fakeService{
 		capabilities: runtimeapi.Capabilities{Architecture: "x86_64", Containers: true, KVM: true, VirtualMachines: true, VMAvailability: runtimeapi.VMAvailable},
 		images:       []domain.Image{{ID: "img-1", OwnerID: "owner-local", Alias: "ubuntu", Digest: "sha256:abc"}},
-		instances:    []domain.Instance{{ID: "instance-1", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox}},
+		instances:    []domain.Instance{{ID: "instance-1", OwnerID: "owner-local", Name: "dev", Kind: domain.KindVPS}},
 	}
 	handler := newTestHandler(t, service)
 
@@ -81,7 +81,7 @@ func TestCreateRequiresIdempotencyAndReturnsOperation(t *testing.T) {
 	t.Parallel()
 
 	service := &fakeService{
-		created:   domain.Instance{ID: "instance-1", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox},
+		created:   domain.Instance{ID: "instance-1", OwnerID: "owner-local", Name: "dev", Kind: domain.KindVPS},
 		operation: domain.Operation{ID: "operation-1", OwnerID: "owner-local", Status: domain.OperationPending},
 	}
 	handler := newTestHandler(t, service)

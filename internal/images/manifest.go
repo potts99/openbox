@@ -77,8 +77,6 @@ func workflowName(kind domain.InstanceKind) (string, error) {
 		return "general", nil
 	case domain.KindSandbox:
 		return "sandbox", nil
-	case domain.KindDevbox:
-		return "devbox", nil
 	default:
 		return "", fmt.Errorf("unsupported instance kind %q", kind)
 	}

@@ -150,7 +150,7 @@ func parseNew(args []string) (Command, error) {
 		command.Kind = domain.InstanceKind(value)
 	}
 	switch command.Kind {
-	case domain.KindSandbox, domain.KindVPS, domain.KindDevbox:
+	case domain.KindSandbox, domain.KindVPS:
 	default:
 		return nil, invalid("invalid --kind")
 	}
