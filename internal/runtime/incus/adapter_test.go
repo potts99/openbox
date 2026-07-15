@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -274,6 +275,19 @@ func TestEgressACLResourcesAndNICComposition(t *testing.T) {
 	}
 	if containsNetworkACLRule(standard.Egress, networkACLRule{Action: "allow", Destination: "10.42.0.0/24"}) {
 		t.Fatalf("standard ACL egress rules = %#v, must not allow peer CIDR", standard.Egress)
+	}
+	// Incus applies reject rules before allows across stacked ACLs. Rejects must
+	// therefore exclude the bridge gateway so baseline DNS and LLM rules remain
+	// usable when this ACL is attached.
+	for _, baselineRule := range networkACLResource().Egress {
+		if standardACLRejectsDestination(standard, baselineRule.Destination) {
+			t.Fatalf("standard ACL rejects baseline %s destination %s:%s under ACL stacking", baselineRule.Description, baselineRule.Destination, baselineRule.DestinationPort)
+		}
+	}
+	for _, peer := range []string{"10.42.0.2", "10.42.0.255"} {
+		if !standardACLRejectsDestination(standard, peer) {
+			t.Fatalf("standard ACL does not reject peer %s: %#v", peer, standard.Egress)
+		}
 	}
 
 	restricted := RestrictedACL("openbox-egress-restricted-profile-1", []string{"203.0.113.9", "198.51.100.0/24"})
@@ -677,6 +691,20 @@ func containsNetworkACLRule(rules []networkACLRule, wanted networkACLRule) bool 
 			rule.Destination == wanted.Destination &&
 			rule.Protocol == wanted.Protocol &&
 			rule.DestinationPort == wanted.DestinationPort {
+			return true
+		}
+	}
+	return false
+}
+
+func standardACLRejectsDestination(acl resource, destination string) bool {
+	address := netip.MustParseAddr(destination)
+	for _, rule := range acl.Egress {
+		if rule.Action != "reject" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(rule.Destination)
+		if err == nil && prefix.Contains(address) {
 			return true
 		}
 	}

@@ -65,20 +65,37 @@ func networkACLResource() resource {
 }
 
 func standardEgressACLResource() resource {
+	egress := make([]networkACLRule, 0, len(managedBridgePeerCIDRs())+1)
+	for _, peerCIDR := range managedBridgePeerCIDRs() {
+		egress = append(egress, networkACLRule{
+			Action: "reject", Destination: peerCIDR,
+			Description: "deny peer instances on managed bridge",
+		})
+	}
+	egress = append(egress, networkACLRule{
+		Action: "allow", Destination: "0.0.0.0/0",
+		Description: "allow public internet egress",
+	})
+
 	return resource{
 		Name:        StandardEgressACLName,
 		Description: "OpenBox standard instance egress policy",
 		Config:      managedConfig("network-acl", nil),
-		Egress: []networkACLRule{
-			{
-				Action: "reject", Destination: "10.42.0.0/24",
-				Description: "deny peer instances on managed bridge",
-			},
-			{
-				Action: "allow", Destination: "0.0.0.0/0",
-				Description: "allow public internet egress",
-			},
-		},
+		Egress:      egress,
+	}
+}
+
+// managedBridgePeerCIDRs covers 10.42.0.2 through 10.42.0.255 without
+// covering the bridge gateway at 10.42.0.1.
+func managedBridgePeerCIDRs() []string {
+	return []string{
+		"10.42.0.2/31",
+		"10.42.0.4/30",
+		"10.42.0.8/29",
+		"10.42.0.16/28",
+		"10.42.0.32/27",
+		"10.42.0.64/26",
+		"10.42.0.128/25",
 	}
 }
 
