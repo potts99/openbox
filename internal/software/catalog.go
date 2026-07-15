@@ -35,7 +35,8 @@ type Catalog struct {
 // DefaultCatalog returns the built-in curated catalog.
 func DefaultCatalog() Catalog {
 	pi := piPackage()
-	return Catalog{packages: map[string]Package{pi.ID: pi}}
+	herdr := herdrPackage()
+	return Catalog{packages: map[string]Package{pi.ID: pi, herdr.ID: herdr}}
 }
 
 // Get looks up a package by ID.
@@ -48,7 +49,7 @@ func (c Catalog) Get(id string) (Package, bool) {
 func (c Catalog) List() []Package {
 	out := make([]Package, 0, len(c.packages))
 	// Stable order: known IDs first, then any others by insertion via sorted keys.
-	order := []string{"pi"}
+	order := []string{"pi", "herdr"}
 	seen := map[string]bool{}
 	for _, id := range order {
 		if pkg, ok := c.packages[id]; ok {
