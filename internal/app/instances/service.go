@@ -637,12 +637,12 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 			Metadata:  managedMetadata(input.OwnerID, instance.ID),
 		})
 		if createErr != nil {
-			s.markError(ctx, instance, createErr)
+			createErr = errors.Join(createErr, s.markError(ctx, instance))
 			return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, fmt.Errorf("create %s: %w", imageType, createErr))
 		}
 		createdByOperation = true
 		if err := verifyRuntime(created, instance.ID, actualIsolation); err != nil {
-			s.markError(ctx, instance, err)
+			err = errors.Join(err, s.markError(ctx, instance))
 			return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, err)
 		}
 	}
@@ -662,7 +662,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 			return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, err)
 		}
 		if err := s.runtime.StartInstance(ctx, runtimeRef); err != nil {
-			s.markError(ctx, instance, err)
+			err = errors.Join(err, s.markError(ctx, instance))
 			return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, fmt.Errorf("start %s: %w", imageType, err))
 		}
 	}
@@ -674,13 +674,13 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 		return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, err)
 	}
 	if err := s.applyNetworkPolicy(ctx, instance); err != nil {
-		s.markError(ctx, instance, err)
+		err = errors.Join(err, s.markError(ctx, instance))
 		return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, fmt.Errorf("apply network policy: %w", err))
 	}
 	if actualIsolation == domain.IsolationVM {
 		err := s.waitForVMReady(ctx, instance, operation)
 		if err != nil {
-			s.markError(ctx, instance, err)
+			err = errors.Join(err, s.markError(ctx, instance))
 			return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, fmt.Errorf("wait for VM readiness: %w", err))
 		}
 	}
@@ -793,7 +793,7 @@ func (s *Service) recoverCreate(ctx context.Context, operation domain.Operation)
 		return err
 	}
 	if err := s.applyNetworkPolicy(ctx, instance); err != nil {
-		s.markError(ctx, instance, err)
+		err = errors.Join(err, s.markError(ctx, instance))
 		return fmt.Errorf("apply network policy: %w", err)
 	}
 	if instance.ActualIsolation == domain.IsolationVM {
@@ -841,14 +841,13 @@ func (s *Service) Refresh(ctx context.Context, ownerID domain.OwnerID, id domain
 	if err != nil {
 		return domain.Instance{}, err
 	}
-	if err := s.syncObserved(ctx, instance, target); err != nil {
-		return domain.Instance{}, err
-	}
 	if target == domain.ObservedRunning {
 		if err := s.verifyNetworkPolicy(ctx, instance); err != nil {
-			s.markError(ctx, instance, err)
-			return domain.Instance{}, fmt.Errorf("verify network policy: %w", err)
+			return domain.Instance{}, errors.Join(fmt.Errorf("verify network policy: %w", err), s.markError(ctx, instance))
 		}
+	}
+	if err := s.syncObserved(ctx, instance, target); err != nil {
+		return domain.Instance{}, err
 	}
 	refreshed, err := s.repo.GetInstance(ctx, ownerID, id)
 	if err != nil {
@@ -1230,8 +1229,11 @@ func (s *Service) mutationOperation(ctx context.Context, kind string, instance d
 	return operation, false, nil
 }
 
-func (s *Service) markError(ctx context.Context, instance domain.Instance, cause error) {
-	_ = s.repo.UpdateInstanceObservation(ctx, instance.OwnerID, instance.ID, instance.RuntimeRef, instance.ActualIsolation, domain.ObservedError, domain.ErrorCode("runtime_error"), s.now())
+func (s *Service) markError(ctx context.Context, instance domain.Instance) error {
+	if err := s.repo.UpdateInstanceObservation(ctx, instance.OwnerID, instance.ID, instance.RuntimeRef, instance.ActualIsolation, domain.ObservedError, domain.ErrorCode("runtime_error"), s.now()); err != nil {
+		return fmt.Errorf("mark instance error: %w", err)
+	}
+	return nil
 }
 
 func selectIsolation(request domain.IsolationRequest, capabilities runtimeapi.Capabilities) (domain.IsolationType, error) {
