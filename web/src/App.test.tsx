@@ -11,7 +11,8 @@ import type { OpenBoxApi, Session } from "./api/client";
 function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
   return {
     getBootstrapStatus: vi.fn().mockResolvedValue({ required: false }),
-    getSession: vi.fn().mockResolvedValue({ authenticated: true, owner: { displayName: "Operator" } }),
+    getSession: vi.fn().mockResolvedValue({ authenticated: true, owner: { displayName: "Operator" }, csrfToken: "test-csrf" }),
+    getCsrfToken: vi.fn().mockReturnValue("test-csrf"),
     getCapabilities: vi.fn().mockResolvedValue({
       architecture: "x86_64",
       containers: true,
@@ -71,7 +72,7 @@ describe("App", () => {
 
   it("submits setup without storing secrets in browser storage", async () => {
     const user = userEvent.setup();
-    const setup = vi.fn().mockResolvedValue({ authenticated: true, owner: { displayName: "Owner" } });
+    const setup = vi.fn().mockResolvedValue({ authenticated: true, owner: { displayName: "Owner" }, csrfToken: "setup-csrf" });
     const api = createApi({
       getBootstrapStatus: vi.fn().mockResolvedValue({ required: true }),
       getSession: vi.fn().mockResolvedValue({ authenticated: false }),
@@ -138,6 +139,18 @@ describe("App", () => {
     expect(screen.getByText("No instances yet")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Show operations" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("complementary", { name: "Operations" })).not.toBeInTheDocument();
+  });
+
+  it("offers an open-terminal action for each instance", async () => {
+    const api = createApi({
+      listInstances: vi.fn().mockResolvedValue([
+        { id: "box-1", name: "workbench", kind: "devbox", status: "running" },
+      ]),
+    });
+    render(<App api={api} />);
+
+    expect(await screen.findByRole("button", { name: "Open terminal" })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /workbench/i })).toBeInTheDocument();
   });
 
   it("opens and closes the operations drawer with keyboard-accessible controls", async () => {

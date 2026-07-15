@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Capabilities, InstanceSummary, OpenBoxApi, OperationSummary, Session } from "../api/client";
 import { CapabilityBanner } from "../components/CapabilityBanner";
 import { OperationDrawer } from "../components/OperationDrawer";
+import { InstanceTerminal } from "./InstanceTerminal";
 
 interface ConsolePageProps {
   api: OpenBoxApi;
@@ -21,6 +22,7 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [logoutPending, setLogoutPending] = useState(false);
   const [logoutError, setLogoutError] = useState("");
+  const [terminalInstance, setTerminalInstance] = useState<InstanceSummary | null>(null);
   const operationsButton = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -51,6 +53,17 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
   function closeDrawer() {
     setDrawerOpen(false);
     queueMicrotask(() => operationsButton.current?.focus());
+  }
+
+  if (terminalInstance) {
+    return (
+      <InstanceTerminal
+        instanceId={terminalInstance.id}
+        instanceName={terminalInstance.name}
+        csrfToken={session.csrfToken || api.getCsrfToken()}
+        onBack={() => setTerminalInstance(null)}
+      />
+    );
   }
 
   const operations = data.status === "ready" ? data.operations : [];
@@ -114,9 +127,22 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
                 ) : (
                   <table>
                     <caption className="sr-only">OpenBox instances</caption>
-                    <thead><tr><th>Name</th><th>Kind</th><th>Status</th></tr></thead>
+                    <thead><tr><th>Name</th><th>Kind</th><th>Status</th><th>Terminal</th></tr></thead>
                     <tbody>{data.instances.map((instance) => (
-                      <tr key={instance.id}><th scope="row">{instance.name}</th><td>{instance.kind}</td><td>{instance.status}</td></tr>
+                      <tr key={instance.id}>
+                        <th scope="row">{instance.name}</th>
+                        <td>{instance.kind}</td>
+                        <td>{instance.status}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="link-button"
+                            onClick={() => setTerminalInstance(instance)}
+                          >
+                            Open terminal
+                          </button>
+                        </td>
+                      </tr>
                     ))}</tbody>
                   </table>
                 )}

@@ -121,6 +121,20 @@ a { color: inherit; }
 .status-running { background: var(--safety); box-shadow: 0 0 0 .25rem rgba(230,78,32,.14); }
 .status-completed, .status-succeeded { background: var(--ok); }
 .console-layout footer { display: flex; justify-content: space-between; border-top: 1px solid var(--ink); padding: .7rem 1.25rem; background: var(--ink); color: #aaa79d; font-size: .55rem; letter-spacing: .12em; }
+.link-button { border: 0; padding: 0; background: transparent; color: var(--safety-dark); cursor: pointer; font-size: .72rem; font-weight: 800; letter-spacing: .06em; text-decoration: underline; text-transform: uppercase; }
+
+/* Instance terminal */
+.terminal-page { display: grid; grid-template-rows: auto 1fr; min-height: 100vh; background: var(--ink); color: var(--paper-raised); }
+.terminal-toolbar { display: grid; grid-template-columns: auto 1fr auto; gap: 1.5rem; align-items: end; border-bottom: 1px solid #5c5a51; padding: 1rem 1.25rem; background: #20201c; }
+.terminal-toolbar h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: clamp(1.8rem, 4vw, 3rem); font-weight: 400; letter-spacing: -.04em; }
+.terminal-toolbar button { border: 1px solid #8e8b80; padding: .55rem .75rem; background: transparent; color: inherit; cursor: pointer; font-size: .66rem; font-weight: 900; letter-spacing: .09em; text-transform: uppercase; }
+.terminal-toolbar button:disabled { opacity: .45; cursor: not-allowed; }
+.terminal-actions { display: flex; align-items: center; gap: .75rem; }
+.terminal-connection { margin: 0; color: #cfcab8; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; }
+.terminal-main { display: grid; grid-template-rows: 1fr auto; min-height: 0; padding: 1rem 1.25rem 1.25rem; }
+.terminal-surface { min-height: 24rem; height: 100%; border: 1px solid #5c5a51; background: #11110f; }
+.terminal-surface .xterm { height: 100%; padding: .5rem; }
+.terminal-hint { margin: .75rem 0 0; color: #8e8b80; font-family: ui-sans-serif, system-ui, sans-serif; font-size: .75rem; }
 
 @media (max-width: 800px) {
   .auth-layout { grid-template-columns: 1fr; }
