@@ -16,6 +16,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/openbox-dev/openbox/internal/domain"
 )
 
 type staticProbe struct {
@@ -202,8 +204,8 @@ func TestBootstrapIsIdempotentAndLeavesUnknownResourcesUntouched(t *testing.T) {
 	if !reflect.DeepEqual(first, second) {
 		t.Fatalf("second bootstrap changed configuration:\nfirst=%#v\nsecond=%#v", first, second)
 	}
-	if api.posts != 5 {
-		t.Fatalf("POST count = %d, want 5", api.posts)
+	if api.posts != 6 {
+		t.Fatalf("POST count = %d, want 6", api.posts)
 	}
 	for key, value := range second {
 		if key == "project/unrelated" || key == "storage/default" {
@@ -237,6 +239,9 @@ func TestBootstrapCreatesACLAndAttachesItToManagedNICs(t *testing.T) {
 	if !exists {
 		t.Fatal("managed default-deny ACL was not created")
 	}
+	if _, exists := resources["network-acl/"+StandardEgressACLName]; !exists {
+		t.Fatal("managed standard egress ACL was not created")
+	}
 	if aclResource.Config[ManagedLabel] != "true" || aclResource.Config[ResourceLabel] != "network-acl" {
 		t.Fatalf("ACL ownership labels = %#v", aclResource.Config)
 	}
@@ -245,24 +250,75 @@ func TestBootstrapCreatesACLAndAttachesItToManagedNICs(t *testing.T) {
 			t.Fatalf("%s eth0 security.acls = %q, want openbox-default-deny", name, got)
 		}
 	}
-	var acl struct {
-		Egress  []aclRule `json:"egress"`
-		Ingress []aclRule `json:"ingress"`
-	}
-	if err := json.Unmarshal(api.postsByPath["/1.0/network-acls"], &acl); err != nil {
-		t.Fatal(err)
-	}
-	for _, wanted := range []aclRule{
+	for _, wanted := range []networkACLRule{
 		{Action: "allow", Destination: "10.42.0.1", Protocol: "udp", DestinationPort: "53"},
 		{Action: "allow", Destination: "10.42.0.1", Protocol: "tcp", DestinationPort: "53"},
 		{Action: "allow", Destination: "10.42.0.1", Protocol: "tcp", DestinationPort: "18789"},
 	} {
-		if !containsACLRule(acl.Egress, wanted) {
-			t.Fatalf("ACL egress rules = %#v, missing %#v", acl.Egress, wanted)
+		if !containsNetworkACLRule(aclResource.Egress, wanted) {
+			t.Fatalf("ACL egress rules = %#v, missing %#v", aclResource.Egress, wanted)
 		}
 	}
-	if !containsACLRule(acl.Ingress, aclRule{Action: "allow", Source: "10.42.0.1", Protocol: "tcp", DestinationPort: "22"}) {
-		t.Fatalf("ACL ingress rules = %#v, missing SSH gateway rule", acl.Ingress)
+	if !containsNetworkACLRule(aclResource.Ingress, networkACLRule{Action: "allow", Source: "10.42.0.1", Protocol: "tcp", DestinationPort: "22"}) {
+		t.Fatalf("ACL ingress rules = %#v, missing SSH gateway rule", aclResource.Ingress)
+	}
+}
+
+func TestEgressACLResourcesAndNICComposition(t *testing.T) {
+	standard := standardEgressACLResource()
+	if standard.Name != StandardEgressACLName {
+		t.Fatalf("standard ACL name = %q, want %q", standard.Name, StandardEgressACLName)
+	}
+	if !containsNetworkACLRule(standard.Egress, networkACLRule{Action: "allow", Destination: "0.0.0.0/0"}) {
+		t.Fatalf("standard ACL egress rules = %#v, missing internet allow", standard.Egress)
+	}
+	if containsNetworkACLRule(standard.Egress, networkACLRule{Action: "allow", Destination: "10.42.0.0/24"}) {
+		t.Fatalf("standard ACL egress rules = %#v, must not allow peer CIDR", standard.Egress)
+	}
+
+	restricted := RestrictedACL("openbox-egress-restricted-profile-1", []string{"203.0.113.9", "198.51.100.0/24"})
+	if restricted.Name != "openbox-egress-restricted-profile-1" {
+		t.Fatalf("restricted ACL name = %q", restricted.Name)
+	}
+	if containsNetworkACLRule(restricted.Egress, networkACLRule{Action: "allow", Destination: "0.0.0.0/0"}) {
+		t.Fatalf("restricted ACL egress rules = %#v, must not allow the internet", restricted.Egress)
+	}
+	for _, destination := range []string{"203.0.113.9", "198.51.100.0/24"} {
+		if !containsNetworkACLRule(restricted.Egress, networkACLRule{Action: "allow", Destination: destination}) {
+			t.Fatalf("restricted ACL egress rules = %#v, missing %q", restricted.Egress, destination)
+		}
+	}
+	if len(restricted.Egress) != 2 {
+		t.Fatalf("restricted ACL egress rules = %#v, want only allowlisted destinations", restricted.Egress)
+	}
+
+	if got, want := NICACLs(domain.EgressStandard), []string{DefaultDenyACLName, StandardEgressACLName}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("standard NIC ACLs = %#v, want %#v", got, want)
+	}
+	if got, want := NICACLs(domain.EgressRestricted, restricted.Name), []string{DefaultDenyACLName, restricted.Name}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("restricted NIC ACLs = %#v, want %#v", got, want)
+	}
+}
+
+func TestEnsureRestrictedACLEnsuresNamedAllowlist(t *testing.T) {
+	api := newBootstrapAPI()
+	socket := serveUnixHTTP(t, api)
+	adapter, err := New(Options{SocketPath: socket})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := adapter.EnsureRestrictedACL(context.Background(), "openbox-egress-restricted-profile-1", []string{"203.0.113.9"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.EnsureRestrictedACL(context.Background(), "openbox-egress-restricted-profile-1", []string{"203.0.113.9"}); err != nil {
+		t.Fatal(err)
+	}
+	if api.posts != 1 {
+		t.Fatalf("restricted ACL POST count = %d, want 1", api.posts)
+	}
+	if _, exists := api.snapshot()["network-acl/openbox-egress-restricted-profile-1"]; !exists {
+		t.Fatal("restricted ACL was not created")
 	}
 }
 
@@ -504,17 +560,16 @@ func cleanupIntegrationResources(adapter *Adapter, config BootstrapConfig) {
 }
 
 type bootstrapAPI struct {
-	mu          sync.Mutex
-	resources   map[string]resource
-	postsByPath map[string]json.RawMessage
-	posts       int
+	mu        sync.Mutex
+	resources map[string]resource
+	posts     int
 }
 
 func newBootstrapAPI() *bootstrapAPI {
 	return &bootstrapAPI{resources: map[string]resource{
 		"storage/default":   {Name: "default", Type: "dir"},
 		"project/unrelated": {Name: "unrelated", Config: map[string]string{"user.owner": "someone-else"}},
-	}, postsByPath: map[string]json.RawMessage{}}
+	}}
 }
 
 func (a *bootstrapAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -543,7 +598,6 @@ func (a *bootstrapAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a.resources[kind+"/"+value.Name] = value
-		a.postsByPath[r.URL.Path] = body
 		a.posts++
 		writeSync(w, nil)
 		return
@@ -616,15 +670,7 @@ func containsField(values []string, wanted string) bool {
 	return false
 }
 
-type aclRule struct {
-	Action          string `json:"action"`
-	Source          string `json:"source"`
-	Destination     string `json:"destination"`
-	Protocol        string `json:"protocol"`
-	DestinationPort string `json:"destination_port"`
-}
-
-func containsACLRule(rules []aclRule, wanted aclRule) bool {
+func containsNetworkACLRule(rules []networkACLRule, wanted networkACLRule) bool {
 	for _, rule := range rules {
 		if rule.Action == wanted.Action &&
 			rule.Source == wanted.Source &&

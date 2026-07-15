@@ -3,6 +3,8 @@
 package networkpolicy_test
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/openbox-dev/openbox/internal/domain"
@@ -38,6 +40,39 @@ func TestEvaluateConnectivityMatrix(t *testing.T) {
 
 			if got := networkpolicy.Evaluate(tt.mode, tt.dest); got != tt.want {
 				t.Fatalf("Evaluate(%q, %q) = %q, want %q", tt.mode, tt.dest, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseAllowedDestinationsNormalizesIPsAndCIDRs(t *testing.T) {
+	t.Parallel()
+
+	destinations, err := networkpolicy.ParseAllowedDestinations([]byte(`["203.0.113.9","198.51.100.29/24","2001:db8::8","2001:db8:1::5/64"]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"203.0.113.9", "198.51.100.0/24", "2001:db8::8", "2001:db8:1::/64"}
+	if !reflect.DeepEqual(destinations, want) {
+		t.Fatalf("destinations = %#v, want %#v", destinations, want)
+	}
+}
+
+func TestParseAllowedDestinationsRejectsInvalidEntries(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		raw, errorText string
+	}{
+		{raw: `["packages.example.com"]`, errorText: "IP address or CIDR"},
+		{raw: `["not an address"]`, errorText: "IP address or CIDR"},
+		{raw: `{"destination":"203.0.113.9"}`, errorText: "parse allowed destinations"},
+		{raw: `[42]`, errorText: "parse allowed destinations"},
+	} {
+		t.Run(test.raw, func(t *testing.T) {
+			_, err := networkpolicy.ParseAllowedDestinations([]byte(test.raw))
+			if err == nil || !strings.Contains(err.Error(), test.errorText) {
+				t.Fatalf("ParseAllowedDestinations(%s) error = %v, want %q validation error", test.raw, err, test.errorText)
 			}
 		})
 	}
