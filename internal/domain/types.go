@@ -109,6 +109,7 @@ type Instance struct {
 	ErrorCode             ErrorCode
 	ErrorStage            string
 	ErrorRetryable        bool
+	NetworkPolicy         NetworkPolicyStatus
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 	DeletedAt             *time.Time
@@ -180,6 +181,25 @@ const (
 	EgressStandard   EgressMode = "standard"
 	EgressRestricted EgressMode = "restricted"
 )
+
+// NetworkPolicyStatus describes the host-enforced policy currently effective
+// for an instance. It contains policy metadata only: never packets, DNS
+// answers, or other guest payloads.
+type NetworkPolicyStatus struct {
+	EgressMode  EgressMode
+	ACLs        []string
+	Resolution  AllowlistResolution
+	DeniedFlows uint64
+}
+
+// AllowlistResolution summarizes hostname resolution without exposing the
+// resolved addresses.
+type AllowlistResolution struct {
+	State    string
+	Pending  []string
+	Resolved []string
+	Failed   []string
+}
 
 type EgressProfile struct {
 	ID                      EgressProfileID

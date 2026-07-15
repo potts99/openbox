@@ -8,10 +8,9 @@ import (
 	"github.com/openbox-dev/openbox/internal/domain"
 )
 
-// EgressLabel is the v0.1 display label until slice 14 network profiles land.
-// Sandboxes and other kinds currently share the default unrestricted posture.
-func EgressLabel(_ domain.InstanceKind) string {
-	return "default"
+// EgressLabel returns the effective host-enforced egress mode.
+func EgressLabel(mode domain.EgressMode) string {
+	return string(mode)
 }
 
 // RemainingLifetime returns how long until expiresAt, or 0 when already due/absent.

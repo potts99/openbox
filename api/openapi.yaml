@@ -805,9 +805,27 @@ components:
         compatibility: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    AllowlistResolution:
+      type: object
+      required: [state, pending, resolved, failed]
+      description: Hostname resolution state. Resolved DNS addresses are not exposed.
+      properties:
+        state: { type: string, enum: [idle, pending, resolved, failed] }
+        pending: { type: array, items: { type: string } }
+        resolved: { type: array, items: { type: string } }
+        failed: { type: array, items: { type: string } }
+    NetworkPolicyStatus:
+      type: object
+      required: [egress_mode, acls, resolution, denied_flows]
+      description: Effective host-enforced network policy metadata without packet or DNS-answer payloads.
+      properties:
+        egress_mode: { type: string, enum: [standard, restricted] }
+        acls: { type: array, items: { type: string } }
+        resolution: { $ref: "#/components/schemas/AllowlistResolution" }
+        denied_flows: { type: integer, format: int64, minimum: 0 }
     Instance:
       type: object
-      required: [id, name, kind, image_id, requested_isolation, actual_isolation, desired_state, observed_state, resources, protected, created_at, updated_at]
+      required: [id, name, kind, image_id, requested_isolation, actual_isolation, desired_state, observed_state, resources, protected, network_policy, created_at, updated_at]
       properties:
         id: { type: string }
         name: { type: string }
@@ -823,6 +841,7 @@ components:
         error_code: { type: string }
         error_stage: { type: string }
         error_retryable: { type: boolean }
+        network_policy: { $ref: "#/components/schemas/NetworkPolicyStatus" }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     Operation:

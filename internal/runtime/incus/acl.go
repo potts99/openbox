@@ -132,9 +132,39 @@ func (a *Adapter) EnsureRestrictedACL(ctx context.Context, name string, destinat
 // starts and before OpenBox reports the instance ready.
 func (a *Adapter) ApplyNetworkPolicy(ctx context.Context, instance domain.Instance) error {
 	if instance.RuntimeRef == "" {
+		a.recordPolicyDenied(instance.ID)
 		return fmt.Errorf("network policy runtime ref is required")
 	}
-	return a.setInstanceNICACLs(ctx, instance.RuntimeRef, NICACLs(instance.EgressMode))
+	if err := a.setInstanceNICACLs(ctx, instance.RuntimeRef, NICACLs(instance.EgressMode)); err != nil {
+		a.recordPolicyDenied(instance.ID)
+		return err
+	}
+	return nil
+}
+
+// NetworkPolicyStatus exposes the effective ACL composition and best-effort
+// denied-flow counter. It intentionally excludes addresses and packet data.
+func (a *Adapter) NetworkPolicyStatus(instance domain.Instance) domain.NetworkPolicyStatus {
+	a.policyMu.RLock()
+	deniedFlows := a.policyDenied[instance.ID]
+	a.policyMu.RUnlock()
+	return domain.NetworkPolicyStatus{
+		EgressMode: instance.EgressMode,
+		ACLs:       NICACLs(instance.EgressMode),
+		Resolution: domain.AllowlistResolution{
+			State:    "idle",
+			Pending:  []string{},
+			Resolved: []string{},
+			Failed:   []string{},
+		},
+		DeniedFlows: deniedFlows,
+	}
+}
+
+func (a *Adapter) recordPolicyDenied(instanceID domain.InstanceID) {
+	a.policyMu.Lock()
+	a.policyDenied[instanceID]++
+	a.policyMu.Unlock()
 }
 
 // RemoveNetworkPolicy deletes the per-instance restricted ACL after the

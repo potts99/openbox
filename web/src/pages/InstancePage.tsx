@@ -158,6 +158,10 @@ export function InstancePage({ api, instanceId, onBack, onOpenTerminal }: Instan
                   <dd>{instance.actualIsolation || instance.requestedIsolation}</dd>
                 </div>
                 <div>
+                  <dt>Egress</dt>
+                  <dd>{instance.networkPolicy?.egressMode || "unknown"}</dd>
+                </div>
+                <div>
                   <dt>Desired</dt>
                   <dd>{instance.desiredState}</dd>
                 </div>

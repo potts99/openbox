@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -630,6 +631,7 @@ func newPolicyTestService(t *testing.T, runtime ContainerRuntime, policy *record
 type recordingNetworkPolicy struct {
 	runtime                *fake.Runtime
 	applyErr               error
+	status                 domain.NetworkPolicyStatus
 	calls                  []string
 	observe                func(domain.Instance)
 	observedWhenApplied    domain.ObservedState
@@ -656,6 +658,10 @@ func (p *recordingNetworkPolicy) RemoveNetworkPolicy(ctx context.Context, instan
 	_, err := p.runtime.InspectInstance(ctx, instance.RuntimeRef)
 	p.runtimeGoneWhenRemoved = errors.Is(err, runtimeapi.ErrNotFound)
 	return nil
+}
+
+func (p *recordingNetworkPolicy) NetworkPolicyStatus(domain.Instance) domain.NetworkPolicyStatus {
+	return p.status
 }
 
 func createInput() CreateInput {
@@ -849,6 +855,33 @@ func TestCreateAppliesNetworkPolicyBeforeReportingReady(t *testing.T) {
 	}
 	if policy.observedWhenApplied == domain.ObservedRunning {
 		t.Fatalf("policy applied after readiness: observed=%q", policy.observedWhenApplied)
+	}
+}
+
+func TestGetInstanceIncludesNetworkPolicyStatus(t *testing.T) {
+	runtime := fake.New(testCapabilities())
+	runtime.AddImage(testImage())
+	policy := &recordingNetworkPolicy{status: domain.NetworkPolicyStatus{
+		EgressMode:  domain.EgressStandard,
+		ACLs:        []string{"openbox-default-deny", "openbox-egress-standard"},
+		DeniedFlows: 2,
+		Resolution:  domain.AllowlistResolution{State: "idle", Pending: []string{}, Resolved: []string{}, Failed: []string{}},
+	}}
+	service, _, _ := newPolicyTestService(t, runtime, policy)
+	created, err := service.Create(context.Background(), createInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	inspected, err := service.GetInstance(context.Background(), created.OwnerID, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspected.NetworkPolicy.DeniedFlows != 2 {
+		t.Fatalf("denied flows = %d, want 2", inspected.NetworkPolicy.DeniedFlows)
+	}
+	if got, want := inspected.NetworkPolicy.ACLs, policy.status.ACLs; !reflect.DeepEqual(got, want) {
+		t.Fatalf("effective ACLs = %#v, want %#v", got, want)
 	}
 }
 
