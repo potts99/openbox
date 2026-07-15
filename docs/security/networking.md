@@ -36,3 +36,12 @@ packet payloads or DNS answers. The field reports:
 `openbox inspect` displays the same egress mode, ACL names, resolution state,
 and denied-flow counter. The counter is in-memory and resets when `openboxd`
 restarts; it is operational telemetry, not an audit trail.
+
+## Policy programming verification
+
+After applying an instance NIC ACL stack, OpenBox reads it back from Incus and
+compares it with the intended stack. A missing, reordered, or unexpected ACL is
+a policy-programming failure: the instance is marked error and is never
+reported ready. Inspecting a running instance performs the same check, so
+policy drift is surfaced as an error rather than silently leaving the instance
+with broader access than intended.

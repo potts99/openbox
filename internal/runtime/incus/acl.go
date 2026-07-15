@@ -139,6 +139,28 @@ func (a *Adapter) ApplyNetworkPolicy(ctx context.Context, instance domain.Instan
 		a.recordPolicyDenied(instance.ID)
 		return err
 	}
+	if err := a.VerifyNetworkPolicy(ctx, instance); err != nil {
+		a.recordPolicyDenied(instance.ID)
+		return err
+	}
+	return nil
+}
+
+// VerifyNetworkPolicy checks that Incus reports the exact ACL stack OpenBox
+// intends to enforce. A mismatch is an apply failure: callers must not report
+// the instance ready while containment is uncertain.
+func (a *Adapter) VerifyNetworkPolicy(ctx context.Context, instance domain.Instance) error {
+	if instance.RuntimeRef == "" {
+		return fmt.Errorf("network policy runtime ref is required")
+	}
+	actual, err := a.instanceNICACLs(ctx, instance.RuntimeRef)
+	if err != nil {
+		return err
+	}
+	expected := NICACLs(instance.EgressMode)
+	if !sameStrings(actual, expected) {
+		return fmt.Errorf("NIC ACL mismatch: got %q, want %q", actual, expected)
+	}
 	return nil
 }
 
@@ -208,6 +230,38 @@ func (a *Adapter) setInstanceNICACLs(ctx context.Context, ref string, acls []str
 		return fmt.Errorf("update Incus instance NIC ACLs: %w", err)
 	}
 	return nil
+}
+
+func (a *Adapter) instanceNICACLs(ctx context.Context, ref string) ([]string, error) {
+	var instance instanceRecord
+	query := url.Values{"project": {a.project}}
+	if err := a.request(ctx, http.MethodGet, "/1.0/instances/"+url.PathEscape(ref), query, nil, &instance); err != nil {
+		return nil, fmt.Errorf("inspect Incus instance NIC: %w", err)
+	}
+	eth0, ok := instance.Devices["eth0"]
+	if !ok || eth0["type"] != "nic" {
+		return nil, fmt.Errorf("managed instance NIC eth0 is missing")
+	}
+	return splitACLs(eth0["security.acls"]), nil
+}
+
+func splitACLs(value string) []string {
+	if value == "" {
+		return nil
+	}
+	return strings.Split(value, ",")
+}
+
+func sameStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 // NICACLs returns the ACL names to attach to an instance NIC. Restricted modes

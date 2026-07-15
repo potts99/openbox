@@ -631,6 +631,7 @@ func newPolicyTestService(t *testing.T, runtime ContainerRuntime, policy *record
 type recordingNetworkPolicy struct {
 	runtime                *fake.Runtime
 	applyErr               error
+	verifyErr              error
 	status                 domain.NetworkPolicyStatus
 	calls                  []string
 	observe                func(domain.Instance)
@@ -651,6 +652,10 @@ func (p *recordingNetworkPolicy) ApplyNetworkPolicy(_ context.Context, instance 
 		p.observe(instance)
 	}
 	return p.applyErr
+}
+
+func (p *recordingNetworkPolicy) VerifyNetworkPolicy(context.Context, domain.Instance) error {
+	return p.verifyErr
 }
 
 func (p *recordingNetworkPolicy) RemoveNetworkPolicy(ctx context.Context, instance domain.Instance) error {
@@ -932,6 +937,46 @@ func TestCreateNetworkPolicyFailurePreventsReady(t *testing.T) {
 	}
 	if stored.ObservedState == domain.ObservedRunning {
 		t.Fatal("policy failure reported the instance ready")
+	}
+}
+
+func TestPolicyVerificationFailurePreventsReadyAndMarksDriftOnInspect(t *testing.T) {
+	runtime := fake.New(testCapabilities())
+	runtime.AddImage(testImage())
+	policy := &recordingNetworkPolicy{verifyErr: errors.New("ACL mismatch")}
+	service, _, store := newPolicyTestService(t, runtime, policy)
+
+	if _, err := service.Create(context.Background(), createInput()); !errors.Is(err, policy.verifyErr) {
+		t.Fatalf("create error=%v", err)
+	}
+	stored, err := store.GetInstance(context.Background(), "owner-1", "instance-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ObservedState != domain.ObservedError {
+		t.Fatalf("create policy drift left instance ready: %+v", stored)
+	}
+
+	policy.verifyErr = nil
+	created, err := service.Create(context.Background(), CreateInput{
+		OwnerID: "owner-1", Name: "second", Kind: domain.KindDevbox, Image: "ubuntu",
+		RequestedIsolation: domain.IsolationStandard,
+		Resources:          domain.Resources{VCPUs: 2, MemoryBytes: 1024, DiskBytes: 2048},
+		OwnerPublicKey:     "ssh-ed25519 owner", IdempotencyKey: "second-create",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy.verifyErr = errors.New("NIC ACLs drifted")
+	if _, err := service.Refresh(context.Background(), created.OwnerID, created.ID); !errors.Is(err, policy.verifyErr) {
+		t.Fatalf("refresh error=%v", err)
+	}
+	stored, err = store.GetInstance(context.Background(), created.OwnerID, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ObservedState != domain.ObservedError {
+		t.Fatalf("inspect policy drift left instance ready: %+v", stored)
 	}
 }
 
