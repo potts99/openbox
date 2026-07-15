@@ -43,9 +43,13 @@ func (h *Handler) openTerminal(response http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	// Accept before acquiring a session slot so abandoned handshakes (browser
-	// retries that never send open) cannot exhaust MaxSessionsPerInstance and
-	// surface as opaque WebSocket "bad response" failures (HTTP 429).
+	release, err := h.terminalSessions.Acquire(string(target.OwnerID), string(target.InstanceID))
+	if err != nil {
+		h.writeError(response, requestID, http.StatusTooManyRequests, "session_limit", "terminal")
+		return
+	}
+	defer release()
+
 	conn, err := websocket.Accept(response, request, &websocket.AcceptOptions{
 		// Origin was validated above against the request host.
 		InsecureSkipVerify: true,
@@ -101,14 +105,6 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 		h.closeTerminalLimit(ctx, conn, err)
 		return
 	}
-
-	release, err := h.terminalSessions.Acquire(string(target.OwnerID), string(target.InstanceID))
-	if err != nil {
-		h.writeTerminalError(ctx, conn, "session_limit", "too many terminal sessions")
-		_ = conn.Close(websocket.StatusNormalClosure, "")
-		return
-	}
-	defer release()
 
 	session, sessionName, sessionID, cols, rows, persisted, err := h.resolveTerminalConsole(ctx, target, start)
 	if err != nil {
