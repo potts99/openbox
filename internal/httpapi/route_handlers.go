@@ -46,6 +46,13 @@ func (h *Handler) routeRoutes(response http.ResponseWriter, request *http.Reques
 		h.publishRoute(response, request, requestID, owner, rest[0])
 		return true
 	}
+	if len(rest) == 2 && rest[1] == "validate-dns" {
+		if !h.requireMethod(response, request, requestID, http.MethodPost) {
+			return true
+		}
+		h.validateRouteDNS(response, request, requestID, owner, rest[0])
+		return true
+	}
 	return false
 }
 
@@ -120,6 +127,15 @@ func (h *Handler) deleteRoute(response http.ResponseWriter, request *http.Reques
 
 func (h *Handler) publishRoute(response http.ResponseWriter, request *http.Request, requestID string, owner domain.OwnerID, rawID string) {
 	route, err := h.routes.Publish(request.Context(), owner, domain.RouteID(rawID))
+	if err != nil {
+		h.writeServiceError(response, requestID, err)
+		return
+	}
+	h.writeJSON(response, http.StatusOK, mapRoute(route))
+}
+
+func (h *Handler) validateRouteDNS(response http.ResponseWriter, request *http.Request, requestID string, owner domain.OwnerID, rawID string) {
+	route, err := h.routes.ValidateDNS(request.Context(), owner, domain.RouteID(rawID))
 	if err != nil {
 		h.writeServiceError(response, requestID, err)
 		return

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"net"
 	"time"
 
 	"github.com/openbox-dev/openbox/internal/domain"
@@ -43,15 +44,19 @@ type UpdateInput struct {
 
 // Service owns route CRUD, publish, and detected-port suggestions.
 type Service struct {
-	repo  Repository
-	now   func() time.Time
-	newID func() string
+	repo        Repository
+	now         func() time.Time
+	newID       func() string
+	dns         DNSResolver
+	expectedIPs []net.IP
 }
 
 // Options configures Service clocks and ID generation.
 type Options struct {
-	Now   func() time.Time
-	NewID func() string
+	Now         func() time.Time
+	NewID       func() string
+	DNS         DNSResolver
+	ExpectedIPs []net.IP
 }
 
 // New constructs a route Service.
@@ -65,7 +70,13 @@ func New(repo Repository, options Options) (*Service, error) {
 	if options.NewID == nil {
 		options.NewID = randomRouteID
 	}
-	return &Service{repo: repo, now: options.Now, newID: options.NewID}, nil
+	return &Service{
+		repo:        repo,
+		now:         options.Now,
+		newID:       options.NewID,
+		dns:         options.DNS,
+		expectedIPs: append([]net.IP(nil), options.ExpectedIPs...),
+	}, nil
 }
 
 // Create validates the managed target and persists a private route.
