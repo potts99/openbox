@@ -238,13 +238,9 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
                   <dt>Disk</dt>
                   <dd>{formatBytes(instance.diskBytes)}</dd>
                 </div>
-                <div className="detail-span">
+                <div>
                   <dt>Image</dt>
                   <dd><code title={instance.imageId}>{shortenId(instance.imageId)}</code></dd>
-                </div>
-                <div className="detail-span">
-                  <dt>ID</dt>
-                  <dd><code title={instance.id}>{instance.id}</code></dd>
                 </div>
                 <div>
                   <dt>Created</dt>
@@ -253,6 +249,10 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
                 <div>
                   <dt>Updated</dt>
                   <dd>{formatWhen(instance.updatedAt)}</dd>
+                </div>
+                <div className="detail-span">
+                  <dt>ID</dt>
+                  <dd><code title={instance.id}>{instance.id}</code></dd>
                 </div>
                 {instance.errorCode ? (
                   <div className="detail-span">
