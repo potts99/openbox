@@ -47,6 +47,7 @@ type Repository interface {
 	CreateInstance(context.Context, domain.Instance, domain.Operation) (domain.Operation, bool, error)
 	GetInstance(context.Context, domain.OwnerID, domain.InstanceID) (domain.Instance, error)
 	UpdateInstanceState(context.Context, domain.OwnerID, domain.InstanceID, domain.DesiredState, domain.ObservedState, time.Time, domain.Operation) error
+	UpdateInstanceProtection(context.Context, domain.OwnerID, domain.InstanceID, bool, time.Time) error
 	UpdateInstanceObservation(context.Context, domain.OwnerID, domain.InstanceID, string, domain.IsolationType, domain.ObservedState, domain.ErrorCode, time.Time) error
 	IsInstanceTombstoned(context.Context, domain.OwnerID, domain.InstanceID) (bool, error)
 	FinalizeInstanceDeletion(context.Context, domain.OwnerID, domain.InstanceID, domain.OperationID, time.Time) error
@@ -284,6 +285,9 @@ func (s *Service) SubmitAction(ctx context.Context, ownerID domain.OwnerID, id d
 	if err != nil {
 		return domain.Operation{}, err
 	}
+	if action == MutationDelete && instance.Protected {
+		return domain.Operation{}, &domain.Error{Code: domain.CodeProtectedBase, Field: "desired_state"}
+	}
 	desired := instance.DesiredState
 	observed := instance.ObservedState
 	switch action {
@@ -317,6 +321,30 @@ func (s *Service) SubmitMutation(ctx context.Context, ownerID domain.OwnerID, id
 
 func (s *Service) CancelOperation(ctx context.Context, ownerID domain.OwnerID, id domain.OperationID) (domain.Operation, error) {
 	return s.repo.CancelPendingOperation(ctx, ownerID, id, s.now().UTC())
+}
+
+// SetProtection marks or clears Devbox base protection. Protected bases cannot
+// be deleted until protection is explicitly removed.
+func (s *Service) SetProtection(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID, protected bool) (domain.Instance, error) {
+	release, err := s.acquireMutation(ctx)
+	if err != nil {
+		return domain.Instance{}, err
+	}
+	defer release()
+	instance, err := s.repo.GetInstance(ctx, ownerID, id)
+	if err != nil {
+		return domain.Instance{}, err
+	}
+	if protected && instance.Kind != domain.KindDevbox {
+		return domain.Instance{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "protected"}
+	}
+	if instance.Protected == protected {
+		return instance, nil
+	}
+	if err := s.repo.UpdateInstanceProtection(ctx, ownerID, id, protected, s.now().UTC()); err != nil {
+		return domain.Instance{}, err
+	}
+	return s.repo.GetInstance(ctx, ownerID, id)
 }
 
 func (s *Service) Capabilities(ctx context.Context) (runtimeapi.Capabilities, error) {
@@ -889,6 +917,9 @@ func (s *Service) Delete(ctx context.Context, ownerID domain.OwnerID, id domain.
 		if err := verifyRuntime(runtimeInstance, id, instance.ActualIsolation); err != nil {
 			return err
 		}
+	}
+	if instance.Protected {
+		return &domain.Error{Code: domain.CodeProtectedBase, Field: "desired_state"}
 	}
 	op, replay, err := s.mutationOperation(ctx, "instance.delete", instance, key, "delete:"+string(id))
 	if err != nil {

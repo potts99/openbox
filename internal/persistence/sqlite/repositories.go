@@ -473,6 +473,24 @@ func (s *Store) UpdateInstanceState(ctx context.Context, ownerID domain.OwnerID,
 	return nil
 }
 
+// UpdateInstanceProtection sets or clears the protected-base flag.
+func (s *Store) UpdateInstanceProtection(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID, protected bool, updatedAt time.Time) error {
+	release, err := s.acquireWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	result, err := s.db.ExecContext(ctx, `UPDATE instances SET protected=?,updated_at=? WHERE owner_id=? AND id=? AND deleted_at IS NULL`,
+		protected, formatTime(updatedAt), ownerID, id)
+	if err != nil {
+		return mapWriteError(err)
+	}
+	if n, _ := result.RowsAffected(); n != 1 {
+		return &domain.Error{Code: domain.CodeNotFound, Field: "instance"}
+	}
+	return nil
+}
+
 // TombstoneInstance removes active metadata while retaining the minimal deletion identity.
 func (s *Store) TombstoneInstance(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID, operation domain.Operation, deletedAt time.Time) error {
 	release, err := s.acquireWrite(ctx)
