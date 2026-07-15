@@ -11,6 +11,10 @@ import (
 	"github.com/openbox-dev/openbox/internal/domain"
 )
 
+// DefaultGuestHome is the guest home used for Pi paths on OpenBox instances.
+// It matches cloud-init OwnerKey (root SSH) and the SSH gateway proxy user.
+const DefaultGuestHome = "/root"
+
 // InstanceTarget is one managed instance that should receive a profile apply.
 type InstanceTarget struct {
 	ID         domain.InstanceID

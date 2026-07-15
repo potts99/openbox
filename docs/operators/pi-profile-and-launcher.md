@@ -28,6 +28,7 @@ When protecting a Devbox as a reusable base:
 
 ## Apply note
 
-Guest apply uses atomic file materialization. Live Incus guest `Exec` wiring
-for production apply is still outstanding; until then apply returns
-`not_implemented` from the daemon.
+Guest apply uses Incus recorded `Exec` to write `~/.pi/agent/settings.json`
+atomically (mkdir, temp write, rename) into each selected instance. OpenBox
+instances currently run as root over SSH, so the guest path is
+`/root/.pi/agent/settings.json`.

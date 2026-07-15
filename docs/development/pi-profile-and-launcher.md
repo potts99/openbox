@@ -13,8 +13,9 @@ Slice 12 packages:
 
 ## Profile apply
 
-Apply writes `~/.pi/agent/settings.json` atomically (temp + rename) inside each
-selected instance. OpenBox never writes `trust.json` or project-local `.pi/`.
+Apply writes `/root/.pi/agent/settings.json` atomically (temp + rename) inside
+each selected instance via Incus recorded `Exec`. OpenBox never writes
+`trust.json` or project-local `.pi/`.
 
 ## Launch Pi
 

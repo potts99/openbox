@@ -4,6 +4,7 @@ package incus
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +17,10 @@ import (
 // Exec runs an argv command inside a managed instance using Incus recorded
 // output (no websockets). Interactive/streaming upgrades can replace this path
 // later without changing the OpenBox Runtime contract.
+//
+// Non-empty stdin is delivered by wrapping the command in a POSIX sh pipeline
+// that base64-decodes argv-carried bytes into the child stdin. That keeps apply
+// and sandbox exec working without Incus exec websockets.
 func (a *Adapter) Exec(ctx context.Context, request runtimeapi.ExecRequest) (runtimeapi.ExecResult, error) {
 	if err := ctx.Err(); err != nil {
 		return runtimeapi.ExecResult{}, err
@@ -26,8 +31,18 @@ func (a *Adapter) Exec(ctx context.Context, request runtimeapi.ExecRequest) (run
 	if len(request.Command) == 0 {
 		return runtimeapi.ExecResult{}, fmt.Errorf("exec command is required")
 	}
+	command := append([]string(nil), request.Command...)
+	if request.Stdin != nil {
+		stdin, err := io.ReadAll(io.LimitReader(request.Stdin, 1<<20))
+		if err != nil {
+			return runtimeapi.ExecResult{}, fmt.Errorf("read exec stdin: %w", err)
+		}
+		if len(stdin) > 0 {
+			command = wrapExecStdin(command, stdin)
+		}
+	}
 	payload := map[string]any{
-		"command":            request.Command,
+		"command":            command,
 		"wait-for-websocket": false,
 		"record-output":      true,
 		"interactive":        false,
@@ -37,16 +52,6 @@ func (a *Adapter) Exec(ctx context.Context, request runtimeapi.ExecRequest) (run
 	}
 	if len(request.Env) > 0 {
 		payload["environment"] = request.Env
-	}
-	if request.Stdin != nil {
-		stdin, err := io.ReadAll(io.LimitReader(request.Stdin, 1<<20))
-		if err != nil {
-			return runtimeapi.ExecResult{}, fmt.Errorf("read exec stdin: %w", err)
-		}
-		if len(stdin) > 0 {
-			// Incus non-websocket exec does not accept stdin bytes in this path.
-			return runtimeapi.ExecResult{}, fmt.Errorf("incus recorded exec does not support stdin yet: %w", runtimeapi.ErrUnsupported)
-		}
 	}
 	query := url.Values{"project": {a.project}}
 	envelope, err := a.call(ctx, a.timeout, http.MethodPost, "/1.0/instances/"+url.PathEscape(request.Ref)+"/exec", query, payload, nil)
@@ -135,4 +140,16 @@ func containsQuery(path string) bool {
 		}
 	}
 	return false
+}
+
+// wrapExecStdin rewrites argv so guest sh feeds decoded stdin into the original
+// command without Incus websockets. $1 is base64 payload; remaining args are
+// the real argv after shift.
+func wrapExecStdin(command []string, stdin []byte) []string {
+	wrapped := []string{
+		"sh", "-c", `b64=$1; shift; printf '%s' "$b64" | base64 -d | "$@"`,
+		"openbox-exec-stdin",
+		base64.StdEncoding.EncodeToString(stdin),
+	}
+	return append(wrapped, command...)
 }
