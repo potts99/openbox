@@ -29,8 +29,10 @@ headers on `WebSocket`, so the handshake accepts the per-session CSRF token as
 `?csrf=` **only** on `GET` with `Upgrade: websocket`. Non-WebSocket cookie
 mutations still require `X-CSRF-Token`.
 
-Origin must match the request host (`Origin` host equals `Host`). Cross-origin
-upgrades are rejected before the console opens.
+Origin must match the request host (`Origin` host equals `Host`) for
+cookie-authenticated upgrades. Bearer-authenticated clients may omit `Origin`
+(no ambient cookie authority). Cross-origin cookie upgrades are rejected before
+the console opens.
 
 ## Protocol and limits
 

@@ -119,6 +119,71 @@ describe("TerminalSession", () => {
     });
   });
 
+  it("opens with session_name and reconnects by session_id from the open ack", () => {
+    const session = new TerminalSession({
+      instanceId: "inst-1",
+      csrfToken: "csrf",
+      cols: 80,
+      rows: 24,
+      sessionName: "work",
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+    });
+
+    session.connect();
+    FakeWebSocket.instances[0]?.open();
+    expect(JSON.parse(FakeWebSocket.instances[0]?.sent[0] ?? "{}")).toMatchObject({
+      type: "open",
+      instance_id: "inst-1",
+      session_name: "work",
+    });
+
+    FakeWebSocket.instances[0]?.message(encodeFrame({
+      type: "open",
+      instanceId: "inst-1",
+      cols: 80,
+      rows: 24,
+      sessionName: "work",
+      sessionId: "sess-abc",
+    }));
+    FakeWebSocket.instances[0]?.close();
+
+    session.reconnect();
+    FakeWebSocket.instances[1]?.open();
+    expect(JSON.parse(FakeWebSocket.instances[1]?.sent[0] ?? "{}")).toEqual({
+      type: "reconnect",
+      session_id: "sess-abc",
+    });
+  });
+
+  it("falls back to a fresh open on reconnect when no session_id was captured", () => {
+    const session = new TerminalSession({
+      instanceId: "inst-1",
+      csrfToken: "csrf",
+      cols: 80,
+      rows: 24,
+      sessionName: "work",
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+    });
+
+    session.connect();
+    FakeWebSocket.instances[0]?.open();
+    FakeWebSocket.instances[0]?.message(encodeFrame({
+      type: "open",
+      instanceId: "inst-1",
+      cols: 80,
+      rows: 24,
+      sessionName: "work",
+    }));
+    FakeWebSocket.instances[0]?.close();
+
+    session.reconnect();
+    FakeWebSocket.instances[1]?.open();
+    expect(JSON.parse(FakeWebSocket.instances[1]?.sent[0] ?? "{}")).toMatchObject({
+      type: "open",
+      session_name: "work",
+    });
+  });
+
   it("forwards input and resize frames", () => {
     const onOutput = vi.fn();
     const session = new TerminalSession({
