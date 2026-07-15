@@ -30,6 +30,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/reconcile"
 	"github.com/openbox-dev/openbox/internal/routes"
 	"github.com/openbox-dev/openbox/internal/runtime/incus"
+	"github.com/openbox-dev/openbox/internal/sandbox"
 	"github.com/openbox-dev/openbox/internal/snapshots"
 	"github.com/openbox-dev/openbox/internal/sshgateway"
 	sshproxy "github.com/openbox-dev/openbox/internal/sshgateway/proxy"
@@ -168,6 +169,10 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
+	expiry, err := sandbox.NewExpiryScheduler(store, service, sandbox.ExpiryOptions{})
+	if err != nil {
+		return fail(err)
+	}
 	handler, err := httpapi.New(service, httpapi.Options{
 		Auth:          authManager,
 		Routes:        routeService,
@@ -194,7 +199,19 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
-	return daemonComponents{operations: worker, reconciler: reconciler, closer: store, api: api, ssh: sshServer}, nil
+	return daemonComponents{operations: worker, reconciler: expiryThenReconcile{expiry: expiry, inner: reconciler}, closer: store, api: api, ssh: sshServer}, nil
+}
+
+type expiryThenReconcile struct {
+	expiry *sandbox.ExpiryScheduler
+	inner  reconciliationRunner
+}
+
+func (r expiryThenReconcile) RunOnce(ctx context.Context) (reconcile.Report, error) {
+	if _, err := r.expiry.RunOnce(ctx); err != nil {
+		return reconcile.Report{}, err
+	}
+	return r.inner.RunOnce(ctx)
 }
 
 type daemonAPIServer struct {

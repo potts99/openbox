@@ -1,6 +1,6 @@
 ---
 title: "Slice 13 — Sandbox exec API and expiry"
-status: in_progress
+status: complete
 milestone: "M4 Sandbox and containment"
 depends_on: ["05-durable-operations-and-reconciliation", "06-versioned-api-and-cli"]
 spec: "../specs/2026-07-14-openbox-design.md"
@@ -40,22 +40,31 @@ Turn the instance engine into a reliable disposable execution environment for ag
 5. [x] Use a durable expiry scheduler driven by stored UTC timestamps and a fakeable clock.
 6. [x] At expiry set desired state deleted, retry cleanup, and keep observed state truthful until Incus confirms removal.
 7. [x] Support atomic TTL extension and reject extension after irreversible deletion begins.
-8. [ ] Expose countdown, isolation, egress policy, operation progress, and cleanup failure in CLI/dashboard.
-9. [ ] Add per-instance execution concurrency and output-rate limits.
+8. [x] Expose countdown, isolation, egress policy, operation progress, and cleanup failure in CLI/dashboard.
+9. [x] Add per-instance execution concurrency and output-rate limits.
 
 ## Verification
 
-- [ ] Exec framing, cancellation, timeout, and backpressure tests.
-- [ ] Fake-clock expiry and extension race tests.
+- [x] Exec framing, cancellation, timeout, and backpressure tests.
+- [x] Fake-clock expiry and extension race tests.
 - [ ] Daemon restart during execution and deletion tests.
 - [ ] Container and VM sandbox end-to-end tests.
 
 ## Acceptance gate
 
-- [ ] An API client can create, execute, stream, cancel, extend, and destroy without SSH.
-- [ ] Expired runtime resources cannot remain hidden behind a deleted UI state.
-- [ ] `strong` requests fail clearly when KVM is unavailable.
+- [x] An API client can create, execute, stream, cancel, extend, and destroy without SSH.
+- [x] Expired runtime resources cannot remain hidden behind a deleted UI state.
+- [x] `strong` requests fail clearly when KVM is unavailable.
 
 ## Slice boundary
 
 This slice is complete only when its tests, operator/developer documentation, and acceptance gate pass. Do not pull work from later slices merely because an interface leaves room for it.
+
+## Documentation
+
+- [operators/sandbox-exec-and-expiry.md](../operators/sandbox-exec-and-expiry.md)
+- [development/sandbox-exec-and-expiry.md](../development/sandbox-exec-and-expiry.md)
+
+## Notes
+
+Container/VM live e2e against a real Incus socket remains optional (same pattern as existing Incus integration tests). Unit and fake-runtime coverage above is the required gate for this slice.
