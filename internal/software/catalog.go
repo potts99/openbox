@@ -11,9 +11,10 @@ import (
 
 // Pin declares one package a catalog recipe installs at an exact version.
 type Pin struct {
-	Manager string // apt or npm
+	Manager string // apt, npm, or github-release
 	Name    string
-	Version string // exact version, never a range or tag
+	Version string         // exact version, never a range or tag
+	Assets  []ReleaseAsset // required when Manager == "github-release"; Name is owner/repo
 }
 
 // Package is one installable catalog entry with pins and guest argv recipes.
@@ -34,7 +35,8 @@ type Catalog struct {
 // DefaultCatalog returns the built-in curated catalog.
 func DefaultCatalog() Catalog {
 	pi := piPackage()
-	return Catalog{packages: map[string]Package{pi.ID: pi}}
+	herdr := herdrPackage()
+	return Catalog{packages: map[string]Package{pi.ID: pi, herdr.ID: herdr}}
 }
 
 // Get looks up a package by ID.
@@ -47,7 +49,7 @@ func (c Catalog) Get(id string) (Package, bool) {
 func (c Catalog) List() []Package {
 	out := make([]Package, 0, len(c.packages))
 	// Stable order: known IDs first, then any others by insertion via sorted keys.
-	order := []string{"pi"}
+	order := []string{"pi", "herdr"}
 	seen := map[string]bool{}
 	for _, id := range order {
 		if pkg, ok := c.packages[id]; ok {
@@ -71,7 +73,7 @@ func (p Package) Validate() error {
 	if p.Name == "" {
 		return fmt.Errorf("package %q name is required", p.ID)
 	}
-	if len(p.Install) == 0 {
+	if len(p.Install) == 0 && !hasGitHubReleasePin(p.Pins) {
 		return fmt.Errorf("package %q must declare install steps", p.ID)
 	}
 	if len(p.Verify) == 0 {
@@ -95,7 +97,12 @@ func (p Package) Validate() error {
 }
 
 func validatePin(pin Pin) error {
-	if pin.Manager != "apt" && pin.Manager != "npm" {
+	switch pin.Manager {
+	case "github-release":
+		return validateGitHubReleasePin(pin)
+	case "apt", "npm":
+		// continue
+	default:
 		return fmt.Errorf("package %q uses unsupported manager %q", pin.Name, pin.Manager)
 	}
 	if pin.Name == "" {

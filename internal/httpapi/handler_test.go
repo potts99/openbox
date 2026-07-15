@@ -70,6 +70,7 @@ func TestSoftwareCatalogAndInstall(t *testing.T) {
 		t.Fatalf("catalog status=%d body=%s", catalog.Code, catalog.Body.String())
 	}
 	assertJSONContains(t, catalog.Body.Bytes(), `"id":"pi"`)
+	assertJSONContains(t, catalog.Body.Bytes(), `"id":"herdr"`)
 
 	install := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/instances/instance-1/software/pi/install", nil)
