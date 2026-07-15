@@ -70,14 +70,14 @@ func TestBootstrapStatusRemainsRequiredAfterChallengeExpires(t *testing.T) {
 	if !status.Required || status.ExpiresAt != nil {
 		t.Fatalf("expired challenge status=%+v", status)
 	}
-	if _, _, err := m.Bootstrap(context.Background(), secret, "a sufficiently long password"); !errors.Is(err, auth.ErrBootstrapUnavailable) {
+	if _, _, err := m.Bootstrap(context.Background(), "loopback", secret, "a sufficiently long password"); !errors.Is(err, auth.ErrBootstrapUnavailable) {
 		t.Fatalf("expired bootstrap error=%v", err)
 	}
 }
 
 func TestCookieCSRFSessionRefreshAndBearerRevocation(t *testing.T) {
 	h, m, bootstrap := newAuthHandler(t)
-	session, cookie, err := m.Bootstrap(context.Background(), bootstrap, "a sufficiently long password")
+	session, cookie, err := m.Bootstrap(context.Background(), "loopback", bootstrap, "a sufficiently long password")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestLoginFailuresAreGenericRateLimitedAndRecover(t *testing.T) {
 	if missing.Code != http.StatusUnauthorized || len(missing.Result().Cookies()) != 0 {
 		t.Fatalf("missing credential response=%d cookies=%v body=%s", missing.Code, missing.Result().Cookies(), missing.Body.String())
 	}
-	if _, _, err := m.Bootstrap(context.Background(), bootstrap, "a sufficiently long password"); err != nil {
+	if _, _, err := m.Bootstrap(context.Background(), "loopback", bootstrap, "a sufficiently long password"); err != nil {
 		t.Fatal(err)
 	}
 	wrong := login("127.0.0.1:4000", "this password is wrong")

@@ -208,6 +208,44 @@ func TestWatchOperationParsesSSEAndResumes(t *testing.T) {
 	}
 }
 
+func TestWatchOperationIgnoresOverallHTTPClientTimeout(t *testing.T) {
+	started := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		close(started)
+		time.Sleep(150 * time.Millisecond)
+		_, _ = fmt.Fprint(w, "id: 1\nevent: operation\ndata: {\"sequence\":1,\"operation_id\":\"op-1\",\"status\":\"succeeded\",\"stage\":\"complete\",\"progress\":100}\n\n")
+	}))
+	defer server.Close()
+
+	c, err := New(Options{BaseURL: server.URL, HTTPClient: &http.Client{Timeout: 40 * time.Millisecond}, MaxRetries: 0, RetryWait: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	events, errs := c.WatchOperation(ctx, "op-1", WatchOptions{})
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("server never started streaming")
+	}
+	var got []OperationEvent
+	for event := range events {
+		got = append(got, event)
+	}
+	if err := <-errs; err != nil {
+		t.Fatalf("watch failed under short client timeout: %v", err)
+	}
+	if len(got) != 1 || got[0].Status != OperationSucceeded {
+		t.Fatalf("events = %#v", got)
+	}
+}
+
 func TestWatchOperationStopsWhenTerminalEventWasAlreadyConsumed(t *testing.T) {
 	var eventCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

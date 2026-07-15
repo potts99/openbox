@@ -80,7 +80,7 @@ func (h *Handler) routeBootstrap(w http.ResponseWriter, r *http.Request, request
 			h.writeError(w, requestID, http.StatusBadRequest, string(domain.CodeInvalidArgument), "body")
 			return true
 		}
-		session, secret, err := h.auth.Bootstrap(r.Context(), input.Secret, input.Password)
+		session, secret, err := h.auth.Bootstrap(r.Context(), clientAddress(r), input.Secret, input.Password)
 		if err != nil {
 			h.writeAuthError(w, requestID, err)
 			return true

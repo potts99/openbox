@@ -20,13 +20,17 @@ one-time bootstrap secret. Open the dashboard at the listener address and use
 that secret within 20 minutes to install the owner password. Only a digest of
 the secret is stored, and the database transaction can succeed only once.
 Restart the daemon to issue a replacement after an unused challenge expires.
+Pass `--storage-pool` so the daemon also bootstraps the managed Incus project,
+bridge, and profiles on startup.
 
 The loopback listener uses HTTP by default. Password setup and login over HTTP
 are accepted only from a direct loopback peer, including the server end of a
 trusted SSH tunnel. To serve HTTPS, provide both `--api-tls-cert` and
 `--api-tls-key`; configuring only one is an error. The daemon requires TLS 1.3
 and refuses a non-loopback listener without TLS. The certificate must be
-trusted by the browser and CLI host.
+trusted by the browser and CLI host. Session cookies are marked `Secure` only
+when `openboxd` itself terminates TLS; TLS-terminating reverse proxies in front
+of a loopback HTTP listener are unsupported in v0.1.
 
 Forwarding headers do not make an insecure remote request trusted. Terminate a
 trusted tunnel on loopback or connect directly with TLS. Keep the listener

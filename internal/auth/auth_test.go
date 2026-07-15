@@ -3,9 +3,11 @@
 package auth_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"strings"
 	"testing"
@@ -63,6 +65,64 @@ func TestPasswordRehashOnlyUpgradesWeakerPolicy(t *testing.T) {
 	}
 }
 
+func TestBootstrapRejectsWrongSecretBeforeHashingPassword(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(ctx, t.TempDir()+"/auth.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	now := time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC)
+	if err := store.CreateOwner(ctx, domain.Owner{ID: "owner-local", Name: "Owner", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	manager, _ := auth.New(store)
+	manager.WithClock(func() time.Time { return now })
+	if _, err := manager.EnsureBootstrap(ctx); err != nil {
+		t.Fatal(err)
+	}
+	hashCalls := 0
+	manager.WithPasswordHasher(func(password string, params auth.PasswordParams) (string, error) {
+		hashCalls++
+		return auth.HashPassword(password, params)
+	})
+	wrong := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0xab}, 32))
+	if _, _, err := manager.Bootstrap(ctx, "client", wrong, "a sufficiently long password"); !errors.Is(err, auth.ErrBootstrapUnavailable) {
+		t.Fatalf("error=%v", err)
+	}
+	if hashCalls != 0 {
+		t.Fatalf("password hashed %d times before rejecting bootstrap secret", hashCalls)
+	}
+}
+
+func TestBootstrapIsRateLimitedLikeLogin(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(ctx, t.TempDir()+"/auth.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	now := time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC)
+	if err := store.CreateOwner(ctx, domain.Owner{ID: "owner-local", Name: "Owner", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	manager, _ := auth.New(store)
+	manager.WithClock(func() time.Time { return now })
+	secret, err := manager.EnsureBootstrap(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0xcd}, 32))
+	for i := 0; i < 5; i++ {
+		if _, _, err := manager.Bootstrap(ctx, "attacker", wrong, "a sufficiently long password"); !errors.Is(err, auth.ErrBootstrapUnavailable) {
+			t.Fatalf("attempt %d error=%v", i, err)
+		}
+	}
+	if _, _, err := manager.Bootstrap(ctx, "attacker", secret, "a sufficiently long password"); !errors.Is(err, auth.ErrRateLimited) {
+		t.Fatalf("expected rate limit, got %v", err)
+	}
+}
+
 func TestBootstrapExpiresAndCanOnlyBeConsumedOnce(t *testing.T) {
 	ctx := context.Background()
 	store, err := sqlite.Open(ctx, t.TempDir()+"/auth.db")
@@ -85,14 +145,14 @@ func TestBootstrapExpiresAndCanOnlyBeConsumedOnce(t *testing.T) {
 	if err != nil || fresh == "" {
 		t.Fatalf("fresh=%q err=%v", fresh, err)
 	}
-	if _, _, err := manager.Bootstrap(ctx, expired, "a sufficiently long password"); !errors.Is(err, auth.ErrBootstrapUnavailable) {
+	if _, _, err := manager.Bootstrap(ctx, "loopback", expired, "a sufficiently long password"); !errors.Is(err, auth.ErrBootstrapUnavailable) {
 		t.Fatalf("expired error=%v", err)
 	}
-	session, cookie, err := manager.Bootstrap(ctx, fresh, "a sufficiently long password")
+	session, cookie, err := manager.Bootstrap(ctx, "loopback", fresh, "a sufficiently long password")
 	if err != nil || cookie == "" || session.OwnerID != "owner-local" {
 		t.Fatalf("session=%+v cookie=%q err=%v", session, cookie, err)
 	}
-	if _, _, err := manager.Bootstrap(ctx, fresh, "a sufficiently long password"); !errors.Is(err, auth.ErrBootstrapUnavailable) {
+	if _, _, err := manager.Bootstrap(ctx, "loopback", fresh, "a sufficiently long password"); !errors.Is(err, auth.ErrBootstrapUnavailable) {
 		t.Fatalf("second consume error=%v", err)
 	}
 	if another, err := manager.EnsureBootstrap(ctx); err != nil || another != "" {
@@ -112,7 +172,7 @@ func TestSessionCSRFTokenRevocationAndSSHKeyValidation(t *testing.T) {
 	m, _ := auth.New(store)
 	m.WithClock(func() time.Time { return now })
 	bootstrap, _ := m.EnsureBootstrap(ctx)
-	session, cookie, err := m.Bootstrap(ctx, bootstrap, "a sufficiently long password")
+	session, cookie, err := m.Bootstrap(ctx, "loopback", bootstrap, "a sufficiently long password")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -32,6 +32,7 @@ type Options struct {
 type Client struct {
 	baseURL    *url.URL
 	http       *http.Client
+	streamHTTP *http.Client
 	userAgent  string
 	token      string
 	maxRetries int
@@ -61,7 +62,9 @@ func New(options Options) (*Client, error) {
 	if options.RetryWait <= 0 {
 		options.RetryWait = 100 * time.Millisecond
 	}
-	return &Client{baseURL: baseURL, http: options.HTTPClient, userAgent: options.UserAgent, token: strings.TrimSpace(options.Token), maxRetries: options.MaxRetries, retryWait: options.RetryWait}, nil
+	streamHTTP := *options.HTTPClient
+	streamHTTP.Timeout = 0
+	return &Client{baseURL: baseURL, http: options.HTTPClient, streamHTTP: &streamHTTP, userAgent: options.UserAgent, token: strings.TrimSpace(options.Token), maxRetries: options.MaxRetries, retryWait: options.RetryWait}, nil
 }
 
 func (c *Client) ServerVersion() string {

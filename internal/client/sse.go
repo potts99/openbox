@@ -76,7 +76,7 @@ func (c *Client) watchOnce(ctx context.Context, id, lastID string, events chan<-
 	if lastID != "" {
 		request.Header.Set("Last-Event-ID", lastID)
 	}
-	response, err := c.http.Do(request)
+	response, err := c.streamHTTP.Do(request)
 	if err != nil {
 		return false, lastID, fmt.Errorf("watch operation: %w", err)
 	}

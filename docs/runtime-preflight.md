@@ -4,21 +4,21 @@ OpenBox talks directly to the local Incus REST API over a Unix socket. It never 
 
 ## Check a host
 
-The default socket is `/var/lib/incus/unix.socket`:
+`openbox doctor` asks the running `openboxd` API for health and discovered capabilities. The daemon is the process that opens the Incus Unix socket (default `/var/lib/incus/unix.socket`):
 
 ```sh
 openbox doctor
 openbox doctor --json
-openbox doctor --socket /run/incus/unix.socket --timeout 15s
+OPENBOX_SERVER=https://openbox.example OPENBOX_TOKEN="$OPENBOX_TOKEN" openbox doctor
 ```
 
 Doctor checks the daemon version and architecture, required Linux namespaces, cgroups, supported storage drivers, host networking tools, accessible `/dev/kvm`, and Incus virtual-machine support. A host without KVM remains usable for standard container isolation; strong isolation is clearly reported as unavailable.
 
-Fatal results prevent safe container operation. Warnings identify optional or repairable host tooling. JSON output uses stable `pass`, `warning`, `unavailable`, and `fatal` status strings for automation.
+Fatal results prevent safe container operation. Warnings identify optional or repairable host tooling. JSON output uses stable status strings for automation.
 
 ## Managed bootstrap
 
-The internal bootstrap operation creates only a named OpenBox project, project-scoped bridge, and container/VM profiles. The administrator must select an existing storage pool; OpenBox references it but does not take ownership of it.
+When `openboxd` starts with `--storage-pool` set, it runs an idempotent Incus bootstrap that creates only a named OpenBox project, project-scoped bridge, and container/VM profiles. The administrator must select an existing storage pool; OpenBox references it but does not take ownership of it. Without `--storage-pool`, bootstrap is skipped and logged.
 
 Every resource OpenBox creates carries these Incus configuration labels:
 
