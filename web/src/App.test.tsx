@@ -141,16 +141,17 @@ describe("App", () => {
     expect(screen.queryByRole("complementary", { name: "Operations" })).not.toBeInTheDocument();
   });
 
-  it("offers an open-terminal action for each instance", async () => {
+  it("offers a uniquely named open-terminal action per instance", async () => {
     const api = createApi({
       listInstances: vi.fn().mockResolvedValue([
         { id: "box-1", name: "workbench", kind: "devbox", status: "running" },
+        { id: "box-2", name: "staging", kind: "devbox", status: "stopped" },
       ]),
     });
     render(<App api={api} />);
 
-    expect(await screen.findByRole("button", { name: "Open terminal" })).toBeInTheDocument();
-    expect(screen.getByRole("row", { name: /workbench/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Open terminal for workbench" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open terminal for staging" })).toBeInTheDocument();
   });
 
   it("opens and closes the operations drawer with keyboard-accessible controls", async () => {
