@@ -11,6 +11,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/openbox-dev/openbox/internal/auth"
 	"github.com/openbox-dev/openbox/internal/domain"
 	"github.com/openbox-dev/openbox/internal/terminal"
 )
@@ -95,4 +96,17 @@ func terminalOriginAllowed(request *http.Request) bool {
 
 func isWebSocketUpgrade(request *http.Request) bool {
 	return strings.EqualFold(request.Header.Get("Upgrade"), "websocket")
+}
+
+// sessionCSRFToken prefers X-CSRF-Token. For WebSocket upgrades only, browsers
+// may supply the same token via ?csrf= because the WebSocket API cannot set
+// custom headers. Non-WebSocket cookie mutations still require the header.
+func sessionCSRFToken(request *http.Request) string {
+	if token := request.Header.Get(auth.CSRFHeader); token != "" {
+		return token
+	}
+	if isWebSocketUpgrade(request) {
+		return request.URL.Query().Get(auth.CSRFQuery)
+	}
+	return ""
 }

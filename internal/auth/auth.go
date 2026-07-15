@@ -21,8 +21,11 @@ import (
 )
 
 const (
-	SessionCookie       = "openbox_session"
-	CSRFHeader          = "X-CSRF-Token"
+	SessionCookie = "openbox_session"
+	CSRFHeader    = "X-CSRF-Token"
+	// CSRFQuery is the browser-deliverable CSRF channel for WebSocket upgrades
+	// (browsers cannot set custom headers on the WebSocket constructor).
+	CSRFQuery           = "csrf"
 	ScopeOwner          = "owner"
 	DefaultBootstrapTTL = 20 * time.Minute
 	DefaultSessionTTL   = 12 * time.Hour
