@@ -352,13 +352,14 @@ type fakeService struct {
 	operation    domain.Operation
 	err          error
 
-	lastOwner    domain.OwnerID
-	createInput  instances.CreateInput
-	action       Action
-	canceled     bool
-	eventBatches [][]domain.OperationEvent
-	eventCalls   int
-	eventAfter   []int
+	lastOwner      domain.OwnerID
+	lastInstanceID domain.InstanceID
+	createInput    instances.CreateInput
+	action         Action
+	canceled       bool
+	eventBatches   [][]domain.OperationEvent
+	eventCalls     int
+	eventAfter     []int
 }
 
 func (f *fakeService) Health(context.Context) error { return f.err }
@@ -375,6 +376,7 @@ func (f *fakeService) ListInstances(_ context.Context, owner domain.OwnerID) ([]
 }
 func (f *fakeService) GetInstance(_ context.Context, owner domain.OwnerID, id domain.InstanceID) (domain.Instance, error) {
 	f.lastOwner = owner
+	f.lastInstanceID = id
 	if f.err != nil {
 		return domain.Instance{}, f.err
 	}
@@ -383,7 +385,10 @@ func (f *fakeService) GetInstance(_ context.Context, owner domain.OwnerID, id do
 			return instance, nil
 		}
 	}
-	return f.created, nil
+	if f.created.ID != "" && f.created.ID == id {
+		return f.created, nil
+	}
+	return domain.Instance{}, &domain.Error{Code: domain.CodeNotFound, Field: "instance"}
 }
 func (f *fakeService) SubmitCreate(_ context.Context, input instances.CreateInput) (domain.Instance, domain.Operation, error) {
 	f.createInput = input

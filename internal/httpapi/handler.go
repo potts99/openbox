@@ -219,6 +219,13 @@ func (h *Handler) routeInstances(response http.ResponseWriter, request *http.Req
 		}
 		return true
 	}
+	if len(rest) == 2 && rest[1] == "terminal" {
+		if !h.requireMethod(response, request, requestID, http.MethodGet) {
+			return true
+		}
+		h.openTerminal(response, request, requestID, rest[0])
+		return true
+	}
 	if len(rest) == 3 && rest[1] == "actions" {
 		if !h.requireMethod(response, request, requestID, http.MethodPost) {
 			return true
