@@ -24,8 +24,8 @@ const (
 
 	// WarningFullCopy is reported before execution when storage lacks CoW.
 	WarningFullCopy = "storage does not provide copy-on-write; OpenBox will use a full copy and will not claim copy-on-write behavior"
-	// WarningSecrets is reported when cloning a personal (unprotected) Devbox.
-	WarningSecrets = "source Devbox is not a protected base; cloned guest files may include secrets"
+	// WarningSecrets is reported when cloning an unprotected VPS that may retain guest secrets.
+	WarningSecrets = "source VPS is not a protected base; cloned guest files may include secrets"
 )
 
 // CloneRuntime is the narrow runtime boundary used for efficient copies.
@@ -141,7 +141,7 @@ func (s *Service) SubmitCopy(ctx context.Context, input CopyInput) (SubmitResult
 	if !StorageEfficientCopy(capabilities.StorageDrivers) {
 		warnings = append(warnings, WarningFullCopy)
 	}
-	if source.Kind == domain.KindDevbox && !source.Protected {
+	if source.Kind == domain.KindVPS && !source.Protected {
 		warnings = append(warnings, WarningSecrets)
 	}
 	now := s.now().UTC()

@@ -124,7 +124,7 @@ func seedRunningInstance(t *testing.T, repo *memoryRepo, runtime *fake.Runtime, 
 	t.Helper()
 	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
 	instance := domain.Instance{
-		ID: domain.InstanceID(id), OwnerID: "owner-1", Name: name, Kind: domain.KindDevbox,
+		ID: domain.InstanceID(id), OwnerID: "owner-1", Name: name, Kind: domain.KindVPS,
 		ImageID: "sha256:ubuntu", RequestedIsolation: domain.IsolationStandard, ActualIsolation: domain.IsolationContainer,
 		DesiredState: domain.DesiredRunning, ObservedState: domain.ObservedRunning,
 		RuntimeRef: "openbox-" + id, CreatedAt: now, UpdatedAt: now,

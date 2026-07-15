@@ -584,7 +584,7 @@ func newTestServiceWithIDs(t *testing.T, runtime ContainerRuntime, ids func() st
 }
 
 func createInput() CreateInput {
-	return CreateInput{OwnerID: "owner-1", Name: "project", Kind: domain.KindDevbox, Image: "ubuntu", RequestedIsolation: domain.IsolationStandard,
+	return CreateInput{OwnerID: "owner-1", Name: "project", Kind: domain.KindVPS, Image: "ubuntu", RequestedIsolation: domain.IsolationStandard,
 		Resources: domain.Resources{VCPUs: 2, MemoryBytes: 1024, DiskBytes: 2048}, OwnerPublicKey: "ssh-ed25519 owner", IdempotencyKey: "create-key"}
 }
 
@@ -702,14 +702,21 @@ func TestProtectedDevboxBaseBlocksDeleteUntilRemoved(t *testing.T) {
 	}
 }
 
-func TestProtectionIsDevboxOnly(t *testing.T) {
+func TestProtectionIsVPSOnly(t *testing.T) {
 	runtime := fake.New(testCapabilities())
-	runtime.AddImage(testImage())
+	runtime.AddImage(runtimeapi.Image{
+		Fingerprint:  "sha256:sandbox",
+		Aliases:      []string{"openbox:sandbox/ubuntu/24.04"},
+		Architecture: "x86_64",
+		Type:         "container",
+		CloudInit:    true,
+	})
 	service, _, _ := newTestServiceWithIDs(t, runtime, newIDs("instance-1", "operation-1"), runtime)
 	ctx := context.Background()
 	input := createInput()
-	input.Kind = domain.KindVPS
-	input.Name = "vps-1"
+	input.Kind = domain.KindSandbox
+	input.Name = "sandbox-1"
+	input.Image = "openbox:sandbox/ubuntu/24.04"
 	created, err := service.Create(ctx, input)
 	if err != nil {
 		t.Fatal(err)

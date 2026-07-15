@@ -35,7 +35,7 @@ func TestValidateInstanceName(t *testing.T) {
 func TestNewInstanceKindDefaults(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.FixedZone("local", 3600))
-	for _, kind := range []domain.InstanceKind{domain.KindSandbox, domain.KindVPS, domain.KindDevbox} {
+	for _, kind := range []domain.InstanceKind{domain.KindSandbox, domain.KindVPS} {
 		i, err := domain.NewInstance("instance-1", "owner-1", "project", kind, now)
 		if err != nil {
 			t.Fatal(err)
@@ -58,7 +58,7 @@ func TestValidateInstancePolicies(t *testing.T) {
 	i, _ := domain.NewInstance("instance-1", "owner-1", "sandbox", domain.KindSandbox, now)
 	i.ExpiresAt = nil
 	assertCode(t, domain.ValidateInstance(i), domain.CodeExpiryRequired)
-	i, _ = domain.NewInstance("instance-2", "owner-1", "base", domain.KindDevbox, now)
+	i, _ = domain.NewInstance("instance-2", "owner-1", "base", domain.KindVPS, now)
 	i.Protected = true
 	assertCode(t, domain.ValidateDesiredTransition(i, domain.DesiredDeleted), domain.CodeProtectedBase)
 	i.RequestedIsolation = domain.IsolationRequest("magic")
@@ -134,7 +134,7 @@ func TestExtendSandboxExpiryRejectsAfterDeletionStarts(t *testing.T) {
 func TestExtendSandboxExpiryRejectsNonSandbox(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
-	for _, kind := range []domain.InstanceKind{domain.KindVPS, domain.KindDevbox} {
+	for _, kind := range []domain.InstanceKind{domain.KindVPS} {
 		i, err := domain.NewInstance("instance-1", "owner-1", "box", kind, now)
 		if err != nil {
 			t.Fatal(err)

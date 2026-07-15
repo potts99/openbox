@@ -186,7 +186,7 @@ func TestTerminalAuditEndReasonCanceledOnContextCancel(t *testing.T) {
 	}
 	svc := h.service.(*fakeService)
 	svc.instances = []domain.Instance{{
-		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindVPS,
 		RuntimeRef: "incus-owned-ref",
 	}}
 
@@ -279,7 +279,7 @@ func newTerminalTestEnvWithOptions(t *testing.T, options Options) *terminalTestE
 	}
 	svc := h.service.(*fakeService)
 	svc.instances = []domain.Instance{{
-		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindVPS,
 		RuntimeRef: "incus-owned-ref",
 	}}
 	server := httptest.NewServer(h)

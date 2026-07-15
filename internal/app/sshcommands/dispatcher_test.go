@@ -13,7 +13,7 @@ import (
 )
 
 func TestDispatcherMapsTypedCommandsAndNeverRunsRejectedInput(t *testing.T) {
-	service := &fakeService{values: []domain.Instance{{ID: "instance-1", OwnerID: "owner", Name: "dev", Kind: domain.KindDevbox, ObservedState: domain.ObservedStopped}}}
+	service := &fakeService{values: []domain.Instance{{ID: "instance-1", OwnerID: "owner", Name: "dev", Kind: domain.KindVPS, ObservedState: domain.ObservedStopped}}}
 	dispatcher, err := New(service, "ssh-ed25519 internal-instance-key", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ func TestDispatcherCopyUsesOnlyExplicitCopier(t *testing.T) {
 }
 
 func TestDispatcherCopyPrintsWarnings(t *testing.T) {
-	service := &fakeService{values: []domain.Instance{{ID: "instance-1", OwnerID: "owner", Name: "base", Kind: domain.KindDevbox}}}
+	service := &fakeService{values: []domain.Instance{{ID: "instance-1", OwnerID: "owner", Name: "base", Kind: domain.KindVPS}}}
 	copier := &fakeCopier{warnings: []string{clones.WarningFullCopy, clones.WarningSecrets}}
 	dispatcher, _ := New(service, "ssh-ed25519 internal-instance-key", copier)
 	dispatcher.newKey = func() (string, error) { return "generated", nil }

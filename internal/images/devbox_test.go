@@ -3,10 +3,10 @@
 package images_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/openbox-dev/openbox/internal/domain"
 	"github.com/openbox-dev/openbox/internal/images"
 )
 
@@ -174,11 +174,20 @@ func TestDevboxCatalogEntriesCarryPinnedVersions(t *testing.T) {
 			t.Fatalf("%s must not claim Pi/tmux pins: %+v", entry.Name, entry)
 		}
 	}
-	devbox, err := catalog.DefaultFor(domain.KindDevbox, "x86_64", "container")
+	devbox, err := findCurated(catalog, "devbox", "x86_64", "container")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if devbox.PiVersion == "" || devbox.TmuxVersion == "" {
 		t.Fatalf("devbox default must carry pins: %+v", devbox)
 	}
+}
+
+func findCurated(catalog images.Catalog, name, arch, runtime string) (images.Manifest, error) {
+	for _, entry := range catalog.List() {
+		if entry.Name == name && entry.Architecture == arch && entry.Runtime == runtime {
+			return entry, nil
+		}
+	}
+	return images.Manifest{}, fmt.Errorf("no curated %s image for architecture %q runtime %q", name, arch, runtime)
 }

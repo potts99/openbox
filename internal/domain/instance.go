@@ -74,7 +74,7 @@ func ValidateInstance(i Instance) error {
 		return err
 	}
 	switch i.Kind {
-	case KindSandbox, KindVPS, KindDevbox:
+	case KindSandbox, KindVPS:
 	default:
 		return newError(CodeInvalidArgument, "kind")
 	}

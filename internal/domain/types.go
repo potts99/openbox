@@ -42,8 +42,28 @@ type InstanceKind string
 const (
 	KindSandbox InstanceKind = "sandbox"
 	KindVPS     InstanceKind = "vps"
-	KindDevbox  InstanceKind = "devbox"
 )
+
+// SoftwareStatus is the install lifecycle for a catalog package on an instance.
+type SoftwareStatus string
+
+const (
+	SoftwareAbsent    SoftwareStatus = "absent"
+	SoftwarePending   SoftwareStatus = "pending"
+	SoftwareInstalled SoftwareStatus = "installed"
+	SoftwareFailed    SoftwareStatus = "failed"
+)
+
+// InstanceSoftware is one catalog package's state on an instance.
+type InstanceSoftware struct {
+	InstanceID InstanceID
+	OwnerID    OwnerID
+	PackageID  string
+	Status     SoftwareStatus
+	Version    string
+	Error      string
+	UpdatedAt  time.Time
+}
 
 type IsolationRequest string
 

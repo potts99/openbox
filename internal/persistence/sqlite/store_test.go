@@ -30,8 +30,8 @@ func TestOpenMigratesOnDiskAndReopens(t *testing.T) {
 	if err := store.db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 7 {
-		t.Fatalf("migration count=%d, want 7", count)
+	if count != 8 {
+		t.Fatalf("migration count=%d, want 8", count)
 	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
@@ -44,8 +44,8 @@ func TestOpenMigratesOnDiskAndReopens(t *testing.T) {
 	if err := store.db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 7 {
-		t.Fatalf("migration count after reopen=%d, want 7", count)
+	if count != 8 {
+		t.Fatalf("migration count after reopen=%d, want 8", count)
 	}
 }
 
@@ -90,7 +90,7 @@ func TestCreateInstanceIsTransactionalAndIdempotent(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 	createOwner(t, store, now)
-	i, err := domain.NewInstance("instance-1", "owner-1", "project", domain.KindDevbox, now)
+	i, err := domain.NewInstance("instance-1", "owner-1", "project", domain.KindVPS, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestProtectedBaseCannotBeDeleted(t *testing.T) {
 	store := openStore(t)
 	now := time.Now().UTC()
 	createOwner(t, store, now)
-	i, _ := domain.NewInstance("instance-1", "owner-1", "base", domain.KindDevbox, now)
+	i, _ := domain.NewInstance("instance-1", "owner-1", "base", domain.KindVPS, now)
 	i.Protected = true
 	if _, _, err := store.CreateInstance(context.Background(), i, operation("op-1", "key-1", "hash-1", now)); err != nil {
 		t.Fatal(err)

@@ -99,7 +99,7 @@ func TestDeleteRouteMissingIsNotFound(t *testing.T) {
 
 func createManagedInstance(t *testing.T, store *Store, id, name, runtimeRef string, now time.Time) domain.Instance {
 	t.Helper()
-	instance, err := domain.NewInstance(domain.InstanceID(id), "owner-1", name, domain.KindDevbox, now)
+	instance, err := domain.NewInstance(domain.InstanceID(id), "owner-1", name, domain.KindVPS, now)
 	if err != nil {
 		t.Fatal(err)
 	}

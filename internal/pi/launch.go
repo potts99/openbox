@@ -33,13 +33,13 @@ func AttachOrCreateCommand(workdir string) ([]string, error) {
 }
 
 // LaunchAvailable reports whether the dashboard may show Launch Pi.
-// Devboxes with Pi and Pi-enabled sandboxes qualify; plain VPS images do not.
+// VPS/sandbox instances that include Pi qualify.
 func LaunchAvailable(kind domain.InstanceKind, includesPi bool) bool {
 	if !includesPi {
 		return false
 	}
 	switch kind {
-	case domain.KindDevbox, domain.KindSandbox:
+	case domain.KindVPS, domain.KindSandbox:
 		return true
 	default:
 		return false
