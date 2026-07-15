@@ -353,6 +353,29 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Route" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/certificates/allow:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - name: domain
+        in: query
+        required: true
+        description: Hostname requested for on-demand TLS certificate issuance.
+        schema: { type: string }
+    get:
+      operationId: allowCertificate
+      summary: Allow certificate issuance for an approved hostname
+      description: >
+        Caddy on-demand TLS ask endpoint. Returns 200 only when domain matches an
+        existing persisted route hostname (any visibility). Unknown, deleted, and
+        malformed names return 404. Unauthenticated by design; bind the API privately
+        so only the local gateway can call it.
+      security: []
+      responses:
+        "200":
+          description: Hostname is approved for certificate issuance.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/operations:
     parameters:
       - { $ref: "#/components/parameters/APIVersion" }

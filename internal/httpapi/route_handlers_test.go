@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -164,6 +165,14 @@ func (f *routeTestRepo) DeleteRoute(_ context.Context, owner domain.OwnerID, id 
 	}
 	delete(f.routes, id)
 	return nil
+}
+func (f *routeTestRepo) FindRouteByHostname(_ context.Context, hostname string) (domain.Route, bool, error) {
+	for _, route := range f.routes {
+		if strings.EqualFold(route.Hostname, hostname) {
+			return route, true, nil
+		}
+	}
+	return domain.Route{}, false, nil
 }
 func (f *routeTestRepo) GetInstance(_ context.Context, owner domain.OwnerID, id domain.InstanceID) (domain.Instance, error) {
 	instance, ok := f.instances[id]

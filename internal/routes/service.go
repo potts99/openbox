@@ -21,6 +21,9 @@ type Repository interface {
 	ListRoutes(context.Context, domain.OwnerID) ([]domain.Route, error)
 	UpdateRoute(context.Context, domain.Route) error
 	DeleteRoute(context.Context, domain.OwnerID, domain.RouteID) error
+	// FindRouteByHostname looks up any persisted route whose hostname matches
+	// case-insensitively. hostname must already be normalized (trimmed, lower).
+	FindRouteByHostname(context.Context, string) (domain.Route, bool, error)
 	GetInstance(context.Context, domain.OwnerID, domain.InstanceID) (domain.Instance, error)
 }
 

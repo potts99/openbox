@@ -4,4 +4,4 @@
 
 package generated
 
-const OpenAPISHA256 = "50f21f804662d5ba3de7e9f906e838c0898207f200ce6e138b874b5b1621dd8e"
+const OpenAPISHA256 = "7f78da29d14924a520bd5b8af11b4ce506626ebcd07758a160c5f3c66a9b4845"

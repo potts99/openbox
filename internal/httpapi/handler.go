@@ -215,6 +215,11 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		if h.routeRoutes(response, request, requestID, segments[2:]) {
 			return
 		}
+	case "certificates":
+		if len(segments) == 3 && segments[2] == "allow" && h.requireMethod(response, request, requestID, http.MethodGet) {
+			h.certificateAllow(response, request, requestID)
+			return
+		}
 	case "operations":
 		if h.routeOperations(response, request, requestID, segments[2:]) {
 			return

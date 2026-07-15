@@ -15,12 +15,17 @@ Example base `Caddyfile`:
 
 ```caddyfile
 {
-	# On-demand TLS ask endpoint is wired in a later slice task.
+	on_demand_tls {
+		ask http://127.0.0.1:8443/v1/certificates/allow
+	}
 	# email admin@example.com
 }
 
 import routes.caddyfile
 ```
+
+The ask URL hits OpenBox's public (unauthenticated) allow endpoint. Bind the
+API to loopback so only the local Caddy process can request certificates.
 
 ## Apply semantics
 
@@ -28,6 +33,6 @@ import routes.caddyfile
 2. Validate the candidate (`caddy validate --config …`)
 3. Rename into place
 4. Reload Caddy
-5. On validate/reload failure, restore the previous file and reload again
+5. On reload failure, restore the previous file and reload again
 
-Certificate allowlisting and private-route auth are not configured here.
+Private-route auth is not configured here (later slice task).
