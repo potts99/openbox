@@ -77,3 +77,35 @@ func TestParseAllowedDestinationsRejectsInvalidEntries(t *testing.T) {
 		})
 	}
 }
+
+func TestParseAllowlistHostnamesNormalizesExactNames(t *testing.T) {
+	t.Parallel()
+
+	hostnames, err := networkpolicy.ParseAllowlistHostnames([]byte(`["Packages.Example.COM.","api.example.com"]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"packages.example.com", "api.example.com"}
+	if !reflect.DeepEqual(hostnames, want) {
+		t.Fatalf("hostnames = %#v, want %#v", hostnames, want)
+	}
+}
+
+func TestParseAllowlistHostnamesRejectsDangerousNames(t *testing.T) {
+	t.Parallel()
+
+	for _, raw := range []string{
+		`[""]`,
+		`["*"]`,
+		`["*.example.com"]`,
+		`["not a hostname"]`,
+		`["203.0.113.9"]`,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			_, err := networkpolicy.ParseAllowlistHostnames([]byte(raw))
+			if err == nil {
+				t.Fatalf("ParseAllowlistHostnames(%s) unexpectedly succeeded", raw)
+			}
+		})
+	}
+}
