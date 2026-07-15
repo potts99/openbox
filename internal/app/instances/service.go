@@ -260,6 +260,9 @@ func (s *Service) SubmitCreate(ctx context.Context, input CreateInput) (domain.I
 		instance, err = s.repo.GetInstance(ctx, input.OwnerID, domain.InstanceID(original.TargetID))
 		return instance, original, err
 	}
+	if err := s.markPackagesPending(ctx, instance, input.Packages); err != nil {
+		return domain.Instance{}, domain.Operation{}, err
+	}
 	return instance, operation, nil
 }
 
@@ -1349,6 +1352,23 @@ func (s *Service) InstallSoftware(ctx context.Context, ownerID domain.OwnerID, i
 func (s *Service) installCreatePackages(ctx context.Context, instance domain.Instance, packageIDs []string) error {
 	for _, packageID := range packageIDs {
 		if _, err := s.installPackage(ctx, instance, packageID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) markPackagesPending(ctx context.Context, instance domain.Instance, packageIDs []string) error {
+	now := s.now().UTC()
+	for _, packageID := range packageIDs {
+		row := domain.InstanceSoftware{
+			InstanceID: instance.ID,
+			OwnerID:    instance.OwnerID,
+			PackageID:  packageID,
+			Status:     domain.SoftwarePending,
+			UpdatedAt:  now,
+		}
+		if err := s.repo.UpsertInstanceSoftware(ctx, row); err != nil {
 			return err
 		}
 	}

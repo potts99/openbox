@@ -170,6 +170,20 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ListImagesResponse" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/software:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+    get:
+      operationId: listSoftwareCatalog
+      summary: List curated installable software packages
+      responses:
+        "200":
+          description: Curated software catalog.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListSoftwareResponse" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/instances:
     parameters:
       - { $ref: "#/components/parameters/APIVersion" }
@@ -227,6 +241,27 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Operation" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/instances/{instance_id}/software/{package_id}/install:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { $ref: "#/components/parameters/InstanceID" }
+      - name: package_id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: installInstanceSoftware
+      parameters:
+        - { $ref: "#/components/parameters/CSRFToken" }
+      summary: Install a catalog package into a running instance
+      responses:
+        "200":
+          description: Software install result for the instance.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InstanceSoftware" }
         default: { $ref: "#/components/responses/Error" }
   /v1/instances/{instance_id}/suggested-ports:
     parameters:
@@ -811,7 +846,7 @@ components:
       properties:
         id: { type: string }
         name: { type: string }
-        kind: { type: string, enum: [sandbox, vps, devbox] }
+        kind: { type: string, enum: [sandbox, vps] }
         image_id: { type: string }
         requested_isolation: { type: string, enum: [best_available, standard, strong] }
         actual_isolation: { type: string, enum: [unknown, container, virtual_machine] }
@@ -820,11 +855,37 @@ components:
         resources: { $ref: "#/components/schemas/Resources" }
         expires_at: { type: string, format: date-time, nullable: true }
         protected: { type: boolean }
+        software:
+          type: array
+          items: { $ref: "#/components/schemas/InstanceSoftware" }
         error_code: { type: string }
         error_stage: { type: string }
         error_retryable: { type: boolean }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    InstanceSoftware:
+      type: object
+      required: [package_id, status, updated_at]
+      properties:
+        package_id: { type: string }
+        status: { type: string, enum: [absent, pending, installed, failed] }
+        version: { type: string }
+        error: { type: string }
+        updated_at: { type: string, format: date-time }
+    SoftwarePackage:
+      type: object
+      required: [id, name, description]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+    ListSoftwareResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/SoftwarePackage" }
     Operation:
       type: object
       required: [id, type, target_type, target_id, status, stage, progress, attempts, created_at, updated_at]
@@ -878,11 +939,15 @@ components:
       additionalProperties: false
       properties:
         name: { type: string }
-        kind: { type: string, enum: [sandbox, vps, devbox], default: vps }
+        kind: { type: string, enum: [sandbox, vps], default: vps }
         image: { type: string }
         requested_isolation: { type: string, enum: [best_available, standard, strong], default: best_available }
         resources: { $ref: "#/components/schemas/Resources" }
         owner_public_key: { type: string }
+        packages:
+          type: array
+          items: { type: string }
+          description: Catalog package IDs to install after the instance is ready.
     ExecInstanceRequest:
       type: object
       required: [argv]

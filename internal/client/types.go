@@ -84,7 +84,7 @@ type Instance struct {
 }
 
 func (i Instance) validate() error {
-	if !oneOf(i.Kind, "sandbox", "vps", "devbox") {
+	if !oneOf(i.Kind, "sandbox", "vps") {
 		return fmt.Errorf("instance %q: unknown kind %q", i.ID, i.Kind)
 	}
 	if !oneOf(i.ActualIsolation, "unknown", "container", "virtual_machine") {

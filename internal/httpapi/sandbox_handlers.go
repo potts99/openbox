@@ -72,7 +72,7 @@ func (h *Handler) extendInstance(response http.ResponseWriter, request *http.Req
 		h.writeServiceError(response, requestID, err)
 		return
 	}
-	h.writeJSON(response, http.StatusOK, mapInstance(instance))
+	h.writeJSON(response, http.StatusOK, mapInstance(instance, nil))
 }
 
 type ndjsonSink struct {
