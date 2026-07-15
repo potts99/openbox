@@ -41,6 +41,25 @@ type InstanceRuntime interface {
 	DeleteInstance(context.Context, string) error
 }
 
+// NetworkPolicy applies and removes the host-side egress policy for one
+// durable instance identity.
+type NetworkPolicy interface {
+	ApplyNetworkPolicy(context.Context, domain.Instance) error
+	RemoveNetworkPolicy(context.Context, domain.Instance) error
+}
+
+// NetworkPolicyVerifier confirms that the policy attached to the runtime still
+// matches the instance's desired policy.
+type NetworkPolicyVerifier interface {
+	VerifyNetworkPolicy(context.Context, domain.Instance) error
+}
+
+// NetworkPolicyStatusProvider supplies non-payload policy observability for
+// instance inspect and status responses.
+type NetworkPolicyStatusProvider interface {
+	NetworkPolicyStatus(domain.Instance) domain.NetworkPolicyStatus
+}
+
 // ContainerRuntime is retained as a source-compatible name for slice 03 callers.
 type ContainerRuntime = InstanceRuntime
 
@@ -95,6 +114,7 @@ type Options struct {
 	NewID                    func() string
 	Mode                     *operations.Mode
 	InstanceGatewayPublicKey string
+	NetworkPolicy            NetworkPolicy
 }
 
 type Service struct {
@@ -104,6 +124,7 @@ type Service struct {
 	newID                    func() string
 	mode                     *operations.Mode
 	instanceGatewayPublicKey string
+	networkPolicy            NetworkPolicy
 	mutationGate             chan struct{}
 	execGate                 *sandbox.ExecGate
 }
@@ -111,6 +132,9 @@ type Service struct {
 func New(runtime InstanceRuntime, repo Repository, options Options) (*Service, error) {
 	if runtime == nil || repo == nil {
 		return nil, errors.New("runtime and repository are required")
+	}
+	if options.NetworkPolicy == nil {
+		return nil, errors.New("network policy is required")
 	}
 	if options.Now == nil {
 		options.Now = time.Now
@@ -121,7 +145,7 @@ func New(runtime InstanceRuntime, repo Repository, options Options) (*Service, e
 	if options.Mode == nil {
 		options.Mode = &operations.Mode{}
 	}
-	service := &Service{runtime: runtime, repo: repo, now: options.Now, newID: options.NewID, mode: options.Mode, instanceGatewayPublicKey: strings.TrimSpace(options.InstanceGatewayPublicKey), mutationGate: make(chan struct{}, 1), execGate: sandbox.NewExecGate(sandbox.DefaultMaxConcurrentExecsPerInstance)}
+	service := &Service{runtime: runtime, repo: repo, now: options.Now, newID: options.NewID, mode: options.Mode, instanceGatewayPublicKey: strings.TrimSpace(options.InstanceGatewayPublicKey), networkPolicy: options.NetworkPolicy, mutationGate: make(chan struct{}, 1), execGate: sandbox.NewExecGate(sandbox.DefaultMaxConcurrentExecsPerInstance)}
 	service.mutationGate <- struct{}{}
 	return service, nil
 }
@@ -134,6 +158,7 @@ type CreateInput struct {
 	RequestedIsolation domain.IsolationRequest
 	Resources          domain.Resources
 	Lifetime           time.Duration // Sandbox only; 0 means kind default
+	EgressMode         domain.EgressMode
 	OwnerPublicKey     string
 	IdempotencyKey     string
 	Packages           []string // catalog package IDs to install after ready
@@ -194,7 +219,7 @@ func (s *Service) SubmitCreate(ctx context.Context, input CreateInput) (domain.I
 		if getErr != nil && previous.ErrorCode == domain.CodeOperationCanceled {
 			return domain.Instance{}, previous, nil
 		}
-		return instance, previous, getErr
+		return s.withNetworkPolicyStatus(instance), previous, getErr
 	}
 	if s.mode.Degraded() {
 		return domain.Instance{}, domain.Operation{}, &domain.Error{Code: domain.CodeUnavailable, Field: "runtime"}
@@ -243,6 +268,7 @@ func (s *Service) SubmitCreate(ctx context.Context, input CreateInput) (domain.I
 	instance.ActualIsolation = actualIsolation
 	instance.Resources = input.Resources
 	instance.RuntimeRef = runtimeReference(instanceID)
+	instance.EgressMode = input.EgressMode
 	applyLifetime(&instance, lifetime, now)
 	if err := domain.ValidateInstance(instance); err != nil {
 		return domain.Instance{}, domain.Operation{}, err
@@ -258,12 +284,15 @@ func (s *Service) SubmitCreate(ctx context.Context, input CreateInput) (domain.I
 	}
 	if replay {
 		instance, err = s.repo.GetInstance(ctx, input.OwnerID, domain.InstanceID(original.TargetID))
-		return instance, original, err
+		if err != nil {
+			return domain.Instance{}, domain.Operation{}, err
+		}
+		return s.withNetworkPolicyStatus(instance), original, nil
 	}
 	if err := s.markPackagesPending(ctx, instance, input.Packages); err != nil {
 		return domain.Instance{}, domain.Operation{}, err
 	}
-	return instance, operation, nil
+	return s.withNetworkPolicyStatus(instance), operation, nil
 }
 
 // SubmitAction records desired state and a pending operation atomically. It
@@ -360,7 +389,11 @@ func (s *Service) SetProtection(ctx context.Context, ownerID domain.OwnerID, id 
 	if err := s.repo.UpdateInstanceProtection(ctx, ownerID, id, protected, s.now().UTC()); err != nil {
 		return domain.Instance{}, err
 	}
-	return s.repo.GetInstance(ctx, ownerID, id)
+	refreshed, err := s.repo.GetInstance(ctx, ownerID, id)
+	if err != nil {
+		return domain.Instance{}, err
+	}
+	return s.withNetworkPolicyStatus(refreshed), nil
 }
 
 // MarkExpired records desired deleted for an expired Sandbox without removing
@@ -405,7 +438,11 @@ func (s *Service) ExtendExpiry(ctx context.Context, ownerID domain.OwnerID, id d
 	if err := s.repo.UpdateInstanceExpiry(ctx, ownerID, id, *extended.ExpiresAt, extended.UpdatedAt); err != nil {
 		return domain.Instance{}, err
 	}
-	return s.repo.GetInstance(ctx, ownerID, id)
+	refreshed, err := s.repo.GetInstance(ctx, ownerID, id)
+	if err != nil {
+		return domain.Instance{}, err
+	}
+	return s.withNetworkPolicyStatus(refreshed), nil
 }
 
 // Exec runs an argv command inside a managed instance and streams framed
@@ -447,11 +484,22 @@ func (s *Service) ListImages(ctx context.Context, ownerID domain.OwnerID) ([]dom
 }
 
 func (s *Service) ListInstances(ctx context.Context, ownerID domain.OwnerID) ([]domain.Instance, error) {
-	return s.repo.ListInstancesByOwner(ctx, ownerID, 100)
+	instances, err := s.repo.ListInstancesByOwner(ctx, ownerID, 100)
+	if err != nil {
+		return nil, err
+	}
+	for index := range instances {
+		instances[index] = s.withNetworkPolicyStatus(instances[index])
+	}
+	return instances, nil
 }
 
 func (s *Service) GetInstance(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID) (domain.Instance, error) {
-	return s.repo.GetInstance(ctx, ownerID, id)
+	instance, err := s.repo.GetInstance(ctx, ownerID, id)
+	if err != nil {
+		return domain.Instance{}, err
+	}
+	return s.withNetworkPolicyStatus(instance), nil
 }
 
 func (s *Service) GetOperation(ctx context.Context, ownerID domain.OwnerID, id domain.OperationID) (domain.Operation, error) {
@@ -494,7 +542,11 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 		if previous.Type != "instance.create" || previous.RequestHash != requestHash {
 			return domain.Instance{}, &domain.Error{Code: domain.CodeIdempotencyConflict, Field: "idempotency_key"}
 		}
-		return s.repo.GetInstance(ctx, input.OwnerID, domain.InstanceID(previous.TargetID))
+		instance, err := s.repo.GetInstance(ctx, input.OwnerID, domain.InstanceID(previous.TargetID))
+		if err != nil {
+			return domain.Instance{}, err
+		}
+		return s.withNetworkPolicyStatus(instance), nil
 	}
 	capabilities, err := s.runtime.DiscoverCapabilities(ctx)
 	if err != nil {
@@ -555,6 +607,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 	instance.ActualIsolation = actualIsolation
 	instance.Resources = input.Resources
 	instance.RuntimeRef = runtimeRef
+	instance.EgressMode = input.EgressMode
 	applyLifetime(&instance, lifetime, now)
 	if err := domain.ValidateInstance(instance); err != nil {
 		return domain.Instance{}, err
@@ -570,7 +623,11 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 		return domain.Instance{}, err
 	}
 	if replay {
-		return s.repo.GetInstance(ctx, input.OwnerID, domain.InstanceID(original.TargetID))
+		instance, err := s.repo.GetInstance(ctx, input.OwnerID, domain.InstanceID(original.TargetID))
+		if err != nil {
+			return domain.Instance{}, err
+		}
+		return s.withNetworkPolicyStatus(instance), nil
 	}
 	if err := s.repo.UpdateInstanceObservation(ctx, input.OwnerID, instance.ID, runtimeRef, actualIsolation, domain.ObservedCreating, "", s.now()); err != nil {
 		return domain.Instance{}, err
@@ -595,12 +652,12 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 			Metadata:  managedMetadata(input.OwnerID, instance.ID),
 		})
 		if createErr != nil {
-			s.markError(ctx, instance, createErr)
+			createErr = errors.Join(createErr, s.markError(ctx, instance))
 			return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, fmt.Errorf("create %s: %w", imageType, createErr))
 		}
 		createdByOperation = true
 		if err := verifyRuntime(created, instance.ID, actualIsolation); err != nil {
-			s.markError(ctx, instance, err)
+			err = errors.Join(err, s.markError(ctx, instance))
 			return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, err)
 		}
 	}
@@ -620,7 +677,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 			return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, err)
 		}
 		if err := s.runtime.StartInstance(ctx, runtimeRef); err != nil {
-			s.markError(ctx, instance, err)
+			err = errors.Join(err, s.markError(ctx, instance))
 			return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, fmt.Errorf("start %s: %w", imageType, err))
 		}
 	}
@@ -631,10 +688,14 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 	if err := s.repo.UpdateOperationStage(ctx, input.OwnerID, operation.ID, startedStage, 60, s.now()); err != nil {
 		return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, err)
 	}
+	if err := s.applyNetworkPolicy(ctx, instance); err != nil {
+		err = errors.Join(err, s.markError(ctx, instance))
+		return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, fmt.Errorf("apply network policy: %w", err))
+	}
 	if actualIsolation == domain.IsolationVM {
 		err := s.waitForVMReady(ctx, instance, operation)
 		if err != nil {
-			s.markError(ctx, instance, err)
+			err = errors.Join(err, s.markError(ctx, instance))
 			return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, fmt.Errorf("wait for VM readiness: %w", err))
 		}
 	}
@@ -749,6 +810,10 @@ func (s *Service) recoverCreate(ctx context.Context, operation domain.Operation)
 	if err := s.repo.UpdateOperationStage(ctx, instance.OwnerID, operation.ID, startedStage, 60, s.now()); err != nil {
 		return err
 	}
+	if err := s.applyNetworkPolicy(ctx, instance); err != nil {
+		err = errors.Join(err, s.markError(ctx, instance))
+		return fmt.Errorf("apply network policy: %w", err)
+	}
 	if instance.ActualIsolation == domain.IsolationVM {
 		if err := s.waitForVMReady(ctx, instance, operation); err != nil {
 			return err
@@ -801,10 +866,19 @@ func (s *Service) Refresh(ctx context.Context, ownerID domain.OwnerID, id domain
 	if err != nil {
 		return domain.Instance{}, err
 	}
+	if target == domain.ObservedRunning {
+		if err := s.verifyNetworkPolicy(ctx, instance); err != nil {
+			return domain.Instance{}, errors.Join(fmt.Errorf("verify network policy: %w", err), s.markError(ctx, instance))
+		}
+	}
 	if err := s.syncObserved(ctx, instance, target); err != nil {
 		return domain.Instance{}, err
 	}
-	return s.repo.GetInstance(ctx, ownerID, id)
+	refreshed, err := s.repo.GetInstance(ctx, ownerID, id)
+	if err != nil {
+		return domain.Instance{}, err
+	}
+	return s.withNetworkPolicyStatus(refreshed), nil
 }
 
 func (s *Service) Start(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID, key string) (domain.Instance, error) {
@@ -1060,6 +1134,9 @@ func (s *Service) Delete(ctx context.Context, ownerID domain.OwnerID, id domain.
 	if err := s.repo.UpdateOperationStage(ctx, ownerID, op.ID, "runtime_deleted", 80, s.now()); err != nil {
 		return err
 	}
+	if err := s.removeNetworkPolicy(ctx, instance); err != nil {
+		return fmt.Errorf("remove network policy: %w", err)
+	}
 	if err := s.repo.UpdateInstanceObservation(ctx, ownerID, id, instance.RuntimeRef, instance.ActualIsolation, domain.ObservedDeleted, "", s.now()); err != nil {
 		return err
 	}
@@ -1177,8 +1254,11 @@ func (s *Service) mutationOperation(ctx context.Context, kind string, instance d
 	return operation, false, nil
 }
 
-func (s *Service) markError(ctx context.Context, instance domain.Instance, cause error) {
-	_ = s.repo.UpdateInstanceObservation(ctx, instance.OwnerID, instance.ID, instance.RuntimeRef, instance.ActualIsolation, domain.ObservedError, domain.ErrorCode("runtime_error"), s.now())
+func (s *Service) markError(ctx context.Context, instance domain.Instance) error {
+	if err := s.repo.UpdateInstanceObservation(ctx, instance.OwnerID, instance.ID, instance.RuntimeRef, instance.ActualIsolation, domain.ObservedError, domain.ErrorCode("runtime_error"), s.now()); err != nil {
+		return fmt.Errorf("mark instance error: %w", err)
+	}
+	return nil
 }
 
 func selectIsolation(request domain.IsolationRequest, capabilities runtimeapi.Capabilities) (domain.IsolationType, error) {
@@ -1209,6 +1289,40 @@ func selectIsolation(request domain.IsolationRequest, capabilities runtimeapi.Ca
 	default:
 		return "", &domain.Error{Code: domain.CodeInvalidArgument, Field: "requested_isolation"}
 	}
+}
+
+func (s *Service) applyNetworkPolicy(ctx context.Context, instance domain.Instance) error {
+	if s.networkPolicy == nil {
+		return nil
+	}
+	if err := s.networkPolicy.ApplyNetworkPolicy(ctx, instance); err != nil {
+		return err
+	}
+	return s.verifyNetworkPolicy(ctx, instance)
+}
+
+func (s *Service) verifyNetworkPolicy(ctx context.Context, instance domain.Instance) error {
+	verifier, ok := s.networkPolicy.(NetworkPolicyVerifier)
+	if !ok {
+		return nil
+	}
+	return verifier.VerifyNetworkPolicy(ctx, instance)
+}
+
+func (s *Service) withNetworkPolicyStatus(instance domain.Instance) domain.Instance {
+	provider, ok := s.networkPolicy.(NetworkPolicyStatusProvider)
+	if !ok {
+		return instance
+	}
+	instance.NetworkPolicy = provider.NetworkPolicyStatus(instance)
+	return instance
+}
+
+func (s *Service) removeNetworkPolicy(ctx context.Context, instance domain.Instance) error {
+	if s.networkPolicy == nil {
+		return nil
+	}
+	return s.networkPolicy.RemoveNetworkPolicy(ctx, instance)
 }
 
 func (s *Service) waitForVMReady(ctx context.Context, instance domain.Instance, operation domain.Operation) error {
@@ -1265,6 +1379,9 @@ func (s *Service) withPartialVMCleanup(instance domain.Instance, created bool, c
 			return errors.Join(cause, fmt.Errorf("partial VM was replaced during cleanup: %w", err))
 		}
 		return errors.Join(cause, fmt.Errorf("partial VM %q still exists after cleanup", instance.RuntimeRef))
+	}
+	if err := s.removeNetworkPolicy(ctx, instance); err != nil {
+		return errors.Join(cause, fmt.Errorf("remove partial VM network policy: %w", err))
 	}
 	return cause
 }
@@ -1391,7 +1508,7 @@ func (s *Service) installPackage(ctx context.Context, instance domain.Instance, 
 	if err := s.repo.UpsertInstanceSoftware(ctx, row); err != nil {
 		return domain.InstanceSoftware{}, err
 	}
-	if err := software.Install(ctx, s.runtime, instance.RuntimeRef, pkg); err != nil {
+	if err := software.Install(ctx, s.runtime, instance.RuntimeRef, pkg, software.InstallOptions{}); err != nil {
 		row.Status = domain.SoftwareFailed
 		row.Error = err.Error()
 		row.UpdatedAt = s.now().UTC()
@@ -1456,6 +1573,7 @@ func applyCreateDefaults(input *CreateInput) (time.Duration, error) {
 		RequestedIsolation: input.RequestedIsolation,
 		Resources:          input.Resources,
 		Lifetime:           input.Lifetime,
+		EgressMode:         input.EgressMode,
 	})
 	if err != nil {
 		return 0, err
@@ -1465,6 +1583,7 @@ func applyCreateDefaults(input *CreateInput) (time.Duration, error) {
 	input.RequestedIsolation = applied.RequestedIsolation
 	input.Resources = applied.Resources
 	input.Lifetime = applied.Lifetime
+	input.EgressMode = applied.EgressMode
 	return applied.Lifetime, nil
 }
 
