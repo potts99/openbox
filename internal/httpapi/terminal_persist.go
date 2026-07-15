@@ -41,7 +41,9 @@ func (p *persistentConsole) startStdoutPump(onExit func()) {
 				p.outMu.Unlock()
 				if w != nil {
 					if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-						p.detachOutput()
+						// Only clear if this writer is still attached — a newer
+						// attachOutput may have replaced outW after we copied w.
+						p.detachOutputIf(w)
 					}
 				}
 			}
@@ -73,6 +75,18 @@ func (p *persistentConsole) detachOutput() {
 	p.outMu.Lock()
 	defer p.outMu.Unlock()
 	if p.outW != nil {
+		_ = p.outW.Close()
+		p.outW = nil
+	}
+}
+
+// detachOutputIf closes outW only when it is still the same writer that failed.
+// Avoids a race where the stdout pump closes a newly attached pipe after an
+// older bridge's Write error.
+func (p *persistentConsole) detachOutputIf(w *io.PipeWriter) {
+	p.outMu.Lock()
+	defer p.outMu.Unlock()
+	if p.outW == w {
 		_ = p.outW.Close()
 		p.outW = nil
 	}

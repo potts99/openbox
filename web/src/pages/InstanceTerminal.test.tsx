@@ -149,4 +149,28 @@ describe("InstanceTerminal", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Back to instances" }));
     expect(onBack).toHaveBeenCalledOnce();
   });
+
+  it("exposes persistent session controls and opens with session_name when enabled", async () => {
+    const user = userEvent.setup();
+    renderTerminal();
+    openConnectedSocket();
+
+    const nameInput = screen.getByRole("textbox", { name: "Session name" });
+    expect(nameInput).toBeDisabled();
+
+    await user.click(screen.getByRole("checkbox", { name: /persistent session/i }));
+    expect(nameInput).toBeEnabled();
+    await user.clear(nameInput);
+    await user.type(nameInput, "work");
+
+    FakeWebSocket.instances[0]?.close();
+    await user.click(await screen.findByRole("button", { name: "Reconnect" }));
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    FakeWebSocket.instances[1]?.open();
+    expect(JSON.parse(FakeWebSocket.instances[1]?.sent[0] ?? "{}")).toMatchObject({
+      type: "open",
+      session_name: "work",
+    });
+  });
 });

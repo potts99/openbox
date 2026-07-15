@@ -112,6 +112,63 @@ func TestTerminalWebSocketRejectsUnauthorizedUpgrades(t *testing.T) {
 	})
 }
 
+func TestTerminalWebSocketBearerSkipsOriginCookieStillRequires(t *testing.T) {
+	h, m, bootstrap := newAuthHandler(t)
+	session, cookie, err := m.Bootstrap(context.Background(), "loopback", bootstrap, "a sufficiently long password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bearer, err := m.CreateToken(context.Background(), "owner-local", "terminal-bearer", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := h.service.(*fakeService)
+	svc.instances = []domain.Instance{{
+		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+		RuntimeRef: "incus-owned-ref",
+	}}
+
+	server := httptest.NewServer(h)
+	t.Cleanup(server.Close)
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/instances/inst-owned/terminal"
+
+	t.Run("bearer without origin succeeds", func(t *testing.T) {
+		conn, err := dialTerminal(t, wsURL, http.Header{
+			"Authorization": []string{"Bearer " + bearer.Secret},
+		})
+		if err != nil {
+			t.Fatalf("bearer dial without Origin: %v", err)
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_, data, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("read stub frame: %v", err)
+		}
+		frame, err := terminal.Decode(data)
+		if err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if _, ok := frame.(terminal.ErrorFrame); !ok {
+			t.Fatalf("frame type %T, want ErrorFrame stub", frame)
+		}
+	})
+
+	t.Run("cookie without origin still forbidden", func(t *testing.T) {
+		status, err := dialTerminalHTTP(t, wsURL+"?"+auth.CSRFQuery+"="+url.QueryEscape(session.CSRFToken), http.Header{
+			"Cookie": []string{auth.SessionCookie + "=" + cookie},
+		})
+		if err == nil {
+			t.Fatal("expected upgrade rejection")
+		}
+		if status != http.StatusForbidden {
+			t.Fatalf("status=%d want %d", status, http.StatusForbidden)
+		}
+	})
+}
+
 func TestTerminalWebSocketAcceptsCSRFQueryWithoutHeader(t *testing.T) {
 	h, m, bootstrap := newAuthHandler(t)
 	session, cookie, err := m.Bootstrap(context.Background(), "loopback", bootstrap, "a sufficiently long password")

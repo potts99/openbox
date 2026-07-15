@@ -14,6 +14,8 @@ export interface TerminalSessionOptions {
   csrfToken: string;
   cols: number;
   rows: number;
+  /** Named tmux session inside the guest; omitted for ephemeral shells. */
+  sessionName?: string;
   WebSocketImpl?: typeof WebSocket;
   location?: Pick<Location, "protocol" | "host">;
   onStateChange?: (state: ConnectionState) => void;
@@ -38,6 +40,8 @@ export class TerminalSession {
   private rows: number;
   private state: ConnectionState = { status: "disconnected" };
   private intentionalClose = false;
+  private sessionId: string | undefined;
+  private preferReconnect = false;
 
   constructor(options: TerminalSessionOptions) {
     this.options = options;
@@ -50,10 +54,12 @@ export class TerminalSession {
   }
 
   connect(): void {
+    this.preferReconnect = false;
     this.openSocket();
   }
 
   reconnect(): void {
+    this.preferReconnect = true;
     this.disposeSocket();
     this.openSocket();
   }
@@ -98,11 +104,16 @@ export class TerminalSession {
     this.socket = socket;
 
     socket.onopen = () => {
+      if (this.preferReconnect && this.sessionId) {
+        this.send({ type: "reconnect", sessionId: this.sessionId });
+        return;
+      }
       this.send({
         type: "open",
         instanceId: this.options.instanceId,
         cols: this.cols,
         rows: this.rows,
+        sessionName: this.options.sessionName,
       });
     };
 
@@ -112,12 +123,17 @@ export class TerminalSession {
         const frame = decodeFrame(event.data);
         switch (frame.type) {
           case "open":
+            if (frame.sessionId) {
+              this.sessionId = frame.sessionId;
+            }
+            this.preferReconnect = false;
             this.setState({ status: "connected" });
             break;
           case "output":
             this.options.onOutput?.(frame.data);
             break;
           case "exit":
+            this.sessionId = undefined;
             this.setState({ status: "disconnected", detail: `exited ${frame.code}` });
             this.options.onExit?.(frame.code);
             break;

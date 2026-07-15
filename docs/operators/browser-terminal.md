@@ -26,8 +26,9 @@ For browser WebSockets, pass CSRF as a query parameter:
 ?csrf=<session_csrf_token>
 ```
 
-(`X-CSRF-Token` is preferred when a custom header is available.) The page
-`Origin` must match the API host.
+(`X-CSRF-Token` is preferred when a custom header is available.) Cookie session
+upgrades require a page `Origin` that matches the API host. Bearer upgrades do
+not require `Origin`.
 
 ### Limits
 

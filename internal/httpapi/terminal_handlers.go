@@ -29,7 +29,9 @@ type authorizedTerminal struct {
 }
 
 func (h *Handler) openTerminal(response http.ResponseWriter, request *http.Request, requestID, rawID string) {
-	if !terminalOriginAllowed(request) {
+	// Cookie sessions have ambient authority — require matching Origin.
+	// Bearer tokens are explicit credentials with no cookie CSRF surface.
+	if !terminalAuthUsesBearer(request) && !terminalOriginAllowed(request) {
 		h.writeError(response, requestID, http.StatusForbidden, "forbidden", "origin")
 		return
 	}
@@ -631,6 +633,10 @@ func (h *Handler) writeTerminalError(ctx context.Context, conn *websocket.Conn, 
 	writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	_ = conn.Write(writeCtx, websocket.MessageText, payload)
+}
+
+func terminalAuthUsesBearer(request *http.Request) bool {
+	return strings.HasPrefix(request.Header.Get("Authorization"), "Bearer ")
 }
 
 func terminalOriginAllowed(request *http.Request) bool {

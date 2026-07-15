@@ -27,6 +27,7 @@ a { color: inherit; }
 :focus-visible { outline: 3px solid var(--safety); outline-offset: 3px; }
 .skip-link { position: fixed; z-index: 100; left: 1rem; top: -6rem; padding: .75rem 1rem; background: var(--ink); color: var(--paper-raised); }
 .skip-link:focus { top: 1rem; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 .eyebrow, .step-label { margin: 0 0 .55rem; color: var(--ink-muted); font-size: .68rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
@@ -129,7 +130,12 @@ a { color: inherit; }
 .terminal-toolbar h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: clamp(1.8rem, 4vw, 3rem); font-weight: 400; letter-spacing: -.04em; }
 .terminal-toolbar button { border: 1px solid #8e8b80; padding: .55rem .75rem; background: transparent; color: inherit; cursor: pointer; font-size: .66rem; font-weight: 900; letter-spacing: .09em; text-transform: uppercase; }
 .terminal-toolbar button:disabled { opacity: .45; cursor: not-allowed; }
-.terminal-actions { display: flex; align-items: center; gap: .75rem; }
+.terminal-actions { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; justify-content: flex-end; }
+.terminal-session-opts { display: flex; align-items: center; gap: .5rem; margin: 0; padding: 0; border: 0; }
+.terminal-persistent { display: flex; align-items: center; gap: .4rem; margin: 0; color: #cfcab8; font-size: .66rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; }
+.terminal-persistent input { accent-color: #cfcab8; }
+.terminal-session-name input { width: 8.5rem; border: 1px solid #8e8b80; padding: .45rem .55rem; background: #161612; color: inherit; font-size: .72rem; }
+.terminal-session-name input:disabled { opacity: .45; }
 .terminal-connection { margin: 0; color: #cfcab8; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; }
 .terminal-main { display: grid; grid-template-rows: 1fr auto; min-height: 0; padding: 1rem 1.25rem 1.25rem; }
 .terminal-surface { min-height: 24rem; height: 100%; border: 1px solid #5c5a51; background: #11110f; }
