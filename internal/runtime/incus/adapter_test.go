@@ -260,7 +260,7 @@ func TestBootstrapRejectsProjectWithoutImageInheritance(t *testing.T) {
 
 func TestBootstrapChecksAllNamesBeforeMutatingManagedProject(t *testing.T) {
 	api := newBootstrapAPI()
-	api.resources["project/openbox"] = resource{Name: "openbox", Config: managedConfig("project", map[string]string{"features.images": "false", "features.networks": "true", "features.profiles": "true"})}
+	api.resources["project/openbox"] = resource{Name: "openbox", Config: managedConfig("project", map[string]string{"features.images": "false", "features.networks": "false", "features.profiles": "true"})}
 	api.resources["network/openbox0"] = resource{Name: "openbox0", Config: map[string]string{"user.owner": "someone-else"}}
 	socket := serveUnixHTTP(t, api)
 	adapter, err := New(Options{SocketPath: socket})
@@ -279,7 +279,7 @@ func TestBootstrapChecksAllNamesBeforeMutatingManagedProject(t *testing.T) {
 
 func TestBootstrapRejectsLabelledConfigurationDriftBeforeMutation(t *testing.T) {
 	api := newBootstrapAPI()
-	api.resources["project/openbox"] = resource{Name: "openbox", Config: managedConfig("project", map[string]string{"features.images": "false", "features.networks": "true", "features.profiles": "true"})}
+	api.resources["project/openbox"] = resource{Name: "openbox", Config: managedConfig("project", map[string]string{"features.images": "false", "features.networks": "false", "features.profiles": "true"})}
 	driftedNetwork := networkResource(BootstrapConfig{Network: "openbox0"})
 	driftedNetwork.Config["ipv4.nat"] = "false"
 	api.resources["network/openbox0"] = driftedNetwork
@@ -300,6 +300,25 @@ func TestBootstrapRejectsLabelledConfigurationDriftBeforeMutation(t *testing.T) 
 	}
 	if api.posts != 0 {
 		t.Fatalf("bootstrap mutated resources before reporting drift: %d POSTs", api.posts)
+	}
+}
+
+func TestRequiredDriftAcceptsExpandedAutoAddresses(t *testing.T) {
+	desired := networkResource(BootstrapConfig{Network: "openbox0"})
+	existing := resource{
+		Name: "openbox0",
+		Type: "bridge",
+		Config: map[string]string{
+			ManagedLabel: "true", ResourceLabel: "network",
+			"ipv4.address": "10.84.217.1/24", "ipv4.nat": "true", "ipv6.address": "none",
+		},
+	}
+	if fields := requiredDrift(existing, desired); len(fields) != 0 {
+		t.Fatalf("expanded auto address reported as drift: %v", fields)
+	}
+	existing.Config["ipv4.address"] = ""
+	if fields := requiredDrift(existing, desired); !containsField(fields, "config.ipv4.address") {
+		t.Fatalf("fields = %v, want config.ipv4.address", fields)
 	}
 }
 
