@@ -53,6 +53,36 @@ func TestHealthAndCompatibilityNegotiation(t *testing.T) {
 	})
 }
 
+func TestSoftwareCatalogAndInstall(t *testing.T) {
+	t.Parallel()
+	service := &fakeService{
+		instances: []domain.Instance{{ID: "instance-1", OwnerID: "owner-local", Name: "dev", Kind: domain.KindVPS, ObservedState: domain.ObservedRunning}},
+		installedSoftware: domain.InstanceSoftware{
+			InstanceID: "instance-1", OwnerID: "owner-local", PackageID: "pi", Status: domain.SoftwareInstalled, Version: "0.80.7",
+			UpdatedAt: time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC),
+		},
+	}
+	handler := newTestHandler(t, service)
+
+	catalog := httptest.NewRecorder()
+	handler.ServeHTTP(catalog, httptest.NewRequest(http.MethodGet, "/v1/software", nil))
+	if catalog.Code != http.StatusOK {
+		t.Fatalf("catalog status=%d body=%s", catalog.Code, catalog.Body.String())
+	}
+	assertJSONContains(t, catalog.Body.Bytes(), `"id":"pi"`)
+
+	install := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/instances/instance-1/software/pi/install", nil)
+	handler.ServeHTTP(install, req)
+	if install.Code != http.StatusOK {
+		t.Fatalf("install status=%d body=%s", install.Code, install.Body.String())
+	}
+	assertJSONContains(t, install.Body.Bytes(), `"package_id":"pi"`, `"status":"installed"`)
+	if service.installPackageID != "pi" {
+		t.Fatalf("install package=%q", service.installPackageID)
+	}
+}
+
 func TestCapabilitiesImagesAndInstancesUseFixedOwner(t *testing.T) {
 	t.Parallel()
 
@@ -85,7 +115,7 @@ func TestCreateRequiresIdempotencyAndReturnsOperation(t *testing.T) {
 		operation: domain.Operation{ID: "operation-1", OwnerID: "owner-local", Status: domain.OperationPending},
 	}
 	handler := newTestHandler(t, service)
-	body := []byte(`{"name":"dev","kind":"devbox","image":"ubuntu","owner_public_key":"ssh-ed25519 AAAA","requested_isolation":"best_available","resources":{"vcpus":2,"memory_bytes":4294967296,"disk_bytes":21474836480}}`)
+	body := []byte(`{"name":"dev","kind":"vps","image":"ubuntu","owner_public_key":"ssh-ed25519 AAAA","requested_isolation":"best_available","resources":{"vcpus":2,"memory_bytes":4294967296,"disk_bytes":21474836480}}`)
 
 	missing := httptest.NewRecorder()
 	handler.ServeHTTP(missing, httptest.NewRequest(http.MethodPost, "/v1/instances", bytes.NewReader(body)))
@@ -346,17 +376,20 @@ func assertJSONContains(t *testing.T, body []byte, fragments ...string) {
 }
 
 type fakeService struct {
-	capabilities runtimeapi.Capabilities
-	images       []domain.Image
-	instances    []domain.Instance
-	operations   []domain.Operation
-	created      domain.Instance
-	operation    domain.Operation
-	extended     domain.Instance
-	err          error
-	execFrames   []execstream.Frame
-	execReq      sandbox.ExecRequest
-	extendBy     time.Duration
+	capabilities       runtimeapi.Capabilities
+	images             []domain.Image
+	instances          []domain.Instance
+	operations         []domain.Operation
+	created            domain.Instance
+	operation          domain.Operation
+	extended           domain.Instance
+	software           []domain.InstanceSoftware
+	installedSoftware  domain.InstanceSoftware
+	err                error
+	execFrames         []execstream.Frame
+	execReq            sandbox.ExecRequest
+	extendBy           time.Duration
+	installPackageID   string
 
 	lastOwner      domain.OwnerID
 	lastInstanceID domain.InstanceID
@@ -455,6 +488,29 @@ func (f *fakeService) ExtendExpiry(_ context.Context, owner domain.OwnerID, id d
 		return f.extended, nil
 	}
 	return f.GetInstance(context.Background(), owner, id)
+}
+func (f *fakeService) ListSoftware(_ context.Context, owner domain.OwnerID, id domain.InstanceID) ([]domain.InstanceSoftware, error) {
+	f.lastOwner = owner
+	f.lastInstanceID = id
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.software, nil
+}
+func (f *fakeService) InstallSoftware(_ context.Context, owner domain.OwnerID, id domain.InstanceID, packageID string) (domain.InstanceSoftware, error) {
+	f.lastOwner = owner
+	f.lastInstanceID = id
+	f.installPackageID = packageID
+	if f.err != nil {
+		return domain.InstanceSoftware{}, f.err
+	}
+	if f.installedSoftware.PackageID != "" {
+		return f.installedSoftware, nil
+	}
+	return domain.InstanceSoftware{
+		InstanceID: id, OwnerID: owner, PackageID: packageID, Status: domain.SoftwareInstalled,
+		UpdatedAt: time.Now().UTC(),
+	}, nil
 }
 
 var _ Service = (*fakeService)(nil)

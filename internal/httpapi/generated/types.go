@@ -16,7 +16,6 @@ const (
 
 // Defines values for CreateInstanceRequestKind.
 const (
-	CreateInstanceRequestKindDevbox  CreateInstanceRequestKind = "devbox"
 	CreateInstanceRequestKindSandbox CreateInstanceRequestKind = "sandbox"
 	CreateInstanceRequestKindVps     CreateInstanceRequestKind = "vps"
 )
@@ -64,7 +63,6 @@ const (
 
 // Defines values for InstanceKind.
 const (
-	InstanceKindDevbox  InstanceKind = "devbox"
 	InstanceKindSandbox InstanceKind = "sandbox"
 	InstanceKindVps     InstanceKind = "vps"
 )
@@ -88,6 +86,14 @@ const (
 	InstanceRequestedIsolationStrong        InstanceRequestedIsolation = "strong"
 )
 
+// Defines values for InstanceSoftwareStatus.
+const (
+	InstanceSoftwareStatusAbsent    InstanceSoftwareStatus = "absent"
+	InstanceSoftwareStatusFailed    InstanceSoftwareStatus = "failed"
+	InstanceSoftwareStatusInstalled InstanceSoftwareStatus = "installed"
+	InstanceSoftwareStatusPending   InstanceSoftwareStatus = "pending"
+)
+
 // Defines values for OperationStatus.
 const (
 	OperationStatusFailed    OperationStatus = "failed"
@@ -98,10 +104,10 @@ const (
 
 // Defines values for OperationEventStatus.
 const (
-	OperationEventStatusFailed    OperationEventStatus = "failed"
-	OperationEventStatusPending   OperationEventStatus = "pending"
-	OperationEventStatusRunning   OperationEventStatus = "running"
-	OperationEventStatusSucceeded OperationEventStatus = "succeeded"
+	Failed    OperationEventStatus = "failed"
+	Pending   OperationEventStatus = "pending"
+	Running   OperationEventStatus = "running"
+	Succeeded OperationEventStatus = "succeeded"
 )
 
 // Defines values for RouteVisibility.
@@ -149,10 +155,13 @@ type Capabilities struct {
 
 // CreateInstanceRequest defines model for CreateInstanceRequest.
 type CreateInstanceRequest struct {
-	Image              string                                   `json:"image"`
-	Kind               *CreateInstanceRequestKind               `json:"kind,omitempty"`
-	Name               string                                   `json:"name"`
-	OwnerPublicKey     string                                   `json:"owner_public_key"`
+	Image          string                     `json:"image"`
+	Kind           *CreateInstanceRequestKind `json:"kind,omitempty"`
+	Name           string                     `json:"name"`
+	OwnerPublicKey string                     `json:"owner_public_key"`
+
+	// Packages Catalog package IDs to install after the instance is ready.
+	Packages           *[]string                                `json:"packages,omitempty"`
 	RequestedIsolation *CreateInstanceRequestRequestedIsolation `json:"requested_isolation,omitempty"`
 	Resources          *Resources                               `json:"resources,omitempty"`
 }
@@ -276,6 +285,7 @@ type Instance struct {
 	Protected          bool                       `json:"protected"`
 	RequestedIsolation InstanceRequestedIsolation `json:"requested_isolation"`
 	Resources          Resources                  `json:"resources"`
+	Software           *[]InstanceSoftware        `json:"software,omitempty"`
 	UpdatedAt          time.Time                  `json:"updated_at"`
 }
 
@@ -293,6 +303,18 @@ type InstanceObservedState string
 
 // InstanceRequestedIsolation defines model for Instance.RequestedIsolation.
 type InstanceRequestedIsolation string
+
+// InstanceSoftware defines model for InstanceSoftware.
+type InstanceSoftware struct {
+	Error     *string                `json:"error,omitempty"`
+	PackageId string                 `json:"package_id"`
+	Status    InstanceSoftwareStatus `json:"status"`
+	UpdatedAt time.Time              `json:"updated_at"`
+	Version   *string                `json:"version,omitempty"`
+}
+
+// InstanceSoftwareStatus defines model for InstanceSoftware.Status.
+type InstanceSoftwareStatus string
 
 // ListImagesResponse defines model for ListImagesResponse.
 type ListImagesResponse struct {
@@ -317,6 +339,11 @@ type ListRoutesResponse struct {
 // ListSSHKeysResponse defines model for ListSSHKeysResponse.
 type ListSSHKeysResponse struct {
 	Items []SSHKey `json:"items"`
+}
+
+// ListSoftwareResponse defines model for ListSoftwareResponse.
+type ListSoftwareResponse struct {
+	Items []SoftwarePackage `json:"items"`
 }
 
 // ListTokensResponse defines model for ListTokensResponse.
@@ -418,6 +445,13 @@ type Session struct {
 	CsrfToken *string   `json:"csrf_token,omitempty"`
 	ExpiresAt time.Time `json:"expires_at"`
 	OwnerId   string    `json:"owner_id"`
+}
+
+// SoftwarePackage defines model for SoftwarePackage.
+type SoftwarePackage struct {
+	Description string `json:"description"`
+	Id          string `json:"id"`
+	Name        string `json:"name"`
 }
 
 // SuggestedPortsResponse Candidate ports for route creation. Empty when the runtime cannot list listening ports yet. Never creates or publishes routes.
@@ -578,6 +612,15 @@ type ExtendInstanceExpiryParams struct {
 	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
 }
 
+// InstallInstanceSoftwareParams defines parameters for InstallInstanceSoftware.
+type InstallInstanceSoftwareParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
 // ListSuggestedPortsParams defines parameters for ListSuggestedPorts.
 type ListSuggestedPortsParams struct {
 	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
@@ -728,6 +771,12 @@ type GetSessionParams struct {
 
 // CreateSessionParams defines parameters for CreateSession.
 type CreateSessionParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// ListSoftwareCatalogParams defines parameters for ListSoftwareCatalog.
+type ListSoftwareCatalogParams struct {
 	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
 	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
 }

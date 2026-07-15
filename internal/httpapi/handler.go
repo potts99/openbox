@@ -27,6 +27,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/routes"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 	"github.com/openbox-dev/openbox/internal/sandbox"
+	"github.com/openbox-dev/openbox/internal/software"
 	"github.com/openbox-dev/openbox/internal/terminal"
 	"github.com/openbox-dev/openbox/internal/version"
 )
@@ -65,6 +66,8 @@ type Service interface {
 	CancelOperation(context.Context, domain.OwnerID, domain.OperationID) (domain.Operation, error)
 	Exec(context.Context, domain.OwnerID, domain.InstanceID, sandbox.ExecRequest, sandbox.FrameSink) error
 	ExtendExpiry(context.Context, domain.OwnerID, domain.InstanceID, time.Duration) (domain.Instance, error)
+	ListSoftware(context.Context, domain.OwnerID, domain.InstanceID) ([]domain.InstanceSoftware, error)
+	InstallSoftware(context.Context, domain.OwnerID, domain.InstanceID, string) (domain.InstanceSoftware, error)
 }
 
 type Options struct {
@@ -225,6 +228,11 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 			h.listImages(response, request, requestID)
 			return
 		}
+	case "software":
+		if len(segments) == 2 && h.requireMethod(response, request, requestID, http.MethodGet) {
+			h.listSoftwareCatalog(response, request, requestID)
+			return
+		}
 	case "instances":
 		if h.routeInstances(response, request, requestID, segments[2:]) {
 			return
@@ -325,6 +333,13 @@ func (h *Handler) routeInstances(response http.ResponseWriter, request *http.Req
 		h.submitAction(response, request, requestID, rest[0], action)
 		return true
 	}
+	if len(rest) == 4 && rest[1] == "software" && rest[3] == "install" {
+		if !h.requireMethod(response, request, requestID, http.MethodPost) {
+			return true
+		}
+		h.installSoftware(response, request, requestID, rest[0], rest[2])
+		return true
+	}
 	return false
 }
 
@@ -394,7 +409,7 @@ func (h *Handler) listInstances(response http.ResponseWriter, request *http.Requ
 	}
 	items := make([]generated.Instance, 0, len(values))
 	for _, value := range values {
-		items = append(items, mapInstance(value))
+		items = append(items, mapInstance(value, nil))
 	}
 	h.writeJSON(response, http.StatusOK, generated.ListInstancesResponse{Items: items})
 }
@@ -405,7 +420,12 @@ func (h *Handler) getInstance(response http.ResponseWriter, request *http.Reques
 		h.writeServiceError(response, requestID, err)
 		return
 	}
-	h.writeJSON(response, http.StatusOK, mapInstance(value))
+	rows, err := h.service.ListSoftware(request.Context(), h.requestOwner(request), domain.InstanceID(rawID))
+	if err != nil {
+		h.writeServiceError(response, requestID, err)
+		return
+	}
+	h.writeJSON(response, http.StatusOK, mapInstance(value, rows))
 }
 
 func (h *Handler) createInstance(response http.ResponseWriter, request *http.Request, requestID string) {
@@ -431,11 +451,16 @@ func (h *Handler) createInstance(response http.ResponseWriter, request *http.Req
 	if input.Resources != nil {
 		resources = domain.Resources{VCPUs: input.Resources.Vcpus, MemoryBytes: input.Resources.MemoryBytes, DiskBytes: input.Resources.DiskBytes}
 	}
+	var packages []string
+	if input.Packages != nil {
+		packages = *input.Packages
+	}
 	instance, operation, err := h.service.SubmitCreate(request.Context(), instances.CreateInput{
 		OwnerID: h.requestOwner(request), Name: input.Name, Kind: kind, Image: input.Image,
 		RequestedIsolation: isolation,
 		Resources:          resources,
 		OwnerPublicKey:     input.OwnerPublicKey, IdempotencyKey: key,
+		Packages: packages,
 	})
 	if err != nil {
 		h.writeServiceError(response, requestID, err)
@@ -443,10 +468,35 @@ func (h *Handler) createInstance(response http.ResponseWriter, request *http.Req
 	}
 	result := generated.CreateInstanceResult{Operation: mapOperation(operation)}
 	if instance.ID != "" {
-		mapped := mapInstance(instance)
+		rows, listErr := h.service.ListSoftware(request.Context(), h.requestOwner(request), instance.ID)
+		if listErr != nil {
+			h.writeServiceError(response, requestID, listErr)
+			return
+		}
+		mapped := mapInstance(instance, rows)
 		result.Instance = &mapped
 	}
 	h.writeJSON(response, http.StatusAccepted, result)
+}
+
+func (h *Handler) listSoftwareCatalog(response http.ResponseWriter, _ *http.Request, _ string) {
+	pkgs := software.DefaultCatalog().List()
+	items := make([]generated.SoftwarePackage, 0, len(pkgs))
+	for _, pkg := range pkgs {
+		items = append(items, generated.SoftwarePackage{
+			Id: pkg.ID, Name: pkg.Name, Description: pkg.Description,
+		})
+	}
+	h.writeJSON(response, http.StatusOK, generated.ListSoftwareResponse{Items: items})
+}
+
+func (h *Handler) installSoftware(response http.ResponseWriter, request *http.Request, requestID, rawID, packageID string) {
+	row, err := h.service.InstallSoftware(request.Context(), h.requestOwner(request), domain.InstanceID(rawID), packageID)
+	if err != nil {
+		h.writeServiceError(response, requestID, err)
+		return
+	}
+	h.writeJSON(response, http.StatusOK, mapInstanceSoftware(row))
 }
 
 func (h *Handler) submitAction(response http.ResponseWriter, request *http.Request, requestID, rawID string, action Action) {
@@ -634,14 +684,32 @@ func mapImage(value domain.Image) generated.Image {
 	return generated.Image{Id: string(value.ID), Alias: value.Alias, Source: value.Source, Digest: value.Digest, Architecture: value.Architecture, Compatibility: value.Compatibility, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt}
 }
 
-func mapInstance(value domain.Instance) generated.Instance {
-	return generated.Instance{
+func mapInstance(value domain.Instance, softwareRows []domain.InstanceSoftware) generated.Instance {
+	out := generated.Instance{
 		Id: string(value.ID), Name: value.Name, Kind: generated.InstanceKind(value.Kind), ImageId: string(value.ImageID),
 		RequestedIsolation: generated.InstanceRequestedIsolation(value.RequestedIsolation), ActualIsolation: generated.InstanceActualIsolation(value.ActualIsolation),
 		DesiredState: generated.InstanceDesiredState(value.DesiredState), ObservedState: generated.InstanceObservedState(value.ObservedState),
 		Resources: generated.Resources{Vcpus: value.Resources.VCPUs, MemoryBytes: value.Resources.MemoryBytes, DiskBytes: value.Resources.DiskBytes},
 		ExpiresAt: value.ExpiresAt, Protected: value.Protected, ErrorCode: optionalString(string(value.ErrorCode)), ErrorStage: optionalString(value.ErrorStage),
 		ErrorRetryable: pointer(value.ErrorRetryable), CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}
+	if len(softwareRows) > 0 {
+		items := make([]generated.InstanceSoftware, 0, len(softwareRows))
+		for _, row := range softwareRows {
+			items = append(items, mapInstanceSoftware(row))
+		}
+		out.Software = &items
+	}
+	return out
+}
+
+func mapInstanceSoftware(row domain.InstanceSoftware) generated.InstanceSoftware {
+	return generated.InstanceSoftware{
+		PackageId: row.PackageID,
+		Status:    generated.InstanceSoftwareStatus(row.Status),
+		Version:   optionalString(row.Version),
+		Error:     optionalString(row.Error),
+		UpdatedAt: row.UpdatedAt,
 	}
 }
 

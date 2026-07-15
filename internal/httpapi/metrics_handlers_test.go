@@ -28,7 +28,7 @@ func TestMetricsWebSocketRequiresAuthAndOwnership(t *testing.T) {
 	}
 	svc := h.service.(*fakeService)
 	svc.instances = []domain.Instance{{
-		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindVPS,
 		Resources: domain.Resources{VCPUs: 2, MemoryBytes: 1 << 30, DiskBytes: 10 << 30},
 	}}
 
@@ -87,7 +87,7 @@ func TestMetricsWebSocketSnapshotAndSample(t *testing.T) {
 	}
 	svc := h.service.(*fakeService)
 	svc.instances = []domain.Instance{{
-		ID: id, OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+		ID: id, OwnerID: "owner-local", Name: "dev", Kind: domain.KindVPS,
 		Resources: domain.Resources{VCPUs: 2, MemoryBytes: 1 << 30, DiskBytes: 10 << 30},
 	}}
 
