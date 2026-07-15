@@ -77,16 +77,17 @@ type Options struct {
 }
 
 type Handler struct {
-	service           Service
-	fixedOwnerID      domain.OwnerID
-	auth              *auth.Manager
-	pollInterval      time.Duration
-	heartbeatInterval time.Duration
-	maxBodyBytes      int64
-	eventBatchSize    int
-	console           runtimeapi.ConsoleOpener
-	terminalLimits    terminal.Limits
-	terminalSessions  *terminal.SessionRegistry
+	service            Service
+	fixedOwnerID       domain.OwnerID
+	auth               *auth.Manager
+	pollInterval       time.Duration
+	heartbeatInterval  time.Duration
+	maxBodyBytes       int64
+	eventBatchSize     int
+	console            runtimeapi.ConsoleOpener
+	terminalLimits     terminal.Limits
+	terminalSessions   *terminal.SessionRegistry
+	persistentConsoles *persistentConsoleStore
 }
 
 func New(service Service, options Options) (*Handler, error) {
@@ -113,8 +114,9 @@ func New(service Service, options Options) (*Handler, error) {
 		service: service, fixedOwnerID: options.OwnerID, auth: options.Auth, pollInterval: options.PollInterval,
 		heartbeatInterval: options.HeartbeatInterval, maxBodyBytes: options.MaxBodyBytes,
 		eventBatchSize: options.EventBatchSize, console: options.Console,
-		terminalLimits:   limits,
-		terminalSessions: terminal.NewSessionRegistry(limits.MaxSessionsPerOwner, limits.MaxSessionsPerInstance),
+		terminalLimits:     limits,
+		terminalSessions:   terminal.NewSessionRegistry(limits.MaxSessionsPerOwner, limits.MaxSessionsPerInstance),
+		persistentConsoles: newPersistentConsoleStore(),
 	}, nil
 }
 

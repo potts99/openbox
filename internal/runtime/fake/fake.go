@@ -14,18 +14,19 @@ import (
 )
 
 type Runtime struct {
-	mu              sync.Mutex
-	capabilities    runtimeapi.Capabilities
-	images          map[string]runtimeapi.Image
-	instances       map[string]runtimeapi.Instance
-	execResults     map[string]runtimeapi.ExecResult
-	failures        map[string][]error
-	calls           []string
-	createRequests  []runtimeapi.CreateRequest
-	lastConsoleRef  string
-	consoleSizes    map[string]consoleSize
-	activeConsoles  map[string]*consoleSession
-	consoleExitCode int
+	mu                 sync.Mutex
+	capabilities       runtimeapi.Capabilities
+	images             map[string]runtimeapi.Image
+	instances          map[string]runtimeapi.Instance
+	execResults        map[string]runtimeapi.ExecResult
+	failures           map[string][]error
+	calls              []string
+	createRequests     []runtimeapi.CreateRequest
+	lastConsoleRef     string
+	lastConsoleCommand []string
+	consoleSizes       map[string]consoleSize
+	activeConsoles     map[string]*consoleSession
+	consoleExitCode    int
 }
 
 type consoleSize struct {
@@ -217,6 +218,16 @@ func (r *Runtime) LastConsoleRef() string {
 	return r.lastConsoleRef
 }
 
+// LastConsoleCommand returns the Command from the most recent OpenConsole call.
+func (r *Runtime) LastConsoleCommand() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.lastConsoleCommand == nil {
+		return nil
+	}
+	return append([]string(nil), r.lastConsoleCommand...)
+}
+
 func (r *Runtime) LastConsoleSize(ref string) (cols, rows uint16) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -275,8 +286,8 @@ func (r *Runtime) OpenConsole(ctx context.Context, request runtimeapi.ConsoleReq
 	if len(command) == 0 {
 		command = []string{"/bin/bash"}
 	}
-	_ = command
 	r.lastConsoleRef = request.Ref
+	r.lastConsoleCommand = append([]string(nil), command...)
 	r.consoleSizes[request.Ref] = consoleSize{cols: request.Cols, rows: request.Rows}
 
 	stdinR, stdinW := io.Pipe()
