@@ -15,6 +15,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/persistence/sqlite"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 	"github.com/openbox-dev/openbox/internal/runtime/fake"
+	"github.com/openbox-dev/openbox/internal/software"
 )
 
 func TestAuthorizedKeysIncludesSeparateGatewayCredential(t *testing.T) {
@@ -642,6 +643,37 @@ func TestInstallSoftwareOnRunningInstance(t *testing.T) {
 	}
 	got, err := store.GetInstanceSoftware(ctx, created.OwnerID, created.ID, "pi")
 	if err != nil || got.Status != domain.SoftwareInstalled {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+}
+
+func TestInstallSoftwareHerdrRecordsVersion(t *testing.T) {
+	service, _, store := newTestService(t, nil)
+	ctx := context.Background()
+	created, err := service.Create(ctx, createInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotArch string
+	service.installSoftwareFn = func(_ context.Context, _ software.GuestExecer, _ string, pkg software.Package, opts software.InstallOptions) error {
+		if pkg.ID != "herdr" {
+			t.Fatalf("pkg=%s", pkg.ID)
+		}
+		gotArch = opts.Architecture
+		return nil
+	}
+	row, err := service.InstallSoftware(ctx, created.OwnerID, created.ID, "herdr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotArch != "x86_64" {
+		t.Fatalf("architecture=%q", gotArch)
+	}
+	if row.Status != domain.SoftwareInstalled || row.PackageID != "herdr" || row.Version != "0.7.4" {
+		t.Fatalf("row=%+v", row)
+	}
+	got, err := store.GetInstanceSoftware(ctx, created.OwnerID, created.ID, "herdr")
+	if err != nil || got.Version != "0.7.4" {
 		t.Fatalf("got=%+v err=%v", got, err)
 	}
 }

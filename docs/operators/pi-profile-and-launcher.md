@@ -1,5 +1,8 @@
 # Pi profiles and software catalog
 
+Install the curated `pi` software catalog package before applying profiles.
+See [Software catalog](software-catalog.md) for `pi` and `herdr`.
+
 ## Shared profile
 
 OpenBox stores an owner-level **Pi profile** (settings, packages, extensions,
