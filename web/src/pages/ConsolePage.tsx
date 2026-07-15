@@ -137,6 +137,7 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
                           <button
                             type="button"
                             className="link-button"
+                            aria-label={`Open terminal for ${instance.name}`}
                             onClick={() => setTerminalInstance(instance)}
                           >
                             Open terminal
