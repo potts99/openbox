@@ -40,6 +40,13 @@ func (h *Handler) openTerminal(response http.ResponseWriter, request *http.Reque
 		return
 	}
 
+	release, err := h.terminalSessions.Acquire(string(target.OwnerID), string(target.InstanceID))
+	if err != nil {
+		h.writeError(response, requestID, http.StatusTooManyRequests, "session_limit", "terminal")
+		return
+	}
+	defer release()
+
 	conn, err := websocket.Accept(response, request, &websocket.AcceptOptions{
 		// Origin was validated above against the request host.
 		InsecureSkipVerify: true,
@@ -48,6 +55,8 @@ func (h *Handler) openTerminal(response http.ResponseWriter, request *http.Reque
 		return
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	conn.SetReadLimit(int64(h.terminalLimits.MaxFrameBytes))
 
 	if h.console == nil {
 		h.serveAuthorizedTerminalStub(request.Context(), conn, target)
@@ -83,10 +92,15 @@ func (h *Handler) serveAuthorizedTerminalStub(ctx context.Context, conn *websock
 }
 
 func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.Conn, target authorizedTerminal) {
-	open, err := h.readTerminalOpen(ctx, conn)
+	limits := h.terminalLimits
+	rate := terminal.NewInboundLimiter(limits.MaxInboundFramesPerWindow, limits.MaxInboundBytesPerWindow, limits.RateWindow)
+	idle := terminal.NewIdleWatch(limits.IdleTimeout)
+	budget := terminal.NewBufferBudget(limits.MaxTotalBufferBytes)
+	idle.Touch(time.Now())
+
+	open, err := h.readTerminalOpen(ctx, conn, rate, idle, limits.MaxFrameBytes)
 	if err != nil {
-		h.writeTerminalError(ctx, conn, "invalid_frame", "expected open frame")
-		_ = conn.Close(websocket.StatusPolicyViolation, "open")
+		h.closeTerminalLimit(ctx, conn, err)
 		return
 	}
 
@@ -116,23 +130,39 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 	if err := conn.Write(ctx, websocket.MessageText, ack); err != nil {
 		return
 	}
+	idle.Touch(time.Now())
 
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	idleCh := make(chan struct{}, 1)
+	go watchTerminalIdle(sessionCtx, idle, func() {
+		select {
+		case idleCh <- struct{}{}:
+		default:
+		}
+		// Do not cancel sessionCtx here: canceling the WebSocket Read context
+		// makes coder/websocket force-close the conn before we can write idle_timeout.
+	})
+
 	errCh := make(chan error, 2)
 	go func() {
-		errCh <- pipeConsoleOutput(sessionCtx, conn, session.Stdout())
+		errCh <- pipeConsoleOutput(sessionCtx, conn, session.Stdout(), idle, budget, limits.MaxTotalBufferBytes)
 	}()
 	go func() {
-		errCh <- pumpTerminalInput(sessionCtx, conn, session)
+		errCh <- pumpTerminalInput(sessionCtx, conn, session, rate, idle, budget, limits.MaxFrameBytes)
 	}()
 
 	select {
+	case <-idleCh:
+		h.closeTerminalLimit(ctx, conn, terminal.ErrIdleTimeout)
+		cancel()
+		return
 	case <-sessionCtx.Done():
 	case err := <-errCh:
 		cancel()
 		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
+			h.closeTerminalLimit(ctx, conn, err)
 			return
 		}
 	}
@@ -151,11 +181,28 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 	_ = conn.Write(writeCtx, websocket.MessageText, payload)
 }
 
-func (h *Handler) readTerminalOpen(ctx context.Context, conn *websocket.Conn) (terminal.OpenFrame, error) {
+func (h *Handler) readTerminalOpen(
+	ctx context.Context,
+	conn *websocket.Conn,
+	rate *terminal.InboundLimiter,
+	idle *terminal.IdleWatch,
+	maxFrameBytes int,
+) (terminal.OpenFrame, error) {
+	// Hard bound waiting for the first frame. coder/websocket closes the
+	// connection when a Read context expires — acceptable before a session starts.
 	readCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	_, data, err := conn.Read(readCtx)
 	if err != nil {
+		if errors.Is(err, websocket.ErrMessageTooBig) {
+			return terminal.OpenFrame{}, terminal.ErrFrameTooLarge
+		}
+		return terminal.OpenFrame{}, err
+	}
+	if err := terminal.CheckFrameSize(len(data), maxFrameBytes); err != nil {
+		return terminal.OpenFrame{}, err
+	}
+	if err := rate.Allow(time.Now(), len(data)); err != nil {
 		return terminal.OpenFrame{}, err
 	}
 	frame, err := terminal.Decode(data)
@@ -166,24 +213,81 @@ func (h *Handler) readTerminalOpen(ctx context.Context, conn *websocket.Conn) (t
 	if !ok {
 		return terminal.OpenFrame{}, errors.New("first frame must be open")
 	}
+	idle.Touch(time.Now())
 	return open, nil
 }
 
-func pipeConsoleOutput(ctx context.Context, conn *websocket.Conn, stdout io.Reader) error {
-	buf := make([]byte, 32<<10)
+// watchTerminalIdle invokes onExpire once when the idle watch expires.
+// It must not cancel WebSocket Read contexts — coder/websocket force-closes
+// the connection when a Read context times out.
+func watchTerminalIdle(ctx context.Context, idle *terminal.IdleWatch, onExpire func()) {
+	interval := 50 * time.Millisecond
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			if idle.Expired(now) {
+				onExpire()
+				return
+			}
+		}
+	}
+}
+
+func readTerminalMessage(ctx context.Context, conn *websocket.Conn, idle *terminal.IdleWatch) ([]byte, error) {
+	_, data, err := conn.Read(ctx)
+	if err != nil {
+		if errors.Is(err, websocket.ErrMessageTooBig) {
+			return nil, terminal.ErrFrameTooLarge
+		}
+		if idle.Expired(time.Now()) {
+			return nil, terminal.ErrIdleTimeout
+		}
+		return nil, err
+	}
+	idle.Touch(time.Now())
+	return data, nil
+}
+
+func pipeConsoleOutput(
+	ctx context.Context,
+	conn *websocket.Conn,
+	stdout io.Reader,
+	idle *terminal.IdleWatch,
+	budget *terminal.BufferBudget,
+	maxChunk int,
+) error {
+	if maxChunk <= 0 {
+		maxChunk = 32 << 10
+	}
+	if maxChunk > 32<<10 {
+		maxChunk = 32 << 10
+	}
+	buf := make([]byte, maxChunk)
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		n, err := stdout.Read(buf)
 		if n > 0 {
-			payload, encodeErr := terminal.Encode(terminal.OutputFrame{Data: append([]byte(nil), buf[:n]...)})
+			chunk := append([]byte(nil), buf[:n]...)
+			if acquireErr := budget.Acquire(len(chunk)); acquireErr != nil {
+				return acquireErr
+			}
+			payload, encodeErr := terminal.Encode(terminal.OutputFrame{Data: chunk})
 			if encodeErr != nil {
+				budget.Release(len(chunk))
 				return encodeErr
 			}
 			if writeErr := conn.Write(ctx, websocket.MessageText, payload); writeErr != nil {
+				budget.Release(len(chunk))
 				return writeErr
 			}
+			budget.Release(len(chunk))
+			idle.Touch(time.Now())
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -194,11 +298,26 @@ func pipeConsoleOutput(ctx context.Context, conn *websocket.Conn, stdout io.Read
 	}
 }
 
-func pumpTerminalInput(ctx context.Context, conn *websocket.Conn, session runtimeapi.ConsoleSession) error {
+func pumpTerminalInput(
+	ctx context.Context,
+	conn *websocket.Conn,
+	session runtimeapi.ConsoleSession,
+	rate *terminal.InboundLimiter,
+	idle *terminal.IdleWatch,
+	budget *terminal.BufferBudget,
+	maxFrameBytes int,
+) error {
 	for {
-		_, data, err := conn.Read(ctx)
+		data, err := readTerminalMessage(ctx, conn, idle)
 		if err != nil {
-			_ = session.Close()
+			// Do not Close the console here: limit errors must win the bridge
+			// select before stdout EOF from a premature session.Close.
+			return err
+		}
+		if err := terminal.CheckFrameSize(len(data), maxFrameBytes); err != nil {
+			return err
+		}
+		if err := rate.Allow(time.Now(), len(data)); err != nil {
 			return err
 		}
 		frame, err := terminal.Decode(data)
@@ -210,8 +329,13 @@ func pumpTerminalInput(ctx context.Context, conn *websocket.Conn, session runtim
 			if len(f.Data) == 0 {
 				continue
 			}
-			if _, err := session.Stdin().Write(f.Data); err != nil {
+			if err := budget.Acquire(len(f.Data)); err != nil {
 				return err
+			}
+			_, writeErr := session.Stdin().Write(f.Data)
+			budget.Release(len(f.Data))
+			if writeErr != nil {
+				return writeErr
 			}
 		case terminal.ResizeFrame:
 			if err := session.Resize(f.Cols, f.Rows); err != nil {
@@ -231,6 +355,30 @@ func pumpTerminalInput(ctx context.Context, conn *websocket.Conn, session runtim
 			// Ignore protocol frames that are not input/control for this task.
 		}
 	}
+}
+
+func (h *Handler) closeTerminalLimit(_ context.Context, conn *websocket.Conn, err error) {
+	code, message := "invalid_frame", "expected open frame"
+	status, reason := websocket.StatusPolicyViolation, "open"
+	switch {
+	case errors.Is(err, terminal.ErrFrameTooLarge):
+		code, message = "frame_too_large", "frame exceeds size limit"
+		status, reason = websocket.StatusMessageTooBig, "frame"
+	case errors.Is(err, terminal.ErrRateLimited):
+		code, message = "rate_limited", "inbound rate limit exceeded"
+		status, reason = websocket.StatusPolicyViolation, "rate"
+	case errors.Is(err, terminal.ErrIdleTimeout):
+		code, message = "idle_timeout", "session idle timeout"
+		status, reason = websocket.StatusPolicyViolation, "idle"
+	case errors.Is(err, terminal.ErrBufferLimit):
+		code, message = "buffer_limit", "pending buffer limit exceeded"
+		status, reason = websocket.StatusPolicyViolation, "buffer"
+	}
+	// Detached write context so request/session cancel cannot skip the limit frame.
+	writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	h.writeTerminalError(writeCtx, conn, code, message)
+	_ = conn.Close(status, reason)
 }
 
 func terminalConsoleError(err error) (code, message string) {
