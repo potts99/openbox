@@ -25,6 +25,19 @@ func TestAuthorizedKeysIncludesSeparateGatewayCredential(t *testing.T) {
 	}
 }
 
+func TestNewRequiresNetworkPolicy(t *testing.T) {
+	runtime := fake.New(testCapabilities())
+	store, err := sqlite.Open(context.Background(), t.TempDir()+"/openbox.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	if _, err := New(runtime, store, Options{}); err == nil {
+		t.Fatal("missing network policy was accepted")
+	}
+}
+
 func TestContainerLifecycle(t *testing.T) {
 	service, runtime, store := newTestService(t, nil)
 	ctx := context.Background()
@@ -195,7 +208,7 @@ func TestDeleteVerificationFailureCanBeRetriedSafely(t *testing.T) {
 		t.Fatal(err)
 	}
 	failing := &failureRuntime{ContainerRuntime: runtime, operation: "instance.inspect", nth: 2, failure: errors.New("verification unavailable")}
-	retryService, err := New(failing, store, Options{Now: func() time.Time { return time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC) }, NewID: newIDs("delete-operation")})
+	retryService, err := New(failing, store, Options{Now: func() time.Time { return time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC) }, NewID: newIDs("delete-operation"), NetworkPolicy: testNetworkPolicy{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +219,7 @@ func TestDeleteVerificationFailureCanBeRetriedSafely(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("delete operation missing: %+v %v", firstOperation, err)
 	}
-	finalService, err := New(runtime, store, Options{Now: func() time.Time { return time.Date(2026, 7, 15, 0, 0, 1, 0, time.UTC) }, NewID: newIDs("must-not-be-used")})
+	finalService, err := New(runtime, store, Options{Now: func() time.Time { return time.Date(2026, 7, 15, 0, 0, 1, 0, time.UTC) }, NewID: newIDs("must-not-be-used"), NetworkPolicy: testNetworkPolicy{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -572,7 +585,7 @@ func newTestServiceWithIDs(t *testing.T, runtime ContainerRuntime, ids func() st
 	if err := store.CreateOwner(context.Background(), domain.Owner{ID: "owner-1", Name: "Owner", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	service, err := New(runtime, store, Options{Now: func() time.Time { return now }, NewID: ids})
+	service, err := New(runtime, store, Options{Now: func() time.Time { return now }, NewID: ids, NetworkPolicy: testNetworkPolicy{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -621,6 +634,13 @@ type recordingNetworkPolicy struct {
 	observe                func(domain.Instance)
 	observedWhenApplied    domain.ObservedState
 	runtimeGoneWhenRemoved bool
+}
+
+type testNetworkPolicy struct{}
+
+func (testNetworkPolicy) ApplyNetworkPolicy(context.Context, domain.Instance) error { return nil }
+func (testNetworkPolicy) RemoveNetworkPolicy(context.Context, domain.Instance) error {
+	return nil
 }
 
 func (p *recordingNetworkPolicy) ApplyNetworkPolicy(_ context.Context, instance domain.Instance) error {

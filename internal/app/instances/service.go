@@ -117,6 +117,9 @@ func New(runtime InstanceRuntime, repo Repository, options Options) (*Service, e
 	if runtime == nil || repo == nil {
 		return nil, errors.New("runtime and repository are required")
 	}
+	if options.NetworkPolicy == nil {
+		return nil, errors.New("network policy is required")
+	}
 	if options.Now == nil {
 		options.Now = time.Now
 	}
