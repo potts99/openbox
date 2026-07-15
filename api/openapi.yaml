@@ -1,0 +1,372 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+
+openapi: 3.0.3
+info:
+  title: OpenBox API
+  version: v1
+  description: Versioned, owner-scoped API for the OpenBox instance engine.
+servers:
+  - url: http://127.0.0.1:8443
+    description: Loopback-only default for local v0.1 deployments.
+  - url: https://127.0.0.1:8443
+    description: Optional TLS listener when an operator supplies a certificate and key.
+security: []
+paths:
+  /v1/health:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+    get:
+      operationId: getHealth
+      responses:
+        "200":
+          description: Service is healthy.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/capabilities:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+    get:
+      operationId: getCapabilities
+      responses:
+        "200":
+          description: Runtime capabilities.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Capabilities" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/images:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+    get:
+      operationId: listImages
+      responses:
+        "200":
+          description: Available images.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListImagesResponse" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/instances:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+    get:
+      operationId: listInstances
+      responses:
+        "200":
+          description: Instances owned by the configured owner.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListInstancesResponse" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createInstance
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateInstanceRequest" }
+      responses:
+        "202":
+          description: Creation was accepted as a durable operation.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreateInstanceResult" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/instances/{instance_id}:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { $ref: "#/components/parameters/InstanceID" }
+    get:
+      operationId: getInstance
+      responses:
+        "200":
+          description: Instance details.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Instance" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteInstance
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      responses:
+        "202":
+          description: Deletion was accepted as a durable operation.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Operation" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/instances/{instance_id}/actions/{action}:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { $ref: "#/components/parameters/InstanceID" }
+      - name: action
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [start, stop, restart]
+      - { $ref: "#/components/parameters/IdempotencyKey" }
+    post:
+      operationId: mutateInstance
+      responses:
+        "202":
+          description: Action was accepted as a durable operation.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Operation" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/operations:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+    get:
+      operationId: listOperations
+      responses:
+        "200":
+          description: Durable operations.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListOperationsResponse" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/operations/{operation_id}:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { $ref: "#/components/parameters/OperationID" }
+    get:
+      operationId: getOperation
+      responses:
+        "200":
+          description: Operation details.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Operation" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/operations/{operation_id}/cancel:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { $ref: "#/components/parameters/OperationID" }
+    post:
+      operationId: cancelOperation
+      responses:
+        "200":
+          description: Operation cancellation was accepted at a safe stage.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Operation" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/operations/{operation_id}/events:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { $ref: "#/components/parameters/OperationID" }
+      - name: Last-Event-ID
+        in: header
+        required: false
+        description: Last processed operation-event sequence.
+        schema: { type: integer, minimum: 0 }
+    get:
+      operationId: watchOperation
+      responses:
+        "200":
+          description: SSE replay followed by live events. Closes after a terminal event.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            text/event-stream:
+              schema: { type: string }
+        default: { $ref: "#/components/responses/Error" }
+components:
+  headers:
+    APIVersion:
+      description: API contract version used for this response.
+      schema: { type: string, enum: [v1] }
+  parameters:
+    APIVersion:
+      name: X-OpenBox-API-Version
+      in: header
+      required: false
+      description: Optional compatibility assertion. If present, it must be v1.
+      schema: { type: string, enum: [v1] }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 255 }
+    InstanceID:
+      name: instance_id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+    OperationID:
+      name: operation_id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+  responses:
+    Error:
+      description: Stable error envelope.
+      headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  schemas:
+    Health:
+      type: object
+      required: [status, api_version, server_version]
+      properties:
+        status: { type: string, enum: [ok] }
+        api_version: { type: string, enum: [v1] }
+        server_version: { type: string }
+    Capabilities:
+      type: object
+      required: [architecture, incus_version, namespaces, cgroups, storage_drivers, network_tools, kvm, containers, virtual_machines, vm_availability]
+      properties:
+        architecture: { type: string }
+        incus_version: { type: string }
+        namespaces: { type: object, additionalProperties: { type: boolean } }
+        cgroups: { type: boolean }
+        storage_drivers: { type: array, items: { type: string } }
+        network_tools: { type: object, additionalProperties: { type: boolean } }
+        kvm: { type: boolean }
+        containers: { type: boolean }
+        virtual_machines: { type: boolean }
+        vm_availability: { type: string }
+        vm_reason: { type: string }
+    Resources:
+      type: object
+      required: [vcpus, memory_bytes, disk_bytes]
+      properties:
+        vcpus: { type: integer, minimum: 0 }
+        memory_bytes: { type: integer, format: int64, minimum: 0 }
+        disk_bytes: { type: integer, format: int64, minimum: 0 }
+    Image:
+      type: object
+      required: [id, alias, source, digest, architecture, compatibility, created_at, updated_at]
+      properties:
+        id: { type: string }
+        alias: { type: string }
+        source: { type: string }
+        digest: { type: string }
+        architecture: { type: string }
+        compatibility: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Instance:
+      type: object
+      required: [id, name, kind, image_id, requested_isolation, actual_isolation, desired_state, observed_state, resources, protected, created_at, updated_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [sandbox, vps, devbox] }
+        image_id: { type: string }
+        requested_isolation: { type: string, enum: [best_available, standard, strong] }
+        actual_isolation: { type: string, enum: [unknown, container, virtual_machine] }
+        desired_state: { type: string, enum: [running, stopped, deleted] }
+        observed_state: { type: string, enum: [pending, creating, running, stopping, stopped, deleting, deleted, error] }
+        resources: { $ref: "#/components/schemas/Resources" }
+        expires_at: { type: string, format: date-time, nullable: true }
+        protected: { type: boolean }
+        error_code: { type: string }
+        error_stage: { type: string }
+        error_retryable: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Operation:
+      type: object
+      required: [id, type, target_type, target_id, status, stage, progress, attempts, created_at, updated_at]
+      properties:
+        id: { type: string }
+        type: { type: string }
+        target_type: { type: string }
+        target_id: { type: string }
+        status: { type: string, enum: [pending, running, succeeded, failed] }
+        stage: { type: string }
+        progress: { type: integer, minimum: 0, maximum: 100 }
+        error_code: { type: string }
+        error_class: { type: string }
+        attempts: { type: integer, minimum: 0 }
+        next_attempt_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    OperationEvent:
+      type: object
+      required: [sequence, operation_id, stage, status, progress, created_at]
+      properties:
+        sequence: { type: integer, minimum: 1 }
+        operation_id: { type: string }
+        stage: { type: string }
+        status: { type: string, enum: [pending, running, succeeded, failed] }
+        progress: { type: integer, minimum: 0, maximum: 100 }
+        error_class: { type: string }
+        error_code: { type: string }
+        message: { type: string }
+        metadata: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+    CreateInstanceRequest:
+      type: object
+      required: [name, image, owner_public_key]
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        kind: { type: string, enum: [sandbox, vps, devbox], default: vps }
+        image: { type: string }
+        requested_isolation: { type: string, enum: [best_available, standard, strong], default: best_available }
+        resources: { $ref: "#/components/schemas/Resources" }
+        owner_public_key: { type: string }
+    CreateInstanceResult:
+      type: object
+      required: [operation]
+      properties:
+        instance:
+          allOf: [{ $ref: "#/components/schemas/Instance" }]
+          nullable: true
+        operation: { $ref: "#/components/schemas/Operation" }
+    ListImagesResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Image" }
+    ListInstancesResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Instance" }
+    ListOperationsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Operation" }
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: object
+          required: [code, message, retryable, request_id]
+          additionalProperties: false
+          properties:
+            code: { type: string }
+            message: { type: string }
+            field: { type: string }
+            retryable: { type: boolean }
+            request_id: { type: string }

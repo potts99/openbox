@@ -27,6 +27,27 @@ func (s *Store) CreateOwner(ctx context.Context, owner domain.Owner) error {
 	return mapWriteError(err)
 }
 
+// EnsureOwner idempotently bootstraps the single configured local owner. A
+// conflicting record is never overwritten.
+func (s *Store) EnsureOwner(ctx context.Context, owner domain.Owner) error {
+	if owner.ID == "" || owner.Name == "" {
+		return &domain.Error{Code: domain.CodeInvalidArgument, Field: "owner"}
+	}
+	err := s.CreateOwner(ctx, owner)
+	var domainErr *domain.Error
+	if !errors.As(err, &domainErr) || domainErr.Code != domain.CodeConflict {
+		return err
+	}
+	var name string
+	if scanErr := s.db.QueryRowContext(ctx, `SELECT name FROM owners WHERE id=?`, owner.ID).Scan(&name); scanErr != nil {
+		return scanErr
+	}
+	if name != owner.Name {
+		return &domain.Error{Code: domain.CodeConflict, Field: "owner", Cause: errors.New("configured owner identity differs")}
+	}
+	return nil
+}
+
 // EnsureImage records the immutable fingerprint selected for a runtime alias.
 func (s *Store) EnsureImage(ctx context.Context, image domain.Image) error {
 	if image.ID == "" || image.OwnerID == "" || image.Alias == "" || image.Digest == "" {
@@ -136,6 +157,59 @@ func (s *Store) ListInstances(ctx context.Context) ([]domain.Instance, error) {
 	return result, nil
 }
 
+// ListInstancesByOwner provides the bounded owner-scoped read model used by
+// transport adapters. Reconciliation intentionally uses ListInstances instead.
+func (s *Store) ListInstancesByOwner(ctx context.Context, ownerID domain.OwnerID, limit int) ([]domain.Instance, error) {
+	if ownerID == "" || limit <= 0 || limit > 1000 {
+		return nil, &domain.Error{Code: domain.CodeInvalidArgument, Field: "limit"}
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id,owner_id,name,kind,COALESCE(image_id,''),requested_isolation,actual_isolation,
+		desired_state,observed_state,vcpus,memory_bytes,disk_bytes,expires_at,protected,runtime_ref,error_code,error_stage,
+		error_retryable,created_at,updated_at,deleted_at FROM instances WHERE owner_id=? AND deleted_at IS NULL ORDER BY id LIMIT ?`, ownerID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list owner instances: %w", err)
+	}
+	defer rows.Close()
+	result := make([]domain.Instance, 0)
+	for rows.Next() {
+		instance, scanErr := scanInstance(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		result = append(result, instance)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) ListImagesByOwner(ctx context.Context, ownerID domain.OwnerID, limit int) ([]domain.Image, error) {
+	if ownerID == "" || limit <= 0 || limit > 1000 {
+		return nil, &domain.Error{Code: domain.CodeInvalidArgument, Field: "limit"}
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id,owner_id,alias,source,digest,architecture,compatibility,created_at,updated_at FROM images WHERE owner_id=? ORDER BY id LIMIT ?`, ownerID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]domain.Image, 0)
+	for rows.Next() {
+		var image domain.Image
+		var created, updated string
+		if err := rows.Scan(&image.ID, &image.OwnerID, &image.Alias, &image.Source, &image.Digest, &image.Architecture, &image.Compatibility, &created, &updated); err != nil {
+			return nil, err
+		}
+		image.CreatedAt, err = parseTime(created)
+		if err != nil {
+			return nil, err
+		}
+		image.UpdatedAt, err = parseTime(updated)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, image)
+	}
+	return result, rows.Err()
+}
+
 func (s *Store) GetOperationByIdempotency(ctx context.Context, ownerID domain.OwnerID, key string) (domain.Operation, bool, error) {
 	op, err := scanOperation(s.db.QueryRowContext(ctx, operationColumns+` WHERE owner_id=? AND idempotency_key=?`, ownerID, key))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -145,6 +219,34 @@ func (s *Store) GetOperationByIdempotency(ctx context.Context, ownerID domain.Ow
 		return domain.Operation{}, false, fmt.Errorf("find idempotent operation: %w", err)
 	}
 	return op, true, nil
+}
+
+func (s *Store) GetOperation(ctx context.Context, ownerID domain.OwnerID, id domain.OperationID) (domain.Operation, error) {
+	op, err := scanOperation(s.db.QueryRowContext(ctx, operationColumns+` WHERE owner_id=? AND id=?`, ownerID, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Operation{}, &domain.Error{Code: domain.CodeNotFound, Field: "operation"}
+	}
+	return op, err
+}
+
+func (s *Store) ListOperations(ctx context.Context, ownerID domain.OwnerID, limit int) ([]domain.Operation, error) {
+	if ownerID == "" || limit <= 0 || limit > 1000 {
+		return nil, &domain.Error{Code: domain.CodeInvalidArgument, Field: "limit"}
+	}
+	rows, err := s.db.QueryContext(ctx, operationColumns+` WHERE owner_id=? ORDER BY created_at DESC,id DESC LIMIT ?`, ownerID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]domain.Operation, 0)
+	for rows.Next() {
+		op, scanErr := scanOperation(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		result = append(result, op)
+	}
+	return result, rows.Err()
 }
 
 func (s *Store) CompleteOperation(ctx context.Context, ownerID domain.OwnerID, id domain.OperationID, completedAt time.Time) error {

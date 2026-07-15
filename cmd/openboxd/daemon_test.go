@@ -5,13 +5,16 @@ package main
 import (
 	"context"
 	"errors"
+	"net/url"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/openbox-dev/openbox/internal/app/instances"
 	"github.com/openbox-dev/openbox/internal/app/recovery"
+	openboxclient "github.com/openbox-dev/openbox/internal/client"
 	"github.com/openbox-dev/openbox/internal/domain"
+	"github.com/openbox-dev/openbox/internal/httpapi"
 	"github.com/openbox-dev/openbox/internal/operations"
 	"github.com/openbox-dev/openbox/internal/persistence/sqlite"
 	"github.com/openbox-dev/openbox/internal/reconcile"
@@ -38,6 +41,45 @@ func TestDaemonRunsStartupRecoveryReconciliationAndCloses(t *testing.T) {
 	if closer.calls.Load() != 1 {
 		t.Fatalf("close calls=%d", closer.calls.Load())
 	}
+}
+
+func TestDaemonAndClientDefaultsAddressSamePrivateAPI(t *testing.T) {
+	base, err := url.Parse(openboxclient.DefaultBaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base.Scheme != "http" || base.Host != httpapi.DefaultAddress {
+		t.Fatalf("client default %q does not match daemon %q", openboxclient.DefaultBaseURL, httpapi.DefaultAddress)
+	}
+}
+
+func TestDaemonRejectsPublicPreAuthenticationAPIAndPartialTLS(t *testing.T) {
+	public := testDaemonConfig()
+	public.APIAddress = "0.0.0.0:8443"
+	if err := public.validate(); err == nil {
+		t.Fatal("public API address accepted before authentication")
+	}
+	partialTLS := testDaemonConfig()
+	partialTLS.APITLSCertificate = "/cert.pem"
+	if err := partialTLS.validate(); err == nil {
+		t.Fatal("partial TLS configuration accepted")
+	}
+}
+
+func TestDaemonRunsAndGracefullyStopsAPI(t *testing.T) {
+	api := &countingAPI{started: make(chan struct{}), stopped: make(chan struct{})}
+	factory := factoryFunc(func(context.Context, daemonConfig) (daemonComponents, error) {
+		return daemonComponents{operations: &countingOperations{called: make(chan struct{}, 4)}, reconciler: &countingReconciler{called: make(chan struct{}, 4)}, closer: &countingCloser{}, api: api}, nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runDaemon(ctx, testDaemonConfig(), factory) }()
+	waitCall(t, api.started)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	waitCall(t, api.stopped)
 }
 
 func TestDaemonRestartRecoversWithoutDuplicateCreateOrStatusLoss(t *testing.T) {
@@ -126,6 +168,27 @@ type countingCloser struct{ calls atomic.Int32 }
 
 func (c *countingCloser) Close() error { c.calls.Add(1); return nil }
 
+type countingAPI struct {
+	started chan struct{}
+	stopped chan struct{}
+	stop    chan struct{}
+}
+
+func (a *countingAPI) Run() error {
+	if a.stop == nil {
+		a.stop = make(chan struct{})
+	}
+	close(a.started)
+	<-a.stop
+	return nil
+}
+
+func (a *countingAPI) Shutdown(context.Context) error {
+	close(a.stop)
+	close(a.stopped)
+	return nil
+}
+
 type recoveryFactory struct {
 	runtime     *fake.Runtime
 	startupDone chan error
@@ -178,7 +241,7 @@ func (noopReconciler) RunOnce(context.Context) (reconcile.Report, error) {
 }
 
 func testDaemonConfig() daemonConfig {
-	return daemonConfig{DatabasePath: "/tmp/openbox-test.db", IncusSocket: "/tmp/incus.sock", WorkerConcurrency: 1, OperationInterval: time.Hour, ReconcileInterval: time.Hour, Lease: time.Minute}
+	return daemonConfig{DatabasePath: "/tmp/openbox-test.db", IncusSocket: "/tmp/incus.sock", APIAddress: "127.0.0.1:8443", OwnerID: "owner-local", OwnerName: "Local owner", WorkerConcurrency: 1, OperationInterval: time.Hour, ReconcileInterval: time.Hour, Lease: time.Minute}
 }
 
 func waitCall(t *testing.T, called <-chan struct{}) {

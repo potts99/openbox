@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/openbox-dev/openbox/internal/httpapi"
 	"github.com/openbox-dev/openbox/internal/version"
 )
 
@@ -27,6 +28,11 @@ func main() {
 	flag.StringVar(&config.ContainerProfile, "container-profile", "openbox-container", "Incus container profile")
 	flag.StringVar(&config.VMProfile, "vm-profile", "openbox-vm", "Incus VM profile")
 	flag.StringVar(&config.StoragePool, "storage-pool", "", "Incus storage pool used for explicit disk limits")
+	flag.StringVar(&config.APIAddress, "api-address", httpapi.DefaultAddress, "private OpenBox API listen address")
+	flag.StringVar(&config.APITLSCertificate, "api-tls-cert", "", "optional API TLS certificate")
+	flag.StringVar(&config.APITLSKey, "api-tls-key", "", "optional API TLS private key")
+	flag.StringVar(&config.OwnerID, "owner-id", "owner-local", "stable local owner identifier")
+	flag.StringVar(&config.OwnerName, "owner-name", "Local owner", "local owner display name")
 	flag.IntVar(&config.WorkerConcurrency, "worker-concurrency", 2, "maximum concurrent durable operations")
 	flag.DurationVar(&config.OperationInterval, "operation-interval", time.Second, "durable operation polling interval")
 	flag.DurationVar(&config.ReconcileInterval, "reconcile-interval", 30*time.Second, "desired-state reconciliation interval")

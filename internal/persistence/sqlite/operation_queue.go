@@ -5,6 +5,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -186,7 +187,17 @@ func (s *Store) finishAttempt(ctx context.Context, ownerID domain.OwnerID, id do
 }
 
 func (s *Store) ListOperationEvents(ctx context.Context, ownerID domain.OwnerID, id domain.OperationID) ([]domain.OperationEvent, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,owner_id,operation_id,sequence,stage,status,error_class,error_code,message,metadata_json,created_at FROM operation_events WHERE owner_id=? AND operation_id=? ORDER BY sequence`, ownerID, id)
+	return s.ListOperationEventsAfter(ctx, ownerID, id, 0, 1000)
+}
+
+func (s *Store) ListOperationEventsAfter(ctx context.Context, ownerID domain.OwnerID, id domain.OperationID, after, limit int) ([]domain.OperationEvent, error) {
+	if ownerID == "" || id == "" || after < 0 || limit <= 0 || limit > 1000 {
+		return nil, &domain.Error{Code: domain.CodeInvalidArgument, Field: "operation_events"}
+	}
+	if _, err := s.GetOperation(ctx, ownerID, id); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id,owner_id,operation_id,sequence,stage,status,progress,error_class,error_code,message,metadata_json,created_at FROM operation_events WHERE owner_id=? AND operation_id=? AND sequence>? ORDER BY sequence LIMIT ?`, ownerID, id, after, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +206,7 @@ func (s *Store) ListOperationEvents(ctx context.Context, ownerID domain.OwnerID,
 	for rows.Next() {
 		var event domain.OperationEvent
 		var created string
-		if err := rows.Scan(&event.ID, &event.OwnerID, &event.OperationID, &event.Sequence, &event.Stage, &event.Status, &event.ErrorClass, &event.ErrorCode, &event.Message, &event.MetadataJSON, &created); err != nil {
+		if err := rows.Scan(&event.ID, &event.OwnerID, &event.OperationID, &event.Sequence, &event.Stage, &event.Status, &event.Progress, &event.ErrorClass, &event.ErrorCode, &event.Message, &event.MetadataJSON, &created); err != nil {
 			return nil, err
 		}
 		event.CreatedAt, err = parseTime(created)
@@ -207,10 +218,96 @@ func (s *Store) ListOperationEvents(ctx context.Context, ownerID domain.OwnerID,
 	return result, rows.Err()
 }
 
+// CancelPendingOperation is intentionally narrow: only an unclaimed operation
+// at the initial runtime stage is cancellable. The status transition and target
+// rollback happen in one transaction, so claim and cancellation races have one
+// winner and can never cancel an external action already in flight.
+func (s *Store) CancelPendingOperation(ctx context.Context, ownerID domain.OwnerID, id domain.OperationID, now time.Time) (domain.Operation, error) {
+	release, err := s.acquireWrite(ctx)
+	if err != nil {
+		return domain.Operation{}, err
+	}
+	defer release()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Operation{}, err
+	}
+	defer tx.Rollback()
+	op, err := scanOperation(tx.QueryRowContext(ctx, operationColumns+` WHERE owner_id=? AND id=?`, ownerID, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Operation{}, &domain.Error{Code: domain.CodeNotFound, Field: "operation"}
+	}
+	if err != nil {
+		return domain.Operation{}, err
+	}
+	if op.Status == domain.OperationFailed && op.Stage == "canceled" && op.ErrorCode == domain.CodeOperationCanceled {
+		return op, nil
+	}
+	if op.Status != domain.OperationPending || op.Stage != "runtime" || op.ClaimedBy != "" || op.ClaimToken != "" {
+		return domain.Operation{}, &domain.Error{Code: domain.CodeCancellationUnsafe, Field: "operation.stage"}
+	}
+	var newer int
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
+		SELECT 1 FROM operations newer
+		WHERE newer.owner_id=? AND newer.target_type=? AND newer.target_id=?
+		AND newer.rowid > (SELECT current.rowid FROM operations current WHERE current.owner_id=? AND current.id=?))`,
+		ownerID, op.TargetType, op.TargetID, ownerID, id).Scan(&newer); err != nil {
+		return domain.Operation{}, err
+	}
+	if newer != 0 {
+		return domain.Operation{}, &domain.Error{Code: domain.CodeCancellationUnsafe, Field: "operation.order"}
+	}
+	if op.Type == "instance.create" {
+		result, deleteErr := tx.ExecContext(ctx, `DELETE FROM instances WHERE owner_id=? AND id=? AND observed_state=?`, ownerID, op.TargetID, domain.ObservedPending)
+		if deleteErr != nil {
+			return domain.Operation{}, mapWriteError(deleteErr)
+		}
+		if count, _ := result.RowsAffected(); count != 1 {
+			return domain.Operation{}, &domain.Error{Code: domain.CodeCancellationUnsafe, Field: "operation.target"}
+		}
+	} else {
+		var payload struct {
+			PreviousDesired  domain.DesiredState  `json:"previous_desired_state"`
+			PreviousObserved domain.ObservedState `json:"previous_observed_state"`
+			IntendedDesired  domain.DesiredState  `json:"intended_desired_state"`
+			IntendedObserved domain.ObservedState `json:"intended_observed_state"`
+		}
+		if err := json.Unmarshal(op.PayloadJSON, &payload); err != nil || payload.PreviousDesired == "" || payload.PreviousObserved == "" || payload.IntendedDesired == "" || payload.IntendedObserved == "" {
+			return domain.Operation{}, &domain.Error{Code: domain.CodeCancellationUnsafe, Field: "operation.payload", Cause: err}
+		}
+		result, updateErr := tx.ExecContext(ctx, `UPDATE instances SET desired_state=?,observed_state=?,updated_at=? WHERE owner_id=? AND id=? AND desired_state=? AND observed_state=?`, payload.PreviousDesired, payload.PreviousObserved, formatTime(now), ownerID, op.TargetID, payload.IntendedDesired, payload.IntendedObserved)
+		if updateErr != nil {
+			return domain.Operation{}, mapWriteError(updateErr)
+		}
+		if count, _ := result.RowsAffected(); count != 1 {
+			return domain.Operation{}, &domain.Error{Code: domain.CodeCancellationUnsafe, Field: "operation.target"}
+		}
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE operations SET status=?,stage='canceled',error_code=?,error_class='correctable',next_attempt_at=NULL,claimed_by='',claim_token='',claim_expires_at=NULL,updated_at=? WHERE owner_id=? AND id=? AND status=? AND stage='runtime' AND claimed_by='' AND claim_token=''`, domain.OperationFailed, domain.CodeOperationCanceled, formatTime(now), ownerID, id, domain.OperationPending)
+	if err != nil {
+		return domain.Operation{}, mapWriteError(err)
+	}
+	if count, _ := result.RowsAffected(); count != 1 {
+		return domain.Operation{}, &domain.Error{Code: domain.CodeCancellationUnsafe, Field: "operation.stage"}
+	}
+	if err := appendOperationEventTx(ctx, tx, ownerID, id, "canceled", domain.OperationFailed, "correctable", domain.CodeOperationCanceled, "operation canceled before runtime mutation", nil, now); err != nil {
+		return domain.Operation{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Operation{}, err
+	}
+	op.Status = domain.OperationFailed
+	op.Stage = "canceled"
+	op.ErrorCode = domain.CodeOperationCanceled
+	op.ErrorClass = "correctable"
+	op.UpdatedAt = now.UTC()
+	return op, nil
+}
+
 func appendOperationEventTx(ctx context.Context, tx *sql.Tx, ownerID domain.OwnerID, id domain.OperationID, stage string, status domain.OperationStatus, class string, code domain.ErrorCode, message string, metadata []byte, now time.Time) error {
 	if len(metadata) == 0 {
 		metadata = []byte("{}")
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO operation_events(owner_id,operation_id,sequence,stage,status,error_class,error_code,message,metadata_json,created_at) SELECT ?,?,COALESCE(MAX(sequence),0)+1,?,?,?,?,?,?,? FROM operation_events WHERE operation_id=?`, ownerID, id, stage, status, class, code, message, metadata, formatTime(now), id)
+	_, err := tx.ExecContext(ctx, `INSERT INTO operation_events(owner_id,operation_id,sequence,stage,status,progress,error_class,error_code,message,metadata_json,created_at) SELECT ?,?,COALESCE(MAX(sequence),0)+1,?,?,COALESCE((SELECT progress FROM operations WHERE id=?),0),?,?,?,?,? FROM operation_events WHERE operation_id=?`, ownerID, id, stage, status, id, class, code, message, metadata, formatTime(now), id)
 	return mapWriteError(err)
 }

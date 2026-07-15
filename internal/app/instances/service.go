@@ -16,6 +16,7 @@ import (
 
 	"github.com/openbox-dev/openbox/internal/domain"
 	"github.com/openbox-dev/openbox/internal/images"
+	"github.com/openbox-dev/openbox/internal/operations"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 )
 
@@ -51,6 +52,12 @@ type Repository interface {
 	FinalizeInstanceDeletion(context.Context, domain.OwnerID, domain.InstanceID, domain.OperationID, time.Time) error
 	CompleteOperation(context.Context, domain.OwnerID, domain.OperationID, time.Time) error
 	UpdateOperationStage(context.Context, domain.OwnerID, domain.OperationID, string, int, time.Time) error
+	ListInstancesByOwner(context.Context, domain.OwnerID, int) ([]domain.Instance, error)
+	ListImagesByOwner(context.Context, domain.OwnerID, int) ([]domain.Image, error)
+	GetOperation(context.Context, domain.OwnerID, domain.OperationID) (domain.Operation, error)
+	ListOperations(context.Context, domain.OwnerID, int) ([]domain.Operation, error)
+	ListOperationEventsAfter(context.Context, domain.OwnerID, domain.OperationID, int, int) ([]domain.OperationEvent, error)
+	CancelPendingOperation(context.Context, domain.OwnerID, domain.OperationID, time.Time) (domain.Operation, error)
 }
 
 type CapabilityError struct {
@@ -78,6 +85,7 @@ func (e *IdentityConflictError) Error() string {
 type Options struct {
 	Now   func() time.Time
 	NewID func() string
+	Mode  *operations.Mode
 }
 
 type Service struct {
@@ -85,6 +93,7 @@ type Service struct {
 	repo         Repository
 	now          func() time.Time
 	newID        func() string
+	mode         *operations.Mode
 	mutationGate chan struct{}
 }
 
@@ -98,7 +107,10 @@ func New(runtime InstanceRuntime, repo Repository, options Options) (*Service, e
 	if options.NewID == nil {
 		options.NewID = randomID
 	}
-	service := &Service{runtime: runtime, repo: repo, now: options.Now, newID: options.NewID, mutationGate: make(chan struct{}, 1)}
+	if options.Mode == nil {
+		options.Mode = &operations.Mode{}
+	}
+	service := &Service{runtime: runtime, repo: repo, now: options.Now, newID: options.NewID, mode: options.Mode, mutationGate: make(chan struct{}, 1)}
 	service.mutationGate <- struct{}{}
 	return service, nil
 }
@@ -116,6 +128,226 @@ type CreateInput struct {
 
 type createRecoveryPayload struct {
 	OwnerPublicKey string `json:"owner_public_key"`
+}
+
+type MutationAction string
+
+const (
+	MutationStart   MutationAction = "start"
+	MutationStop    MutationAction = "stop"
+	MutationRestart MutationAction = "restart"
+	MutationDelete  MutationAction = "delete"
+)
+
+type mutationRecoveryPayload struct {
+	PreviousDesired  domain.DesiredState  `json:"previous_desired_state"`
+	PreviousObserved domain.ObservedState `json:"previous_observed_state"`
+	IntendedDesired  domain.DesiredState  `json:"intended_desired_state"`
+	IntendedObserved domain.ObservedState `json:"intended_observed_state"`
+}
+
+// SubmitCreate validates and durably records a create without performing a
+// runtime mutation. Durable workers execute the returned operation separately.
+func (s *Service) SubmitCreate(ctx context.Context, input CreateInput) (domain.Instance, domain.Operation, error) {
+	if input.OwnerID == "" || input.Image == "" || input.OwnerPublicKey == "" || input.IdempotencyKey == "" {
+		return domain.Instance{}, domain.Operation{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "create"}
+	}
+	release, err := s.acquireMutation(ctx)
+	if err != nil {
+		return domain.Instance{}, domain.Operation{}, err
+	}
+	defer release()
+	if input.Kind == "" {
+		input.Kind = domain.KindVPS
+	}
+	if input.RequestedIsolation == "" {
+		input.RequestedIsolation = domain.IsolationBestAvailable
+	}
+	requestHash, err := hashCreateInput(input)
+	if err != nil {
+		return domain.Instance{}, domain.Operation{}, err
+	}
+	previous, found, err := s.repo.GetOperationByIdempotency(ctx, input.OwnerID, input.IdempotencyKey)
+	if err != nil {
+		return domain.Instance{}, domain.Operation{}, err
+	}
+	if found {
+		if previous.Type != "instance.create" || previous.RequestHash != requestHash {
+			return domain.Instance{}, domain.Operation{}, &domain.Error{Code: domain.CodeIdempotencyConflict, Field: "idempotency_key"}
+		}
+		instance, getErr := s.repo.GetInstance(ctx, input.OwnerID, domain.InstanceID(previous.TargetID))
+		if getErr != nil && previous.ErrorCode == domain.CodeOperationCanceled {
+			return domain.Instance{}, previous, nil
+		}
+		return instance, previous, getErr
+	}
+	if s.mode.Degraded() {
+		return domain.Instance{}, domain.Operation{}, &domain.Error{Code: domain.CodeUnavailable, Field: "runtime"}
+	}
+	capabilities, err := s.runtime.DiscoverCapabilities(ctx)
+	if err != nil {
+		return domain.Instance{}, domain.Operation{}, fmt.Errorf("discover runtime capabilities: %w", err)
+	}
+	actualIsolation, err := selectIsolation(input.RequestedIsolation, capabilities)
+	if err != nil {
+		return domain.Instance{}, domain.Operation{}, err
+	}
+	available, err := s.runtime.ListImages(ctx)
+	if err != nil {
+		return domain.Instance{}, domain.Operation{}, fmt.Errorf("list runtime images: %w", err)
+	}
+	imageType := "container"
+	if actualIsolation == domain.IsolationVM {
+		imageType = "virtual-machine"
+	}
+	image, err := images.ResolveForType(input.Image, imageType, available)
+	if err != nil {
+		if _, anyTypeErr := images.Resolve(input.Image, available); anyTypeErr == nil {
+			return domain.Instance{}, domain.Operation{}, &CapabilityError{Capability: imageType + "_image", Reason: "the selected image is incompatible with " + imageType + " isolation"}
+		}
+		return domain.Instance{}, domain.Operation{}, err
+	}
+	if capabilities.Architecture != "" && image.Architecture != "" && capabilities.Architecture != image.Architecture {
+		return domain.Instance{}, domain.Operation{}, &CapabilityError{Capability: "image_architecture", Reason: image.Architecture + " image on " + capabilities.Architecture + " host"}
+	}
+	if !image.CloudInit {
+		return domain.Instance{}, domain.Operation{}, &CapabilityError{Capability: "image_cloud_init", Reason: "the selected image does not advertise variant=cloud or the OpenBox cloud-init override"}
+	}
+	now := s.now().UTC()
+	instanceID := domain.InstanceID(s.newID())
+	imageRecord := domain.Image{ID: domain.ImageID(image.Fingerprint), OwnerID: input.OwnerID, Alias: image.Fingerprint, Source: "incus:" + input.Image, Digest: image.Fingerprint, Architecture: image.Architecture, Compatibility: imageType, CreatedAt: now, UpdatedAt: now}
+	if err := s.repo.EnsureImage(ctx, imageRecord); err != nil {
+		return domain.Instance{}, domain.Operation{}, err
+	}
+	instance, err := domain.NewInstance(instanceID, input.OwnerID, input.Name, input.Kind, now)
+	if err != nil {
+		return domain.Instance{}, domain.Operation{}, err
+	}
+	instance.ImageID = imageRecord.ID
+	instance.RequestedIsolation = input.RequestedIsolation
+	instance.ActualIsolation = actualIsolation
+	instance.Resources = input.Resources
+	instance.RuntimeRef = runtimeReference(instanceID)
+	if err := domain.ValidateInstance(instance); err != nil {
+		return domain.Instance{}, domain.Operation{}, err
+	}
+	operation := s.operation("instance.create", instance, input.IdempotencyKey, requestHash)
+	operation.PayloadJSON, err = json.Marshal(createRecoveryPayload{OwnerPublicKey: input.OwnerPublicKey})
+	if err != nil {
+		return domain.Instance{}, domain.Operation{}, fmt.Errorf("encode create recovery payload: %w", err)
+	}
+	original, replay, err := s.repo.CreateInstance(ctx, instance, operation)
+	if err != nil {
+		return domain.Instance{}, domain.Operation{}, err
+	}
+	if replay {
+		instance, err = s.repo.GetInstance(ctx, input.OwnerID, domain.InstanceID(original.TargetID))
+		return instance, original, err
+	}
+	return instance, operation, nil
+}
+
+// SubmitAction records desired state and a pending operation atomically. It
+// deliberately performs no runtime inspection or mutation.
+func (s *Service) SubmitAction(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID, action MutationAction, key string) (domain.Operation, error) {
+	if key == "" {
+		return domain.Operation{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "idempotency_key"}
+	}
+	release, err := s.acquireMutation(ctx)
+	if err != nil {
+		return domain.Operation{}, err
+	}
+	defer release()
+	kind := "instance." + string(action)
+	switch action {
+	case MutationStart, MutationRestart, MutationStop, MutationDelete:
+	default:
+		return domain.Operation{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "action"}
+	}
+	hash := string(action) + ":" + string(id)
+	existing, found, err := s.repo.GetOperationByIdempotency(ctx, ownerID, key)
+	if err != nil {
+		return domain.Operation{}, err
+	}
+	if found {
+		if existing.Type != kind || existing.TargetID != string(id) || existing.RequestHash != hash {
+			return domain.Operation{}, &domain.Error{Code: domain.CodeIdempotencyConflict, Field: "idempotency_key"}
+		}
+		return existing, nil
+	}
+	if s.mode.Degraded() {
+		return domain.Operation{}, &domain.Error{Code: domain.CodeUnavailable, Field: "runtime"}
+	}
+	instance, err := s.repo.GetInstance(ctx, ownerID, id)
+	if err != nil {
+		return domain.Operation{}, err
+	}
+	desired := instance.DesiredState
+	observed := instance.ObservedState
+	switch action {
+	case MutationStart, MutationRestart:
+		desired = domain.DesiredRunning
+	case MutationStop:
+		desired = domain.DesiredStopped
+	case MutationDelete:
+		desired = domain.DesiredDeleted
+		observed = domain.ObservedDeleting
+	}
+	operation := s.operation(kind, instance, key, hash)
+	operation.PayloadJSON, err = json.Marshal(mutationRecoveryPayload{
+		PreviousDesired: instance.DesiredState, PreviousObserved: instance.ObservedState,
+		IntendedDesired: desired, IntendedObserved: observed,
+	})
+	if err != nil {
+		return domain.Operation{}, err
+	}
+	if err := s.repo.UpdateInstanceState(ctx, ownerID, id, desired, observed, s.now(), operation); err != nil {
+		return domain.Operation{}, err
+	}
+	return operation, nil
+}
+
+// SubmitMutation is retained as a descriptive alias for callers outside the
+// HTTP transport.
+func (s *Service) SubmitMutation(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID, action MutationAction, key string) (domain.Operation, error) {
+	return s.SubmitAction(ctx, ownerID, id, action, key)
+}
+
+func (s *Service) CancelOperation(ctx context.Context, ownerID domain.OwnerID, id domain.OperationID) (domain.Operation, error) {
+	return s.repo.CancelPendingOperation(ctx, ownerID, id, s.now().UTC())
+}
+
+func (s *Service) Capabilities(ctx context.Context) (runtimeapi.Capabilities, error) {
+	return s.runtime.DiscoverCapabilities(ctx)
+}
+
+func (s *Service) Health(ctx context.Context) error {
+	_, err := s.runtime.DiscoverCapabilities(ctx)
+	return err
+}
+
+func (s *Service) ListImages(ctx context.Context, ownerID domain.OwnerID) ([]domain.Image, error) {
+	return s.repo.ListImagesByOwner(ctx, ownerID, 100)
+}
+
+func (s *Service) ListInstances(ctx context.Context, ownerID domain.OwnerID) ([]domain.Instance, error) {
+	return s.repo.ListInstancesByOwner(ctx, ownerID, 100)
+}
+
+func (s *Service) GetInstance(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID) (domain.Instance, error) {
+	return s.repo.GetInstance(ctx, ownerID, id)
+}
+
+func (s *Service) GetOperation(ctx context.Context, ownerID domain.OwnerID, id domain.OperationID) (domain.Operation, error) {
+	return s.repo.GetOperation(ctx, ownerID, id)
+}
+
+func (s *Service) ListOperations(ctx context.Context, ownerID domain.OwnerID) ([]domain.Operation, error) {
+	return s.repo.ListOperations(ctx, ownerID, 100)
+}
+
+func (s *Service) ListOperationEventsAfter(ctx context.Context, ownerID domain.OwnerID, id domain.OperationID, after, limit int) ([]domain.OperationEvent, error) {
+	return s.repo.ListOperationEventsAfter(ctx, ownerID, id, after, limit)
 }
 
 func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instance, error) {

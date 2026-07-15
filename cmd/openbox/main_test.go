@@ -4,53 +4,178 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
-	"time"
-
-	"github.com/openbox-dev/openbox/internal/doctor"
-	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 )
 
-type commandDiscoverer struct{}
-
-func (commandDiscoverer) DiscoverCapabilities(context.Context) (runtimeapi.Capabilities, error) {
-	return runtimeapi.Capabilities{
-		Architecture: "x86_64", IncusVersion: "test", Containers: true,
-		Namespaces: map[string]bool{"mnt": true, "net": true, "pid": true, "user": true},
-		Cgroups:    true, StorageDrivers: []string{"dir"},
-		NetworkTools: map[string]bool{"dnsmasq": true, "ip": true, "nft": true},
-	}, nil
-}
-
-func TestDoctorJSON(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	factory := func(socket string, timeout time.Duration) (doctor.Discoverer, error) {
-		if socket != "/test/incus.socket" || timeout != 2*time.Second {
-			t.Fatalf("factory arguments = %q, %s", socket, timeout)
+func TestDoctorHumanAndJSON(t *testing.T) {
+	server := apiServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/health":
+			w.Header().Set("X-OpenBox-API-Version", "v1")
+			_, _ = fmt.Fprint(w, `{"status":"ok","server_version":"v0.1.0","api_version":"v1"}`)
+		case "/v1/capabilities":
+			_, _ = fmt.Fprint(w, `{"architecture":"x86_64","containers":true,"virtual_machines":false,"vm_availability":"kvm_absent","vm_reason":"KVM unavailable"}`)
+		default:
+			http.NotFound(w, r)
 		}
-		return commandDiscoverer{}, nil
+	})
+	defer server.Close()
+
+	stdout, stderr, code := runCLI(t, server.URL, "doctor")
+	if code != 0 || !strings.Contains(stdout, "OpenBox v0.1.0") || !strings.Contains(stdout, "KVM unavailable") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	code := run([]string{"doctor", "--json", "--socket", "/test/incus.socket", "--timeout", "2s"}, &stdout, &stderr, factory)
-	if code != 0 {
-		t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
-	}
-	var report doctor.Report
-	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
-		t.Fatalf("decode output: %v\n%s", err, stdout.String())
-	}
-	if len(report.Checks) == 0 || report.Capabilities.IncusVersion != "test" {
-		t.Fatalf("report = %#v", report)
+	stdout, stderr, code = runCLI(t, server.URL, "doctor", "--json")
+	if code != 0 || !json.Valid([]byte(stdout)) || stderr != "" {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 }
 
-func TestDoctorHumanOutput(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"doctor"}, &stdout, &stderr, func(string, time.Duration) (doctor.Discoverer, error) {
-		return commandDiscoverer{}, nil
+func TestListHumanAndJSON(t *testing.T) {
+	server := commandServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/instances" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"items":[{"id":"box-1","name":"my-box","kind":"devbox","requested_isolation":"best_available","desired_state":"running","observed_state":"running","actual_isolation":"container"}]}`)
 	})
-	if code != 0 || !bytes.Contains(stdout.Bytes(), []byte("strong-isolation")) {
-		t.Fatalf("exit = %d, stdout = %s, stderr = %s", code, stdout.String(), stderr.String())
+	defer server.Close()
+
+	stdout, stderr, code := runCLI(t, server.URL, "ls")
+	if code != 0 || !strings.Contains(stdout, "my-box") || !strings.Contains(stdout, "RUNNING") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
+	stdout, _, code = runCLI(t, server.URL, "ls", "--json")
+	if code != 0 || !strings.Contains(stdout, `"instances"`) || !json.Valid([]byte(stdout)) {
+		t.Fatalf("exit=%d stdout=%q", code, stdout)
+	}
+}
+
+func TestInspectHuman(t *testing.T) {
+	server := commandServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `{"id":"box-1","name":"my-box","kind":"vps","image_id":"ubuntu","requested_isolation":"strong","desired_state":"stopped","observed_state":"stopped","actual_isolation":"virtual_machine","resources":{"vcpus":2,"memory_bytes":8589934592,"disk_bytes":10737418240}}`)
+	})
+	defer server.Close()
+
+	stdout, stderr, code := runCLI(t, server.URL, "inspect", "box-1")
+	if code != 0 || !strings.Contains(stdout, "Isolation: virtual_machine") || !strings.Contains(stdout, "Memory: 8.0 GiB") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
+func TestNewSendsRequestAndIdempotencyKey(t *testing.T) {
+	server := commandServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/instances" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Idempotency-Key"); got == "" {
+			t.Fatal("missing idempotency key")
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["name"] != "my-box" || body["kind"] != "devbox" || body["image"] != "ubuntu" || body["owner_public_key"] != "ssh-ed25519 test" {
+			t.Fatalf("body = %#v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"operation":{"id":"op-1","status":"pending","stage":"queued"},"instance":{"id":"box-1","name":"my-box","kind":"devbox","requested_isolation":"best_available","desired_state":"running","observed_state":"pending","actual_isolation":"unknown"}}`)
+	})
+	defer server.Close()
+
+	stdout, stderr, code := runCLI(t, server.URL, "new", "my-box", "--kind", "devbox", "--image", "ubuntu", "--ssh-key", "ssh-ed25519 test")
+	if code != 0 || !strings.Contains(stdout, "op-1") || !strings.Contains(stdout, "box-1") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
+func TestLifecycleCommands(t *testing.T) {
+	for _, command := range []string{"start", "stop", "restart", "rm"} {
+		t.Run(command, func(t *testing.T) {
+			server := commandServer(t, func(w http.ResponseWriter, r *http.Request) {
+				wantMethod, wantPath := http.MethodPost, "/v1/instances/box-1/actions/"+command
+				if command == "rm" {
+					wantMethod, wantPath = http.MethodDelete, "/v1/instances/box-1"
+				}
+				if r.Method != wantMethod || r.URL.Path != wantPath || r.Header.Get("Idempotency-Key") == "" {
+					t.Fatalf("request = %s %s key=%q", r.Method, r.URL.Path, r.Header.Get("Idempotency-Key"))
+				}
+				_, _ = fmt.Fprint(w, `{"id":"op-1","status":"pending"}`)
+			})
+			defer server.Close()
+
+			stdout, stderr, code := runCLI(t, server.URL, command, "box-1", "--json")
+			if code != 0 || !json.Valid([]byte(stdout)) || !strings.Contains(stdout, "op-1") {
+				t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+		})
+	}
+}
+
+func TestOperationWatchHumanAndJSON(t *testing.T) {
+	server := commandServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/operations/op-1/events" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "id: 1\nevent: operation\ndata: {\"sequence\":1,\"operation_id\":\"op-1\",\"status\":\"running\",\"stage\":\"booting\",\"progress\":50}\n\nid: 2\nevent: operation\ndata: {\"sequence\":2,\"operation_id\":\"op-1\",\"status\":\"succeeded\",\"stage\":\"complete\",\"progress\":100}\n\n")
+	})
+	defer server.Close()
+
+	stdout, stderr, code := runCLI(t, server.URL, "operation", "watch", "op-1")
+	if code != 0 || !strings.Contains(stdout, "booting") || !strings.Contains(stdout, "SUCCEEDED") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	stdout, _, code = runCLI(t, server.URL, "operation", "watch", "op-1", "--json")
+	if code != 0 || strings.Count(strings.TrimSpace(stdout), "\n") != 1 {
+		t.Fatalf("exit=%d stdout=%q", code, stdout)
+	}
+}
+
+func TestAPIErrorIsActionable(t *testing.T) {
+	server := commandServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = fmt.Fprint(w, `{"error":{"code":"not_found","message":"instance not found","request_id":"req-1"}}`)
+	})
+	defer server.Close()
+
+	_, stderr, code := runCLI(t, server.URL, "inspect", "missing")
+	if code != 1 || !strings.Contains(stderr, "instance not found") || !strings.Contains(stderr, "req-1") {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+}
+
+func commandServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
+	t.Helper()
+	return apiServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/health" {
+			w.Header().Set("X-OpenBox-API-Version", "v1")
+			_, _ = fmt.Fprint(w, `{"status":"ok","server_version":"test","api_version":"v1"}`)
+			return
+		}
+		handler(w, r)
+	})
+}
+
+func apiServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-OpenBox-API-Version") != "v1" {
+			t.Fatalf("API version = %q", r.Header.Get("X-OpenBox-API-Version"))
+		}
+		handler(w, r)
+	}))
+}
+
+func runCLI(t *testing.T, serverURL string, args ...string) (string, string, int) {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	args = append(args, "--server", serverURL)
+	code := run(args, &stdout, &stderr)
+	return stdout.String(), stderr.String(), code
 }

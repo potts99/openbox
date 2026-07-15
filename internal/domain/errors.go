@@ -17,6 +17,9 @@ const (
 	CodeIdempotencyConflict   ErrorCode = "idempotency_conflict"
 	CodePersistenceCorruption ErrorCode = "persistence_corruption"
 	CodeRuntimeMissing        ErrorCode = "runtime_missing"
+	CodeOperationCanceled     ErrorCode = "operation_canceled"
+	CodeCancellationUnsafe    ErrorCode = "cancellation_unsafe"
+	CodeUnavailable           ErrorCode = "unavailable"
 )
 
 // Error carries a code and field without coupling the domain to UI wording.

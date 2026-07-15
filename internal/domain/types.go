@@ -225,6 +225,7 @@ type OperationEvent struct {
 	Sequence     int
 	Stage        string
 	Status       OperationStatus
+	Progress     int
 	ErrorClass   string
 	ErrorCode    ErrorCode
 	Message      string
