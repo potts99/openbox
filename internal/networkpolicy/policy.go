@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
+	"strings"
 
 	"github.com/openbox-dev/openbox/internal/domain"
 )
@@ -75,4 +76,46 @@ func ParseAllowedDestinations(raw []byte) ([]string, error) {
 		return nil, fmt.Errorf("allowed destination %q must be an IP address or CIDR", entry)
 	}
 	return destinations, nil
+}
+
+// ParseAllowlistHostnames parses exact administrator allowlist hostnames.
+// IP addresses and CIDRs remain the responsibility of ParseAllowedDestinations.
+func ParseAllowlistHostnames(raw []byte) ([]string, error) {
+	var entries []string
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, fmt.Errorf("parse allowlist hostnames: %w", err)
+	}
+	if entries == nil {
+		return nil, fmt.Errorf("allowlist hostnames must be a JSON array")
+	}
+
+	hostnames := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		hostname := strings.ToLower(strings.TrimSuffix(entry, "."))
+		if !isExactHostname(hostname) {
+			return nil, fmt.Errorf("allowlist hostname %q must be an exact hostname", entry)
+		}
+		hostnames = append(hostnames, hostname)
+	}
+	return hostnames, nil
+}
+
+func isExactHostname(hostname string) bool {
+	if hostname == "" {
+		return false
+	}
+	if _, err := netip.ParseAddr(hostname); err == nil {
+		return false
+	}
+	for _, label := range strings.Split(hostname, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, char := range label {
+			if char != '-' && (char < 'a' || char > 'z') && (char < '0' || char > '9') {
+				return false
+			}
+		}
+	}
+	return true
 }
