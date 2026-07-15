@@ -88,24 +88,52 @@ export function InstanceMetrics({
         </div>
       </dl>
       <div className="metrics-charts" aria-label="Usage history, last 60 minutes">
-        <Sparkline title="CPU" values={cpuSeries} unit="%" />
-        <Sparkline title="Memory" values={memSeries} unit="%" />
-        <Sparkline title="Disk" values={diskSeries} unit="%" />
-        <Sparkline title="Net" values={netSeries} unit="B/s" />
+        <Sparkline title="CPU" values={cpuSeries} unit="%" value={formatCPU(latest?.cpuPercent)} />
+        <Sparkline
+          title="Memory"
+          values={memSeries}
+          unit="%"
+          value={formatSparkPercent(latest?.memoryBytes, limits.memoryBytes)}
+        />
+        <Sparkline
+          title="Disk"
+          values={diskSeries}
+          unit="%"
+          value={formatSparkPercent(latest?.diskBytes, limits.diskBytes)}
+        />
+        <Sparkline
+          title="Net"
+          values={netSeries}
+          unit="B/s"
+          value={formatNetCompact(latest?.netRxBps, latest?.netTxBps)}
+        />
       </div>
       <p className="metrics-caption">Last 60 minutes</p>
     </section>
   );
 }
 
-function Sparkline({ title, values, unit }: { title: string; values: Array<number | null>; unit: string }) {
+function Sparkline({
+  title,
+  values,
+  unit,
+  value,
+}: {
+  title: string;
+  values: Array<number | null>;
+  unit: string;
+  value: string;
+}) {
   const width = 160;
   const height = 36;
   const path = sparkPath(values, width, height);
   return (
     <figure className="metrics-spark">
-      <figcaption>{title}</figcaption>
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${title} sparkline (${unit})`}>
+      <figcaption>
+        <span>{title}</span>
+        <span className="metrics-spark-value">{value}</span>
+      </figcaption>
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${title} ${value} (${unit})`}>
         <path d={path} fill="none" stroke="currentColor" strokeWidth="1.5" />
       </svg>
     </figure>
@@ -147,6 +175,18 @@ function formatUsedLimit(used: number | undefined, limit: number): string {
 function formatNet(rx?: number, tx?: number): string {
   if (rx === undefined && tx === undefined) return "—";
   return `↓ ${formatRate(rx ?? 0)} ↑ ${formatRate(tx ?? 0)}`;
+}
+
+function formatSparkPercent(used: number | undefined, limit: number): string {
+  if (used === undefined || !limit) return "—";
+  const pct = percentOf(used, limit);
+  if (pct === null) return "—";
+  return formatCPU(pct);
+}
+
+function formatNetCompact(rx?: number, tx?: number): string {
+  if (rx === undefined && tx === undefined) return "—";
+  return formatRate((rx ?? 0) + (tx ?? 0));
 }
 
 function formatBytes(bytes: number): string {

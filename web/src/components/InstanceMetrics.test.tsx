@@ -54,10 +54,13 @@ describe("InstanceMetrics", () => {
 
     expect(await screen.findByRole("heading", { name: "Monitoring" })).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByText("12.5%")).toBeInTheDocument();
+      expect(screen.getAllByText("12.5%").length).toBeGreaterThanOrEqual(1);
       expect(screen.getByText("1 GiB / 4 GiB")).toBeInTheDocument();
       expect(screen.getByText("5 GiB / 20 GiB")).toBeInTheDocument();
     });
+    // Sparkline captions carry a compact current value next to the series name.
+    expect(screen.getByLabelText("Memory 25% (%)")).toBeInTheDocument();
+    expect(screen.getByLabelText("Disk 25% (%)")).toBeInTheDocument();
     expect(screen.getByText("live")).toBeInTheDocument();
   });
 });
