@@ -97,7 +97,6 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 	limits := h.terminalLimits
 	rate := terminal.NewInboundLimiter(limits.MaxInboundFramesPerWindow, limits.MaxInboundBytesPerWindow, limits.RateWindow)
 	idle := terminal.NewIdleWatch(limits.IdleTimeout)
-	budget := terminal.NewBufferBudget(limits.MaxTotalBufferBytes)
 	idle.Touch(time.Now())
 
 	start, err := h.readTerminalStart(ctx, conn, rate, idle, limits.MaxFrameBytes)
@@ -120,18 +119,15 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 		SessionID:   sessionID,
 		SessionName: sessionName,
 	}
-	h.recordTerminalAudit(ctx, TerminalAuditEvent{
-		OwnerID: base.OwnerID, InstanceID: base.InstanceID,
-		SessionID: base.SessionID, SessionName: base.SessionName,
-		Phase: TerminalAuditPhaseStart,
-	})
+	startEvt := base
+	startEvt.Phase = TerminalAuditPhaseStart
+	h.recordTerminalAudit(ctx, startEvt)
 	endReason := TerminalAuditReasonCanceled
 	defer func() {
-		h.recordTerminalAudit(context.Background(), TerminalAuditEvent{
-			OwnerID: base.OwnerID, InstanceID: base.InstanceID,
-			SessionID: base.SessionID, SessionName: base.SessionName,
-			Phase: TerminalAuditPhaseEnd, Reason: endReason,
-		})
+		endEvt := base
+		endEvt.Phase = TerminalAuditPhaseEnd
+		endEvt.Reason = endReason
+		h.recordTerminalAudit(context.Background(), endEvt)
 	}()
 
 	// Named detach / reconnect leaves the console open in persistentConsoles.
@@ -187,16 +183,15 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 
 	errCh := make(chan error, 2)
 	go func() {
-		errCh <- pipeConsoleOutput(sessionCtx, conn, stdout, idle, budget, limits.MaxTotalBufferBytes)
+		errCh <- pipeConsoleOutput(sessionCtx, conn, stdout, idle)
 	}()
 	go func() {
-		errCh <- pumpTerminalInput(sessionCtx, conn, session, sessionName, rate, idle, budget, limits.MaxFrameBytes)
+		errCh <- pumpTerminalInput(sessionCtx, conn, session, sessionName, rate, idle, limits.MaxFrameBytes)
 	}()
 
 	select {
 	case <-idleCh:
-		endReason = TerminalAuditReasonIdleTimeout
-		h.closeTerminalLimit(ctx, conn, terminal.ErrIdleTimeout)
+		endReason = h.closeTerminalLimit(ctx, conn, terminal.ErrIdleTimeout)
 		cancel()
 		return
 	case <-sessionCtx.Done():
@@ -217,8 +212,7 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 			return
 		}
 		if err != nil && isTerminalLimitError(err) {
-			endReason = terminalAuditReasonForLimit(err)
-			h.closeTerminalLimit(ctx, conn, err)
+			endReason = h.closeTerminalLimit(ctx, conn, err)
 			return
 		}
 		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
@@ -244,21 +238,6 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 	_ = conn.Write(writeCtx, websocket.MessageText, payload)
 }
 
-func terminalAuditReasonForLimit(err error) string {
-	switch {
-	case errors.Is(err, terminal.ErrFrameTooLarge):
-		return TerminalAuditReasonFrameTooLarge
-	case errors.Is(err, terminal.ErrRateLimited):
-		return TerminalAuditReasonRateLimited
-	case errors.Is(err, terminal.ErrIdleTimeout):
-		return TerminalAuditReasonIdleTimeout
-	case errors.Is(err, terminal.ErrBufferLimit):
-		return TerminalAuditReasonBufferLimit
-	default:
-		return TerminalAuditReasonError
-	}
-}
-
 // errTerminalDetached is returned by the input pump when the client detaches a
 // named session (or the WebSocket ends without terminate). The bridge must close
 // the WebSocket without terminating the console.
@@ -267,7 +246,6 @@ var errTerminalDetached = errors.New("terminal detached")
 var (
 	errTerminalSessionNotFound = errors.New("terminal session not found")
 	errTerminalSessionBusy     = errors.New("terminal session busy")
-	errTerminalInvalidSession  = errors.New("invalid terminal session_name")
 )
 
 func (h *Handler) resolveTerminalConsole(
@@ -281,13 +259,7 @@ func (h *Handler) resolveTerminalConsole(
 	case terminal.OpenFrame:
 		cols, rows = f.Cols, f.Rows
 		sessionName = strings.TrimSpace(f.SessionName)
-		if sid := strings.TrimSpace(f.SessionID); sid != "" {
-			return h.reattachPersistentConsole(target, sid, cols, rows, true)
-		}
 		if sessionName != "" {
-			if !terminal.ValidSessionName(sessionName) {
-				return nil, "", "", 0, 0, nil, errTerminalInvalidSession
-			}
 			if existing := h.persistentConsoles.getByName(string(target.OwnerID), string(target.InstanceID), sessionName); existing != nil {
 				return h.claimPersistentConsole(existing, cols, rows, true)
 			}
@@ -381,7 +353,7 @@ func (h *Handler) openPersistentConsole(
 
 func terminalResolveError(err error) (code, message string) {
 	switch {
-	case errors.Is(err, errTerminalInvalidSession), errors.Is(err, terminal.ErrInvalidFrame):
+	case errors.Is(err, terminal.ErrInvalidFrame):
 		return "invalid_argument", "invalid session_name"
 	case errors.Is(err, errTerminalSessionNotFound):
 		return "not_found", "terminal session not found"
@@ -469,36 +441,21 @@ func pipeConsoleOutput(
 	conn *websocket.Conn,
 	stdout io.Reader,
 	idle *terminal.IdleWatch,
-	budget *terminal.BufferBudget,
-	maxChunk int,
 ) error {
-	if maxChunk <= 0 {
-		maxChunk = 32 << 10
-	}
-	if maxChunk > 32<<10 {
-		maxChunk = 32 << 10
-	}
-	buf := make([]byte, maxChunk)
+	buf := make([]byte, 32<<10)
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		n, err := stdout.Read(buf)
 		if n > 0 {
-			chunk := append([]byte(nil), buf[:n]...)
-			if acquireErr := budget.Acquire(len(chunk)); acquireErr != nil {
-				return acquireErr
-			}
-			payload, encodeErr := terminal.Encode(terminal.OutputFrame{Data: chunk})
+			payload, encodeErr := terminal.Encode(terminal.OutputFrame{Data: append([]byte(nil), buf[:n]...)})
 			if encodeErr != nil {
-				budget.Release(len(chunk))
 				return encodeErr
 			}
 			if writeErr := conn.Write(ctx, websocket.MessageText, payload); writeErr != nil {
-				budget.Release(len(chunk))
 				return writeErr
 			}
-			budget.Release(len(chunk))
 			idle.Touch(time.Now())
 		}
 		if err != nil {
@@ -517,7 +474,6 @@ func pumpTerminalInput(
 	sessionName string,
 	rate *terminal.InboundLimiter,
 	idle *terminal.IdleWatch,
-	budget *terminal.BufferBudget,
 	maxFrameBytes int,
 ) error {
 	for {
@@ -547,12 +503,7 @@ func pumpTerminalInput(
 			if len(f.Data) == 0 {
 				continue
 			}
-			if err := budget.Acquire(len(f.Data)); err != nil {
-				return err
-			}
-			_, writeErr := session.Stdin().Write(f.Data)
-			budget.Release(len(f.Data))
-			if writeErr != nil {
+			if _, writeErr := session.Stdin().Write(f.Data); writeErr != nil {
 				return writeErr
 			}
 		case terminal.ResizeFrame:
@@ -583,32 +534,35 @@ func pumpTerminalInput(
 func isTerminalLimitError(err error) bool {
 	return errors.Is(err, terminal.ErrFrameTooLarge) ||
 		errors.Is(err, terminal.ErrRateLimited) ||
-		errors.Is(err, terminal.ErrIdleTimeout) ||
-		errors.Is(err, terminal.ErrBufferLimit)
+		errors.Is(err, terminal.ErrIdleTimeout)
 }
 
-func (h *Handler) closeTerminalLimit(_ context.Context, conn *websocket.Conn, err error) {
+// closeTerminalLimit writes a typed error frame, closes the socket, and returns
+// the matching audit end reason.
+func (h *Handler) closeTerminalLimit(_ context.Context, conn *websocket.Conn, err error) string {
 	code, message := "invalid_frame", "expected open frame"
 	status, reason := websocket.StatusPolicyViolation, "open"
+	auditReason := TerminalAuditReasonError
 	switch {
 	case errors.Is(err, terminal.ErrFrameTooLarge):
 		code, message = "frame_too_large", "frame exceeds size limit"
 		status, reason = websocket.StatusMessageTooBig, "frame"
+		auditReason = TerminalAuditReasonFrameTooLarge
 	case errors.Is(err, terminal.ErrRateLimited):
 		code, message = "rate_limited", "inbound rate limit exceeded"
 		status, reason = websocket.StatusPolicyViolation, "rate"
+		auditReason = TerminalAuditReasonRateLimited
 	case errors.Is(err, terminal.ErrIdleTimeout):
 		code, message = "idle_timeout", "session idle timeout"
 		status, reason = websocket.StatusPolicyViolation, "idle"
-	case errors.Is(err, terminal.ErrBufferLimit):
-		code, message = "buffer_limit", "pending buffer limit exceeded"
-		status, reason = websocket.StatusPolicyViolation, "buffer"
+		auditReason = TerminalAuditReasonIdleTimeout
 	}
 	// Detached write context so request/session cancel cannot skip the limit frame.
 	writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	h.writeTerminalError(writeCtx, conn, code, message)
 	_ = conn.Close(status, reason)
+	return auditReason
 }
 
 func terminalConsoleError(err error) (code, message string) {

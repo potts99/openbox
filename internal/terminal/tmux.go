@@ -36,14 +36,11 @@ func ValidSessionName(name string) bool {
 // When sessionName is empty (after trim), the result is DefaultShell and does
 // not mention tmux — ordinary unnamed shells stay independent of tmux.
 //
-// When sessionName is set, the result is the attach-or-create helper:
+// When sessionName is set, the result is:
 //
 //	tmux new-session -A -s <sessionName>
 //
 // The -A flag attaches to an existing session of that name, or creates it.
-// Detaching the browser (or closing the PTY) leaves the named tmux session
-// running inside the guest; a later open/reconnect with the same name reattaches.
-//
 // Invalid non-empty names return an error; callers should surface a protocol
 // error rather than falling back to a host shell.
 func CommandForSession(sessionName string) ([]string, error) {
@@ -54,20 +51,5 @@ func CommandForSession(sessionName string) ([]string, error) {
 	if !ValidSessionName(name) {
 		return nil, fmt.Errorf("%w: invalid session_name", ErrInvalidFrame)
 	}
-	return AttachOrCreateCommand(name), nil
-}
-
-// AttachOrCreateCommand returns the canonical tmux helper argv for a validated
-// session name. Prefer CommandForSession, which validates and handles the
-// unnamed-shell path.
-//
-// Contract (stable for tests and guest images):
-//
-//	argv[0] = "tmux"
-//	argv[1] = "new-session"
-//	argv[2] = "-A"           // attach if exists, else create
-//	argv[3] = "-s"
-//	argv[4] = <sessionName>  // validated persistent name
-func AttachOrCreateCommand(sessionName string) []string {
-	return []string{"tmux", "new-session", "-A", "-s", sessionName}
+	return []string{"tmux", "new-session", "-A", "-s", name}, nil
 }

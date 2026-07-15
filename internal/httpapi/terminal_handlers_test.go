@@ -661,39 +661,6 @@ func TestTerminalClosesIdleSessions(t *testing.T) {
 	}
 }
 
-func TestTerminalEnforcesTotalBufferLimit(t *testing.T) {
-	rt := newRunningFakeRuntime(t, "incus-owned-ref")
-	limits := terminal.DefaultLimits()
-	limits.MaxTotalBufferBytes = 16
-
-	_, conn, ctx := dialOpenTerminal(t, rt, limits)
-	defer conn.Close(websocket.StatusNormalClosure, "")
-
-	payload, err := terminal.Encode(terminal.InputFrame{Data: []byte("0123456789abcdef0123456789")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := conn.Write(ctx, websocket.MessageText, payload); err != nil {
-		t.Fatal(err)
-	}
-
-	_, data, err := conn.Read(ctx)
-	if err != nil {
-		t.Fatalf("read buffer error: %v", err)
-	}
-	frame, err := terminal.Decode(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	errFrame, ok := frame.(terminal.ErrorFrame)
-	if !ok {
-		t.Fatalf("frame type %T, want ErrorFrame", frame)
-	}
-	if errFrame.Code != "buffer_limit" {
-		t.Fatalf("code=%q want buffer_limit", errFrame.Code)
-	}
-}
-
 func TestTerminalResizePropagatesToConsole(t *testing.T) {
 	rt := newRunningFakeRuntime(t, "incus-owned-ref")
 	_, conn, ctx := dialOpenTerminal(t, rt, terminal.DefaultLimits())

@@ -3,7 +3,7 @@
 The browser terminal slice keeps these boundaries separate:
 
 - `internal/terminal` owns the WebSocket JSON frame protocol, inbound limits,
-  idle/buffer helpers, and the named `tmux` argv contract.
+  idle helpers, and the named `tmux` argv contract.
 - `internal/httpapi` owns authorization, origin/CSRF upgrade policy, the PTY
   bridge, the persistent-console reconnect registry, and terminal audit emission.
 - `internal/runtime` (and adapters) open guest consoles; handlers never pass a
@@ -38,7 +38,7 @@ the console opens.
 
 Frames: `open`, `reconnect`, `input`, `output`, `resize`, `signal`, `detach`,
 `exit`, `error`. Defaults live in `terminal.DefaultLimits()` (frame size, inbound
-rate, concurrent sessions per owner/instance, idle timeout, buffer budget).
+rate, concurrent sessions per owner/instance, idle timeout).
 
 ## Named tmux sessions
 

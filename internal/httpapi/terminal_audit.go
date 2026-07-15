@@ -23,7 +23,6 @@ const (
 	TerminalAuditReasonIdleTimeout   = "idle_timeout"
 	TerminalAuditReasonFrameTooLarge = "frame_too_large"
 	TerminalAuditReasonRateLimited   = "rate_limited"
-	TerminalAuditReasonBufferLimit   = "buffer_limit"
 	TerminalAuditReasonError         = "error"
 	TerminalAuditReasonCanceled      = "canceled"
 )

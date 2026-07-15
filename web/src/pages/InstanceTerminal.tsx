@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type { ConnectionState } from "../terminal/session";
 import { TerminalSession } from "../terminal/session";
-import { encodePasteText } from "../terminal/copyPaste";
 import type { TerminalSurfaceHandle, TerminalSurfaceProps } from "../terminal/TerminalSurface";
 import { XtermTerminalSurface } from "../terminal/TerminalSurface";
 
@@ -14,7 +13,7 @@ export interface InstanceTerminalProps {
   csrfToken: string;
   onBack(): void;
   WebSocketImpl?: typeof WebSocket;
-  /** Override the PTY surface (tests inject TestTerminalSurface). */
+  /** Override the PTY surface (tests inject a lightweight stub). */
   Surface?: (props: TerminalSurfaceProps) => ReactElement;
 }
 
@@ -34,6 +33,8 @@ function statusLabel(state: ConnectionState): string {
     }
   }
 }
+
+const textEncoder = new TextEncoder();
 
 export function InstanceTerminal({
   instanceId,
@@ -81,7 +82,7 @@ export function InstanceTerminal({
   }, [attachSession]);
 
   const onData = useCallback((data: string) => {
-    sessionRef.current?.sendInput(encodePasteText(data));
+    sessionRef.current?.sendInput(textEncoder.encode(data));
   }, []);
 
   const onResize = useCallback((cols: number, rows: number) => {

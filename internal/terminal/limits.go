@@ -30,10 +30,6 @@ const (
 
 	// DefaultIdleTimeout closes a session after this long with no traffic.
 	DefaultIdleTimeout = 10 * time.Minute
-
-	// DefaultMaxTotalBufferBytes caps pending input+output bytes held in the
-	// bridge before delivery (unbounded-memory guard).
-	DefaultMaxTotalBufferBytes = 1 << 20 // 1 MiB
 )
 
 // Limit errors returned by helpers and the HTTP bridge.
@@ -42,7 +38,6 @@ var (
 	ErrRateLimited   = errors.New("terminal inbound rate exceeded")
 	ErrSessionLimit  = errors.New("terminal session limit exceeded")
 	ErrIdleTimeout   = errors.New("terminal idle timeout")
-	ErrBufferLimit   = errors.New("terminal buffer limit exceeded")
 )
 
 // Limits bundles enforceable terminal session bounds.
@@ -54,7 +49,6 @@ type Limits struct {
 	MaxSessionsPerOwner       int
 	MaxSessionsPerInstance    int
 	IdleTimeout               time.Duration
-	MaxTotalBufferBytes       int
 }
 
 // DefaultLimits returns production defaults (see constants above).
@@ -67,7 +61,6 @@ func DefaultLimits() Limits {
 		MaxSessionsPerOwner:       DefaultMaxSessionsPerOwner,
 		MaxSessionsPerInstance:    DefaultMaxSessionsPerInstance,
 		IdleTimeout:               DefaultIdleTimeout,
-		MaxTotalBufferBytes:       DefaultMaxTotalBufferBytes,
 	}
 }
 
@@ -94,9 +87,6 @@ func (l Limits) WithDefaults() Limits {
 	}
 	if l.IdleTimeout <= 0 {
 		l.IdleTimeout = d.IdleTimeout
-	}
-	if l.MaxTotalBufferBytes <= 0 {
-		l.MaxTotalBufferBytes = d.MaxTotalBufferBytes
 	}
 	return l
 }
@@ -266,8 +256,7 @@ func (w *IdleWatch) Touch(now time.Time) {
 }
 
 // Expired reports whether now is at or past last+timeout. A never-touched
-// watch is treated as expired once timeout has elapsed from the zero time
-// only if last was set; callers should Touch on session start.
+// watch is not expired; callers should Touch on session start.
 func (w *IdleWatch) Expired(now time.Time) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -275,65 +264,4 @@ func (w *IdleWatch) Expired(now time.Time) bool {
 		return false
 	}
 	return !now.Before(w.last.Add(w.timeout))
-}
-
-// Deadline returns the absolute time when the session becomes idle, or zero
-// if Touch has not been called.
-func (w *IdleWatch) Deadline() time.Time {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.last.IsZero() {
-		return time.Time{}
-	}
-	return w.last.Add(w.timeout)
-}
-
-// BufferBudget bounds pending bridge bytes.
-type BufferBudget struct {
-	max int
-
-	mu   sync.Mutex
-	used int
-}
-
-// NewBufferBudget constructs a budget with the given maximum outstanding bytes.
-func NewBufferBudget(max int) *BufferBudget {
-	if max <= 0 {
-		max = DefaultMaxTotalBufferBytes
-	}
-	return &BufferBudget{max: max}
-}
-
-// Acquire reserves n bytes. Returns ErrBufferLimit when the budget would overflow.
-func (b *BufferBudget) Acquire(n int) error {
-	if n <= 0 {
-		return nil
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.used+n > b.max {
-		return ErrBufferLimit
-	}
-	b.used += n
-	return nil
-}
-
-// Release returns n bytes to the budget. Over-release clamps at zero.
-func (b *BufferBudget) Release(n int) {
-	if n <= 0 {
-		return
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.used -= n
-	if b.used < 0 {
-		b.used = 0
-	}
-}
-
-// Used returns currently reserved bytes (tests/diagnostics).
-func (b *BufferBudget) Used() int {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.used
 }

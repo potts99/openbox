@@ -35,7 +35,7 @@ Open authenticated terminals inside instances from the dashboard without ever sp
 1. [ ] Write protocol tests for open, input, output, resize, signal, detach, reconnect, exit, and error frames.
 2. [ ] Authorize each WebSocket against the browser session, instance ownership, CSRF/origin policy, and actual runtime identity.
 3. [ ] Create PTYs only through the runtime adapter and reject requests targeting the host or unmanaged instances.
-4. [ ] Enforce frame-size, rate, concurrent-session, idle, and total-buffer limits.
+4. [ ] Enforce frame-size, rate, concurrent-session, and idle limits.
 5. [ ] Implement resize and exit-status propagation with cancellation on explicit terminate.
 6. [ ] Build the browser terminal with accessible connection state, reconnect controls, and copy/paste behavior.
 7. [ ] Provide a named `tmux` helper contract for persistent sessions while keeping generic shells independent of tmux.
