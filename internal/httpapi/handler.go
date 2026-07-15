@@ -74,6 +74,9 @@ type Options struct {
 	// TerminalLimits bounds frame size, inbound rate, concurrent sessions,
 	// idle time, and pending buffers. Zero fields use terminal.DefaultLimits.
 	TerminalLimits terminal.Limits
+	// TerminalAudit records session start/end metadata only (never PTY payloads).
+	// When nil, terminal sessions still run without audit emission.
+	TerminalAudit TerminalAuditor
 }
 
 type Handler struct {
@@ -88,6 +91,7 @@ type Handler struct {
 	terminalLimits     terminal.Limits
 	terminalSessions   *terminal.SessionRegistry
 	persistentConsoles *persistentConsoleStore
+	terminalAudit      TerminalAuditor
 }
 
 func New(service Service, options Options) (*Handler, error) {
@@ -117,6 +121,7 @@ func New(service Service, options Options) (*Handler, error) {
 		terminalLimits:     limits,
 		terminalSessions:   terminal.NewSessionRegistry(limits.MaxSessionsPerOwner, limits.MaxSessionsPerInstance),
 		persistentConsoles: newPersistentConsoleStore(),
+		terminalAudit:      options.TerminalAudit,
 	}, nil
 }
 

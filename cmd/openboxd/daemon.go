@@ -153,7 +153,11 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
-	handler, err := httpapi.New(service, httpapi.Options{Auth: authManager, Console: runtime})
+	handler, err := httpapi.New(service, httpapi.Options{
+		Auth:          authManager,
+		Console:       runtime,
+		TerminalAudit: durableTerminalAuditor{store: store, fallbackOwner: domain.OwnerID(config.OwnerID)},
+	})
 	if err != nil {
 		return fail(err)
 	}
@@ -306,6 +310,51 @@ func (a durableSSHAuditor) Record(ctx context.Context, event sshgateway.AuditEve
 		return err
 	}
 	return a.store.CreateAuditEvent(ctx, domain.AuditEvent{ID: domain.AuditEventID("audit-" + hex.EncodeToString(raw)), OwnerID: owner, Actor: actor, Action: "ssh.session", TargetType: targetType, TargetID: targetID, Outcome: event.Outcome, MetadataJSON: metadata, CreatedAt: event.At.UTC()})
+}
+
+type durableTerminalAuditor struct {
+	store         sshAuditWriter
+	fallbackOwner domain.OwnerID
+}
+
+func (a durableTerminalAuditor) Record(ctx context.Context, event httpapi.TerminalAuditEvent) error {
+	owner := event.OwnerID
+	if owner == "" {
+		owner = a.fallbackOwner
+	}
+	metadata, err := json.Marshal(struct {
+		Phase       string `json:"phase"`
+		SessionID   string `json:"session_id,omitempty"`
+		SessionName string `json:"session_name,omitempty"`
+		Reason      string `json:"reason,omitempty"`
+	}{
+		Phase:       event.Phase,
+		SessionID:   event.SessionID,
+		SessionName: event.SessionName,
+		Reason:      event.Reason,
+	})
+	if err != nil {
+		return err
+	}
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
+		return err
+	}
+	outcome := event.Phase
+	if event.Phase == httpapi.TerminalAuditPhaseEnd && event.Reason != "" {
+		outcome = event.Reason
+	}
+	return a.store.CreateAuditEvent(ctx, domain.AuditEvent{
+		ID:           domain.AuditEventID("audit-" + hex.EncodeToString(raw)),
+		OwnerID:      owner,
+		Actor:        "browser",
+		Action:       "terminal.session",
+		TargetType:   "instance",
+		TargetID:     string(event.InstanceID),
+		Outcome:      outcome,
+		MetadataJSON: metadata,
+		CreatedAt:    event.At.UTC(),
+	})
 }
 
 func periodic(ctx context.Context, wg *sync.WaitGroup, interval time.Duration, immediate bool, name string, run func(context.Context) error) {
