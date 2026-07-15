@@ -16,7 +16,7 @@ export interface TerminalSessionOptions {
   rows: number;
   /** Named tmux session inside the guest; omitted for ephemeral shells. */
   sessionName?: string;
-  /** Absolute guest working directory for Launch Pi. */
+  /** Absolute guest working directory for a named terminal session. */
   workingDirectory?: string;
   WebSocketImpl?: typeof WebSocket;
   location?: Pick<Location, "protocol" | "host">;

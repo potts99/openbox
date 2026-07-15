@@ -1,7 +1,7 @@
-# Images, snapshots, and Devbox cloning
+# Images, snapshots, and VPS cloning
 
 OpenBox pins images by digest, snapshots instances through durable operations,
-protects designated Devbox bases, and clones with verified runtime identity.
+protects designated VPS bases, and clones with verified runtime identity.
 
 ## Images
 
@@ -9,8 +9,9 @@ Aliases resolve to immutable fingerprints at create time. Updating an alias
 affects **future** creates only; existing instances keep their pinned
 `image_id` (fingerprint).
 
-Curated manifests live in `internal/images` for general, sandbox, and Devbox
-aliases across `x86_64` / `aarch64` and container / VM compatibility.
+Curated manifests live in `internal/images` for general and sandbox aliases
+(plus a legacy Devbox alias retained only as a pin carrier for the software
+catalog). Install agent tooling via the **software catalog** on VPS instances.
 
 ## Snapshots
 
@@ -25,8 +26,9 @@ copy and refuse to complete if runtime identity does not match the new instance.
 
 ## Protection
 
-Only Devboxes can be protected. While `protected` is true, delete submissions
+VPS instances can be protected. While `protected` is true, delete submissions
 fail with `protected_base`. Clear protection explicitly before deletion.
+Sandboxes cannot be protected.
 
 ```go
 service.SetProtection(ctx, owner, id, true)  // mark base
@@ -47,7 +49,7 @@ deleting the source instance or snapshot never invalidates a completed clone.
 | Condition | Warning |
 |---|---|
 | Storage drivers lack CoW (`dir`, etc.) | Full copy; OpenBox will not claim copy-on-write |
-| Source Devbox is not protected | Guest files may include secrets |
+| Source has Pi installed and is not protected | Guest files may include secrets |
 
 CoW is only claimed when capabilities advertise a driver such as `zfs`,
 `btrfs`, `lvm`, or `ceph`.

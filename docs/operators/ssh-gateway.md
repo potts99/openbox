@@ -37,7 +37,7 @@ Use the management endpoint without opening a host shell:
 
 ```sh
 ssh -p 2222 openbox@server.example ls
-ssh -p 2222 openbox@server.example new dev --kind devbox
+ssh -p 2222 openbox@server.example new dev --kind vps
 ssh -p 2222 openbox@server.example inspect dev
 ssh -p 2222 openbox@server.example start dev
 ```
