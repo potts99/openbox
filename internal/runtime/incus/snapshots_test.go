@@ -25,7 +25,11 @@ func TestSnapshotCreateDeleteAndCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	api.mu.Lock()
-	api.instances["base"] = instanceRecord{Name: "base", Type: "container", Status: "Running", Config: map[string]string{}, ExpandedConfig: map[string]string{}}
+	api.instances["base"] = instanceRecord{
+		Name: "base", Type: "container", Status: "Running",
+		Config:         map[string]string{"user.openbox.instance_id": "source"},
+		ExpandedConfig: map[string]string{"user.openbox.instance_id": "source"},
+	}
 	api.mu.Unlock()
 
 	if err := adapter.CreateSnapshot(context.Background(), "base", "ready"); err != nil {
@@ -34,8 +38,11 @@ func TestSnapshotCreateDeleteAndCopy(t *testing.T) {
 	if err := adapter.CreateSnapshot(context.Background(), "base", "ready"); !errors.Is(err, runtimeapi.ErrAlreadyExists) {
 		t.Fatalf("duplicate create err=%v", err)
 	}
-	copied, err := adapter.CopyInstance(context.Background(), runtimeapi.CopyRequest{SourceRef: "base", Snapshot: "ready", TargetRef: "feature"})
-	if err != nil || copied.Ref != "feature" {
+	copied, err := adapter.CopyInstance(context.Background(), runtimeapi.CopyRequest{
+		SourceRef: "base", Snapshot: "ready", TargetRef: "feature",
+		Metadata: map[string]string{"user.openbox.instance_id": "clone", "user.openbox.managed": "true", "user.openbox.resource": "instance", "user.openbox.owner_id": "owner"},
+	})
+	if err != nil || copied.Ref != "feature" || copied.Metadata["user.openbox.instance_id"] != "clone" {
 		t.Fatalf("copy=%+v err=%v", copied, err)
 	}
 	if err := adapter.DeleteSnapshot(context.Background(), "base", "ready"); err != nil {
@@ -121,7 +128,27 @@ func (a *snapshotAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		record := a.instances[source]
 		record.Name = body.Name
+		record.Config = cloneStringMap(record.Config)
+		record.ExpandedConfig = cloneStringMap(record.ExpandedConfig)
 		a.instances[body.Name] = record
+		writeSync(w, nil)
+	case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/1.0/instances/"):
+		ref := strings.TrimPrefix(r.URL.Path, "/1.0/instances/")
+		record, ok := a.instances[ref]
+		if !ok {
+			writeError(w, http.StatusNotFound, "Instance not found")
+			return
+		}
+		var body struct {
+			Config map[string]string `json:"config"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		record.Config = cloneStringMap(body.Config)
+		record.ExpandedConfig = cloneStringMap(body.Config)
+		a.instances[ref] = record
 		writeSync(w, nil)
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/1.0/instances/"):
 		ref := strings.TrimPrefix(r.URL.Path, "/1.0/instances/")

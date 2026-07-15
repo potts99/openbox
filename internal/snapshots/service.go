@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openbox-dev/openbox/internal/app/instances"
 	"github.com/openbox-dev/openbox/internal/domain"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 )
@@ -36,6 +37,7 @@ type SnapshotRuntime interface {
 type Repository interface {
 	GetInstance(context.Context, domain.OwnerID, domain.InstanceID) (domain.Instance, error)
 	CreateInstance(context.Context, domain.Instance, domain.Operation) (domain.Operation, bool, error)
+	UpdateInstanceObservation(context.Context, domain.OwnerID, domain.InstanceID, string, domain.IsolationType, domain.ObservedState, domain.ErrorCode, time.Time) error
 	CreateSnapshotRecord(context.Context, domain.Snapshot, domain.Operation) (domain.Operation, bool, error)
 	GetSnapshot(context.Context, domain.OwnerID, domain.SnapshotID) (domain.Snapshot, error)
 	ListSnapshots(context.Context, domain.OwnerID, domain.InstanceID) ([]domain.Snapshot, error)
@@ -302,7 +304,8 @@ func (s *Service) recoverDelete(ctx context.Context, operation domain.Operation)
 }
 
 func (s *Service) recoverRestore(ctx context.Context, operation domain.Operation) error {
-	if _, err := s.repo.GetInstance(ctx, operation.OwnerID, domain.InstanceID(operation.TargetID)); err != nil {
+	clone, err := s.repo.GetInstance(ctx, operation.OwnerID, domain.InstanceID(operation.TargetID))
+	if err != nil {
 		return err
 	}
 	var payload restorePayload
@@ -312,19 +315,37 @@ func (s *Service) recoverRestore(ctx context.Context, operation domain.Operation
 	if err := s.repo.UpdateOperationStage(ctx, operation.OwnerID, operation.ID, "copying_instance", 40, s.now()); err != nil {
 		return err
 	}
-	_, err := s.runtime.InspectInstance(ctx, payload.TargetRef)
+	copied, err := s.runtime.InspectInstance(ctx, payload.TargetRef)
 	if err != nil && !errors.Is(err, runtimeapi.ErrNotFound) {
 		return fmt.Errorf("inspect restore target: %w", err)
 	}
 	if errors.Is(err, runtimeapi.ErrNotFound) {
-		if _, copyErr := s.runtime.CopyInstance(ctx, runtimeapi.CopyRequest{
+		copied, err = s.runtime.CopyInstance(ctx, runtimeapi.CopyRequest{
 			SourceRef: payload.SourceRef, Snapshot: payload.SnapshotRef, TargetRef: payload.TargetRef,
-		}); copyErr != nil && !errors.Is(copyErr, runtimeapi.ErrAlreadyExists) {
-			return fmt.Errorf("copy instance from snapshot: %w", copyErr)
+			Metadata: map[string]string{
+				instances.MetadataManaged: "true", instances.MetadataResource: "instance",
+				instances.MetadataInstanceID: string(clone.ID), instances.MetadataOwnerID: string(clone.OwnerID),
+			},
+		})
+		if err != nil && !errors.Is(err, runtimeapi.ErrAlreadyExists) {
+			return fmt.Errorf("copy instance from snapshot: %w", err)
+		}
+		if errors.Is(err, runtimeapi.ErrAlreadyExists) {
+			copied, err = s.runtime.InspectInstance(ctx, payload.TargetRef)
+			if err != nil {
+				return fmt.Errorf("inspect existing restore target: %w", err)
+			}
 		}
 	}
-	if _, err := s.runtime.InspectInstance(ctx, payload.TargetRef); err != nil {
-		return fmt.Errorf("verify restored instance: %w", err)
+	if err := instances.VerifyRuntimeIdentity(copied, clone.ID, clone.ActualIsolation); err != nil {
+		return err
+	}
+	observed := domain.ObservedStopped
+	if copied.State == runtimeapi.StateRunning {
+		observed = domain.ObservedRunning
+	}
+	if err := s.repo.UpdateInstanceObservation(ctx, clone.OwnerID, clone.ID, clone.RuntimeRef, clone.ActualIsolation, observed, "", s.now()); err != nil {
+		return err
 	}
 	if err := s.repo.UpdateOperationStage(ctx, operation.OwnerID, operation.ID, "instance_copied", 80, s.now()); err != nil {
 		return err

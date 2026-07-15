@@ -103,6 +103,7 @@ type ExecResult struct {
 
 type CopyRequest struct {
 	SourceRef, Snapshot, TargetRef string
+	Metadata                       map[string]string
 }
 
 // ConsoleRequest opens an interactive PTY inside a managed instance.

@@ -7,6 +7,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/openbox-dev/openbox/internal/app/clones"
 	"github.com/openbox-dev/openbox/internal/app/instances"
 	"github.com/openbox-dev/openbox/internal/domain"
 )
@@ -46,6 +47,30 @@ func TestDispatcherCopyUsesOnlyExplicitCopier(t *testing.T) {
 	if code := dispatcher.Execute(context.Background(), "owner", "cp base feature", nil, &stdout, &stderr); code != 1 || !bytes.Contains(stderr.Bytes(), []byte("unavailable")) {
 		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
 	}
+}
+
+func TestDispatcherCopyPrintsWarnings(t *testing.T) {
+	service := &fakeService{values: []domain.Instance{{ID: "instance-1", OwnerID: "owner", Name: "base", Kind: domain.KindDevbox}}}
+	copier := &fakeCopier{warnings: []string{clones.WarningFullCopy, clones.WarningSecrets}}
+	dispatcher, _ := New(service, "ssh-ed25519 internal-instance-key", copier)
+	dispatcher.newKey = func() (string, error) { return "generated", nil }
+	var stdout, stderr bytes.Buffer
+	if code := dispatcher.Execute(context.Background(), "owner", "cp base feature", nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(clones.WarningFullCopy)) || !bytes.Contains(stdout.Bytes(), []byte(clones.WarningSecrets)) {
+		t.Fatalf("stdout=%q", stdout.String())
+	}
+}
+
+type fakeCopier struct{ warnings []string }
+
+func (c *fakeCopier) SubmitCopy(context.Context, domain.OwnerID, string, string, string) (clones.SubmitResult, error) {
+	return clones.SubmitResult{
+		Instance:  domain.Instance{ID: "clone-1", Name: "feature"},
+		Operation: domain.Operation{ID: "op-copy", Status: domain.OperationPending},
+		Warnings:  c.warnings,
+	}, nil
 }
 
 type fakeService struct {

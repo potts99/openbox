@@ -438,6 +438,9 @@ func (r *Runtime) CopyInstance(ctx context.Context, request runtimeapi.CopyReque
 	target := source
 	target.Ref = request.TargetRef
 	target.Snapshots = nil
+	if request.Metadata != nil {
+		target.Metadata = cloneStringMap(request.Metadata)
+	}
 	r.instances[target.Ref] = target
 	return cloneInstance(target), nil
 }

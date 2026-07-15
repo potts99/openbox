@@ -337,7 +337,7 @@ type sshCopyAdapter struct {
 	clones *clones.Service
 }
 
-func (a sshCopyAdapter) SubmitCopy(ctx context.Context, owner domain.OwnerID, source, destination, key string) (domain.Instance, domain.Operation, error) {
+func (a sshCopyAdapter) SubmitCopy(ctx context.Context, owner domain.OwnerID, source, destination, key string) (clones.SubmitResult, error) {
 	return a.clones.SubmitCopy(ctx, clones.CopyInput{OwnerID: owner, Source: source, Destination: destination, IdempotencyKey: key})
 }
 

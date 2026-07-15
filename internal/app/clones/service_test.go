@@ -4,60 +4,152 @@ package clones_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/openbox-dev/openbox/internal/app/clones"
+	"github.com/openbox-dev/openbox/internal/app/instances"
 	"github.com/openbox-dev/openbox/internal/domain"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 	"github.com/openbox-dev/openbox/internal/runtime/fake"
 )
 
-func TestSubmitCopyRecordsProvenanceAndCreatesIndependentRuntime(t *testing.T) {
+func TestSubmitCopyRecordsProvenanceAndVerifiesIdentity(t *testing.T) {
 	t.Parallel()
-	svc, runtime, repo := newTestService(t)
-	source := seedRunning(t, repo, runtime, "inst-source", "base", "sha256:ubuntu")
+	svc, runtime, repo := newTestService(t, runtimeapi.Capabilities{Architecture: "x86_64", Containers: true, StorageDrivers: []string{"zfs"}})
+	source := seedRunning(t, repo, runtime, "inst-source", "base", "sha256:ubuntu", true)
 
-	clone, op, err := svc.SubmitCopy(context.Background(), clones.CopyInput{
+	result, err := svc.SubmitCopy(context.Background(), clones.CopyInput{
 		OwnerID: source.OwnerID, Source: "base", Destination: "feature", IdempotencyKey: "cp-1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if op.Type != "instance.copy" || clone.Name != "feature" || clone.ID == source.ID {
-		t.Fatalf("clone=%+v op=%+v", clone, op)
+	if result.Operation.Type != "instance.copy" || result.Instance.Name != "feature" || result.Instance.ID == source.ID {
+		t.Fatalf("result=%+v", result)
 	}
-	if clone.CloneSourceInstanceID != source.ID || clone.CloneSourceImageID != source.ImageID {
-		t.Fatalf("provenance missing: %+v", clone)
+	if result.Instance.CloneSourceInstanceID != source.ID || result.Instance.CloneSourceImageID != source.ImageID {
+		t.Fatalf("provenance missing: %+v", result.Instance)
 	}
-	if err := svc.RecoverOperation(context.Background(), op); err != nil {
+	if len(result.Warnings) != 0 {
+		t.Fatalf("unexpected warnings for protected zfs source: %v", result.Warnings)
+	}
+	if err := svc.RecoverOperation(context.Background(), result.Operation); err != nil {
 		t.Fatal(err)
 	}
-	reloaded, err := repo.GetInstance(context.Background(), clone.OwnerID, clone.ID)
+	reloaded, err := repo.GetInstance(context.Background(), result.Instance.OwnerID, result.Instance.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if reloaded.RuntimeRef == "" || reloaded.RuntimeRef == source.RuntimeRef {
 		t.Fatalf("clone runtime ref not independent: %q source=%q", reloaded.RuntimeRef, source.RuntimeRef)
 	}
-	if _, err := runtime.InspectInstance(context.Background(), reloaded.RuntimeRef); err != nil {
+	copied, err := runtime.InspectInstance(context.Background(), reloaded.RuntimeRef)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if reloaded.CloneSourceInstanceID != source.ID || reloaded.CloneSourceImageID != "sha256:ubuntu" {
-		t.Fatalf("persisted provenance=%+v", reloaded)
+	if err := instances.VerifyRuntimeIdentity(copied, reloaded.ID, reloaded.ActualIsolation); err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.ObservedState != domain.ObservedRunning {
+		t.Fatalf("observed=%s", reloaded.ObservedState)
 	}
 }
 
-func TestSubmitCopyResolvesSourceByID(t *testing.T) {
+func TestSubmitCopyWarnsForFullCopyAndPersonalDevboxSecrets(t *testing.T) {
 	t.Parallel()
-	svc, runtime, repo := newTestService(t)
-	source := seedRunning(t, repo, runtime, "inst-source", "base", "sha256:ubuntu")
-	clone, _, err := svc.SubmitCopy(context.Background(), clones.CopyInput{
-		OwnerID: source.OwnerID, Source: string(source.ID), Destination: "copy-by-id", IdempotencyKey: "cp-2",
+	svc, runtime, repo := newTestService(t, runtimeapi.Capabilities{Architecture: "x86_64", Containers: true, StorageDrivers: []string{"dir"}})
+	source := seedRunning(t, repo, runtime, "inst-source", "personal", "sha256:ubuntu", false)
+
+	result, err := svc.SubmitCopy(context.Background(), clones.CopyInput{
+		OwnerID: source.OwnerID, Source: "personal", Destination: "scratch", IdempotencyKey: "cp-warn",
 	})
-	if err != nil || clone.Name != "copy-by-id" {
-		t.Fatalf("clone=%+v err=%v", clone, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsWarning(result.Warnings, clones.WarningFullCopy) || !containsWarning(result.Warnings, clones.WarningSecrets) {
+		t.Fatalf("warnings=%v", result.Warnings)
+	}
+}
+
+func TestDeletingSourceDoesNotInvalidateCompletedClone(t *testing.T) {
+	t.Parallel()
+	svc, runtime, repo := newTestService(t, runtimeapi.Capabilities{Architecture: "x86_64", Containers: true, StorageDrivers: []string{"zfs"}})
+	source := seedRunning(t, repo, runtime, "inst-source", "base", "sha256:ubuntu", true)
+	if err := runtime.CreateSnapshot(context.Background(), source.RuntimeRef, "ready"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.SubmitCopy(context.Background(), clones.CopyInput{
+		OwnerID: source.OwnerID, Source: "base", Destination: "feature", IdempotencyKey: "cp-indep",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RecoverOperation(context.Background(), result.Operation); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.DeleteSnapshot(context.Background(), source.RuntimeRef, "ready"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.DeleteInstance(context.Background(), source.RuntimeRef); err != nil {
+		t.Fatal(err)
+	}
+	delete(repo.instances, source.ID)
+
+	clone, err := repo.GetInstance(context.Background(), result.Instance.OwnerID, result.Instance.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.InspectInstance(context.Background(), clone.RuntimeRef); err != nil {
+		t.Fatalf("clone invalidated after source/snapshot delete: %v", err)
+	}
+	if err := runtime.StopInstance(context.Background(), clone.RuntimeRef); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.StartInstance(context.Background(), clone.RuntimeRef); err != nil {
+		t.Fatal(err)
+	}
+	if clone.CloneSourceInstanceID != source.ID {
+		t.Fatalf("provenance lost: %+v", clone)
+	}
+}
+
+func TestRecoverCopyRejectsWrongRuntimeIdentity(t *testing.T) {
+	t.Parallel()
+	svc, runtime, repo := newTestService(t, runtimeapi.Capabilities{Architecture: "x86_64", Containers: true, StorageDrivers: []string{"zfs"}})
+	source := seedRunning(t, repo, runtime, "inst-source", "base", "sha256:ubuntu", true)
+	result, err := svc.SubmitCopy(context.Background(), clones.CopyInput{
+		OwnerID: source.OwnerID, Source: "base", Destination: "feature", IdempotencyKey: "cp-bad-id",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Pre-create target with source identity metadata so verification must fail.
+	if _, err := runtime.CopyInstance(context.Background(), runtimeapi.CopyRequest{
+		SourceRef: source.RuntimeRef, TargetRef: result.Instance.RuntimeRef,
+		Metadata: map[string]string{
+			instances.MetadataManaged: "true", instances.MetadataResource: "instance",
+			instances.MetadataInstanceID: string(source.ID), instances.MetadataOwnerID: string(source.OwnerID),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err = svc.RecoverOperation(context.Background(), result.Operation)
+	var identity *instances.IdentityConflictError
+	if !errors.As(err, &identity) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestStorageEfficientCopyDrivers(t *testing.T) {
+	t.Parallel()
+	if clones.StorageEfficientCopy([]string{"dir"}) {
+		t.Fatal("dir must not claim CoW")
+	}
+	if !clones.StorageEfficientCopy([]string{"dir", "zfs"}) {
+		t.Fatal("zfs should claim CoW")
 	}
 }
 
@@ -66,9 +158,9 @@ type memoryRepo struct {
 	ops       map[string]domain.Operation
 }
 
-func newTestService(t *testing.T) (*clones.Service, *fake.Runtime, *memoryRepo) {
+func newTestService(t *testing.T, capabilities runtimeapi.Capabilities) (*clones.Service, *fake.Runtime, *memoryRepo) {
 	t.Helper()
-	runtime := fake.New(runtimeapi.Capabilities{Architecture: "x86_64", Containers: true})
+	runtime := fake.New(capabilities)
 	repo := &memoryRepo{instances: map[domain.InstanceID]domain.Instance{}, ops: map[string]domain.Operation{}}
 	n := 0
 	svc, err := clones.New(runtime, repo, clones.Options{
@@ -84,19 +176,23 @@ func newTestService(t *testing.T) (*clones.Service, *fake.Runtime, *memoryRepo) 
 	return svc, runtime, repo
 }
 
-func seedRunning(t *testing.T, repo *memoryRepo, runtime *fake.Runtime, id, name, image string) domain.Instance {
+func seedRunning(t *testing.T, repo *memoryRepo, runtime *fake.Runtime, id, name, image string, protected bool) domain.Instance {
 	t.Helper()
 	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
 	instance := domain.Instance{
 		ID: domain.InstanceID(id), OwnerID: "owner-1", Name: name, Kind: domain.KindDevbox,
 		ImageID: domain.ImageID(image), RequestedIsolation: domain.IsolationStandard, ActualIsolation: domain.IsolationContainer,
-		DesiredState: domain.DesiredRunning, ObservedState: domain.ObservedRunning,
+		DesiredState: domain.DesiredRunning, ObservedState: domain.ObservedRunning, Protected: protected,
 		RuntimeRef: "openbox-" + id, CreatedAt: now, UpdatedAt: now,
 	}
 	repo.instances[instance.ID] = instance
 	runtime.AddImage(runtimeapi.Image{Fingerprint: image, Aliases: []string{"ubuntu"}, Architecture: "x86_64", Type: "container", CloudInit: true})
 	if _, err := runtime.CreateInstance(context.Background(), runtimeapi.CreateRequest{
 		Ref: instance.RuntimeRef, Image: image, Unprivileged: true,
+		Metadata: map[string]string{
+			instances.MetadataManaged: "true", instances.MetadataResource: "instance",
+			instances.MetadataInstanceID: string(instance.ID), instances.MetadataOwnerID: string(instance.OwnerID),
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -104,6 +200,15 @@ func seedRunning(t *testing.T, repo *memoryRepo, runtime *fake.Runtime, id, name
 		t.Fatal(err)
 	}
 	return instance
+}
+
+func containsWarning(warnings []string, wanted string) bool {
+	for _, warning := range warnings {
+		if warning == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *memoryRepo) ListInstancesByOwner(_ context.Context, owner domain.OwnerID, _ int) ([]domain.Instance, error) {
@@ -136,6 +241,15 @@ func (m *memoryRepo) CreateInstance(_ context.Context, instance domain.Instance,
 	m.instances[instance.ID] = instance
 	m.ops[string(operation.ID)] = operation
 	return operation, false, nil
+}
+func (m *memoryRepo) UpdateInstanceObservation(_ context.Context, owner domain.OwnerID, id domain.InstanceID, runtimeRef string, actual domain.IsolationType, observed domain.ObservedState, code domain.ErrorCode, at time.Time) error {
+	instance, ok := m.instances[id]
+	if !ok || instance.OwnerID != owner {
+		return &domain.Error{Code: domain.CodeNotFound, Field: "instance"}
+	}
+	instance.RuntimeRef, instance.ActualIsolation, instance.ObservedState, instance.ErrorCode, instance.UpdatedAt = runtimeRef, actual, observed, code, at
+	m.instances[id] = instance
+	return nil
 }
 func (m *memoryRepo) GetOperationByIdempotency(_ context.Context, owner domain.OwnerID, key string) (domain.Operation, bool, error) {
 	for _, op := range m.ops {

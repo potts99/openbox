@@ -14,6 +14,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/openbox-dev/openbox/internal/app/clones"
 	"github.com/openbox-dev/openbox/internal/app/instances"
 	"github.com/openbox-dev/openbox/internal/domain"
 	"github.com/openbox-dev/openbox/internal/sshgateway/commands"
@@ -26,7 +27,7 @@ type Service interface {
 }
 
 type Copier interface {
-	SubmitCopy(context.Context, domain.OwnerID, string, string, string) (domain.Instance, domain.Operation, error)
+	SubmitCopy(context.Context, domain.OwnerID, string, string, string) (clones.SubmitResult, error)
 }
 
 type Dispatcher struct {
@@ -108,11 +109,14 @@ func (d *Dispatcher) execute(ctx context.Context, owner domain.OwnerID, command 
 		if err != nil {
 			return err
 		}
-		instance, operation, err := d.copier.SubmitCopy(ctx, owner, value.Source, value.Destination, key)
+		result, err := d.copier.SubmitCopy(ctx, owner, value.Source, value.Destination, key)
 		if err != nil {
 			return err
 		}
-		return writeResult(output, value.JSON, instance, operation)
+		for _, warning := range result.Warnings {
+			fmt.Fprintf(output, "warning\t%s\n", warning)
+		}
+		return writeResult(output, value.JSON, result.Instance, result.Operation)
 	default:
 		return errors.New("unsupported OpenBox command")
 	}
