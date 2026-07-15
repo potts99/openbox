@@ -673,3 +673,55 @@ func (r *failureRuntime) StartInstance(ctx context.Context, ref string) error {
 	}
 	return r.ContainerRuntime.StartInstance(ctx, ref)
 }
+
+func TestProtectedDevboxBaseBlocksDeleteUntilRemoved(t *testing.T) {
+	runtime := fake.New(testCapabilities())
+	runtime.AddImage(testImage())
+	service, _, _ := newTestServiceWithIDs(t, runtime, newIDs(
+		"instance-1", "operation-1", "operation-2", "operation-3", "operation-4",
+	), runtime)
+	ctx := context.Background()
+	created, err := service.Create(ctx, createInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	protected, err := service.SetProtection(ctx, created.OwnerID, created.ID, true)
+	if err != nil || !protected.Protected {
+		t.Fatalf("protect=%+v err=%v", protected, err)
+	}
+	err = service.Delete(ctx, created.OwnerID, created.ID, "delete-protected")
+	assertDomainCode(t, err, domain.CodeProtectedBase)
+	_, err = service.SubmitAction(ctx, created.OwnerID, created.ID, MutationDelete, "submit-delete-protected")
+	assertDomainCode(t, err, domain.CodeProtectedBase)
+	cleared, err := service.SetProtection(ctx, created.OwnerID, created.ID, false)
+	if err != nil || cleared.Protected {
+		t.Fatalf("unprotect=%+v err=%v", cleared, err)
+	}
+	if err := service.Delete(ctx, created.OwnerID, created.ID, "delete-unprotected"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProtectionIsDevboxOnly(t *testing.T) {
+	runtime := fake.New(testCapabilities())
+	runtime.AddImage(testImage())
+	service, _, _ := newTestServiceWithIDs(t, runtime, newIDs("instance-1", "operation-1"), runtime)
+	ctx := context.Background()
+	input := createInput()
+	input.Kind = domain.KindVPS
+	input.Name = "vps-1"
+	created, err := service.Create(ctx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.SetProtection(ctx, created.OwnerID, created.ID, true)
+	assertDomainCode(t, err, domain.CodeInvalidArgument)
+}
+
+func assertDomainCode(t *testing.T, err error, code domain.ErrorCode) {
+	t.Helper()
+	var domainErr *domain.Error
+	if !errors.As(err, &domainErr) || domainErr.Code != code {
+		t.Fatalf("err=%v want code=%s", err, code)
+	}
+}
