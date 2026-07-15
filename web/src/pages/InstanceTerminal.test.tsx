@@ -194,27 +194,25 @@ describe("InstanceTerminal", () => {
     expect(onBack).toHaveBeenCalledOnce();
   });
 
-  it("exposes persistent session controls and opens with session_name when enabled", async () => {
-    const user = userEvent.setup();
+  it("always opens the persistent main session and has no session name controls", async () => {
     renderTerminal();
-    openConnectedSocket();
 
-    const nameInput = screen.getByRole("textbox", { name: "Session name" });
-    expect(nameInput).toBeDisabled();
+    expect(screen.queryByRole("checkbox", { name: /persistent session/i })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Session name" })).toBeNull();
 
-    await user.click(screen.getByRole("checkbox", { name: /persistent session/i }));
-    expect(nameInput).toBeEnabled();
-    await user.clear(nameInput);
-    await user.type(nameInput, "work");
-
-    FakeWebSocket.instances[0]?.close();
-    await user.click(await screen.findByRole("button", { name: "Reconnect" }));
-
-    expect(FakeWebSocket.instances).toHaveLength(2);
-    FakeWebSocket.instances[1]?.open();
-    expect(JSON.parse(FakeWebSocket.instances[1]?.sent[0] ?? "{}")).toMatchObject({
+    const socket = FakeWebSocket.instances.at(-1);
+    socket?.open();
+    expect(JSON.parse(socket?.sent[0] ?? "{}")).toMatchObject({
       type: "open",
-      session_name: "work",
+      session_name: "main",
     });
+    socket?.message(encodeFrame({
+      type: "open",
+      instanceId: "box-1",
+      cols: 80,
+      rows: 24,
+      sessionName: "main",
+    }));
+    expect(await screen.findByRole("status", { name: "Terminal connection state" })).toHaveTextContent(/connected/i);
   });
 });

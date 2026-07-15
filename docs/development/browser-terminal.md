@@ -49,6 +49,8 @@ session registered under a daemon `session_id` for `reconnect` or a later
 `open` with the same name. See `TestTerminalDetachDoesNotTerminateNamedSession`
 and related tests in `internal/httpapi`.
 
+The dashboard terminal always opens `session_name: main` (no ephemeral shell UI).
+
 ## Audit metadata only
 
 `TerminalAuditor` records start/end lifecycle metadata (owner, instance id,
