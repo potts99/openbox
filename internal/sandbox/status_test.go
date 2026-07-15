@@ -13,8 +13,8 @@ import (
 func TestRemainingAndEgressLabels(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
-	if sandbox.EgressLabel(domain.KindSandbox) != "default" {
-		t.Fatal("egress label")
+	if got := sandbox.EgressLabel(domain.EgressRestricted); got != "restricted" {
+		t.Fatalf("egress label = %q", got)
 	}
 	future := now.Add(90 * time.Minute)
 	if got := sandbox.FormatRemaining(&future, now); got != "1h30m" {

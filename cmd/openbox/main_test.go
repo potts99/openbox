@@ -74,12 +74,12 @@ func TestUsesBearerTokenFromFlag(t *testing.T) {
 
 func TestInspectHuman(t *testing.T) {
 	server := commandServer(t, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, `{"id":"box-1","name":"my-box","kind":"vps","image_id":"ubuntu","requested_isolation":"strong","desired_state":"stopped","observed_state":"stopped","actual_isolation":"virtual_machine","resources":{"vcpus":2,"memory_bytes":8589934592,"disk_bytes":10737418240}}`)
+		_, _ = fmt.Fprint(w, `{"id":"box-1","name":"my-box","kind":"vps","image_id":"ubuntu","requested_isolation":"strong","desired_state":"stopped","observed_state":"stopped","actual_isolation":"virtual_machine","resources":{"vcpus":2,"memory_bytes":8589934592,"disk_bytes":10737418240},"network_policy":{"egress_mode":"standard","acls":["openbox-default-deny","openbox-egress-standard"],"resolution":{"state":"idle","pending":[],"resolved":[],"failed":[]},"denied_flows":0}}`)
 	})
 	defer server.Close()
 
 	stdout, stderr, code := runCLI(t, server.URL, "inspect", "box-1")
-	if code != 0 || !strings.Contains(stdout, "Isolation: virtual_machine") || !strings.Contains(stdout, "Memory: 8.0 GiB") || !strings.Contains(stdout, "Egress: default") || !strings.Contains(stdout, "Observed: stopped") {
+	if code != 0 || !strings.Contains(stdout, "Isolation: virtual_machine") || !strings.Contains(stdout, "Memory: 8.0 GiB") || !strings.Contains(stdout, "Egress: standard") || !strings.Contains(stdout, "Network ACLs: openbox-default-deny, openbox-egress-standard") || !strings.Contains(stdout, "Hostname resolution: idle") || !strings.Contains(stdout, "Denied flows: 0") || !strings.Contains(stdout, "Observed: stopped") {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 }

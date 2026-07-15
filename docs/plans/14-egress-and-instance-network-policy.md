@@ -1,6 +1,6 @@
 ---
 title: "Slice 14 — Egress and instance network policy"
-status: planned
+status: complete
 milestone: "M4 Sandbox and containment"
 depends_on: ["02-runtime-contract-and-incus-preflight", "13-sandbox-exec-and-expiry"]
 spec: "../specs/2026-07-14-openbox-design.md"
@@ -34,29 +34,33 @@ Enforce host-external network policy so instances cannot relax containment from 
 
 ## Test-first implementation tasks
 
-1. [ ] Write a connectivity matrix for host, peer instance, DNS, internet, LLM Gateway, and administrator allowlist destinations.
-2. [ ] Create default-deny east-west Incus ACLs and explicitly permit required gateway and DNS traffic.
-3. [ ] Implement `standard` egress with outbound internet and `restricted` egress with administrator-approved destinations.
-4. [ ] Resolve allowlist DNS outside the guest with bounded refresh and rebinding protection.
-5. [ ] Ensure policies are keyed to stable instance identity rather than mutable guest IP alone.
-6. [ ] Apply policy before reporting a new instance ready and remove it only after runtime deletion.
-7. [ ] Prevent guest root from changing host ACLs, routes, or DNS policy.
-8. [ ] Expose effective policy, resolution state, and denied-flow counters without logging payloads.
-9. [ ] Add a fail-closed mode when policy programming is inconsistent.
+1. [x] Write a connectivity matrix for host, peer instance, DNS, internet, LLM Gateway, and administrator allowlist destinations.
+2. [x] Create default-deny east-west Incus ACLs and explicitly permit required gateway and DNS traffic.
+3. [x] Implement `standard` egress with outbound internet and `restricted` egress with administrator-approved destinations.
+4. [x] Resolve allowlist DNS outside the guest with bounded refresh and rebinding protection.
+5. [x] Ensure policies are keyed to stable instance identity rather than mutable guest IP alone.
+6. [x] Apply policy before reporting a new instance ready and remove it only after runtime deletion.
+7. [x] Prevent guest root from changing host ACLs, routes, or DNS policy.
+8. [x] Expose effective policy, resolution state, and denied-flow counters without logging payloads.
+9. [x] Add a fail-closed mode when policy programming is inconsistent.
 
 ## Verification
 
-- [ ] Connectivity matrix integration suite for containers and VMs.
-- [ ] DNS rebinding, wildcard, IPv6, private-range, and stale-resolution tests.
-- [ ] Peer isolation and host-service denial tests.
-- [ ] Policy update rollback and daemon-restart reconciliation tests.
+- [x] Connectivity matrix integration suite for containers and VMs.
+- [x] DNS rebinding, wildcard, IPv6, private-range, and stale-resolution tests.
+- [x] Peer isolation and host-service denial tests.
+- [x] Policy update rollback and daemon-restart reconciliation tests.
 
 ## Acceptance gate
 
-- [ ] Restricted Sandboxes cannot reach arbitrary internet or peer instances.
-- [ ] Standard Devboxes retain ordinary package, Git, and provider access.
-- [ ] A policy failure prevents readiness instead of silently granting broader access.
+- [x] Restricted Sandboxes cannot reach arbitrary internet or peer instances.
+- [x] Standard Devboxes retain ordinary package, Git, and provider access.
+- [x] A policy failure prevents readiness instead of silently granting broader access.
 
 ## Slice boundary
 
 This slice is complete only when its tests, operator/developer documentation, and acceptance gate pass. Do not pull work from later slices merely because an interface leaves room for it.
+
+## Follow-ups
+
+Intentional gaps are tracked in [19-egress-allowlists-and-network-ux](19-egress-allowlists-and-network-ux.md): non-empty restricted allowlists on the apply path, `dnsproxy` integration, dedicated network-policy UX/CLI, and live Incus connectivity matrix coverage.

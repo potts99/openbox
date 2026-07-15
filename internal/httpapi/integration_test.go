@@ -35,7 +35,7 @@ func TestRealServiceSubmissionLostResponseAndWorkerCompletion(t *testing.T) {
 	runtime := fake.New(runtimeapi.Capabilities{Architecture: "x86_64", Containers: true})
 	runtime.AddImage(runtimeapi.Image{Fingerprint: "sha256:ubuntu", Aliases: []string{"ubuntu"}, Architecture: "x86_64", Type: "container", CloudInit: true})
 	ids := []string{"instance-1", "operation-1"}
-	service, err := instances.New(runtime, store, instances.Options{Now: func() time.Time { return now }, NewID: func() string { value := ids[0]; ids = ids[1:]; return value }})
+	service, err := instances.New(runtime, store, instances.Options{Now: func() time.Time { return now }, NewID: func() string { value := ids[0]; ids = ids[1:]; return value }, NetworkPolicy: runtime})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,6 +67,80 @@ func TestRealServiceSubmissionLostResponseAndWorkerCompletion(t *testing.T) {
 	if len(runtime.CreateRequests()) != 1 {
 		t.Fatalf("runtime creates=%d", len(runtime.CreateRequests()))
 	}
+}
+
+func TestCreateAndExtendResponsesIncludeNetworkPolicy(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(ctx, t.TempDir()+"/openbox.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	now := time.Date(2026, 7, 15, 8, 0, 0, 0, time.UTC)
+	if err := store.CreateOwner(ctx, domain.Owner{ID: "owner-local", Name: "Owner", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	runtime := fake.New(runtimeapi.Capabilities{Architecture: "x86_64", Containers: true})
+	runtime.AddImage(runtimeapi.Image{Fingerprint: "sha256:ubuntu", Aliases: []string{"ubuntu"}, Architecture: "x86_64", Type: "container", CloudInit: true})
+	policy := integrationNetworkPolicy{status: domain.NetworkPolicyStatus{
+		EgressMode: domain.EgressRestricted,
+		ACLs:       []string{"openbox-default-deny"},
+		Resolution: domain.AllowlistResolution{State: "idle", Pending: []string{}, Resolved: []string{}, Failed: []string{}},
+	}}
+	service, err := instances.New(runtime, store, instances.Options{
+		Now: func() time.Time { return now },
+		NewID: func() string {
+			return "instance-1"
+		},
+		NetworkPolicy: policy,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := New(service, Options{OwnerID: "owner-local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	create := httptest.NewRequest(http.MethodPost, "/v1/instances", bytes.NewBufferString(`{"name":"sandbox","kind":"sandbox","image":"ubuntu","owner_public_key":"ssh-ed25519 owner"}`))
+	create.Header.Set(HeaderIdempotencyKey, "policy-create")
+	createResponse := httptest.NewRecorder()
+	handler.ServeHTTP(createResponse, create)
+	if createResponse.Code != http.StatusAccepted {
+		t.Fatalf("create status=%d body=%s", createResponse.Code, createResponse.Body.String())
+	}
+	assertJSONContains(t, createResponse.Body.Bytes(), `"egress_mode":"restricted"`, `"acls":["openbox-default-deny"]`, `"state":"idle"`, `"denied_flows":0`)
+
+	replay := httptest.NewRequest(http.MethodPost, "/v1/instances", bytes.NewBufferString(`{"name":"sandbox","kind":"sandbox","image":"ubuntu","owner_public_key":"ssh-ed25519 owner"}`))
+	replay.Header.Set(HeaderIdempotencyKey, "policy-create")
+	replayResponse := httptest.NewRecorder()
+	handler.ServeHTTP(replayResponse, replay)
+	if replayResponse.Code != http.StatusAccepted {
+		t.Fatalf("replay status=%d body=%s", replayResponse.Code, replayResponse.Body.String())
+	}
+	assertJSONContains(t, replayResponse.Body.Bytes(), `"egress_mode":"restricted"`, `"acls":["openbox-default-deny"]`, `"state":"idle"`, `"denied_flows":0`)
+
+	extend := httptest.NewRequest(http.MethodPost, "/v1/instances/instance-1/extend", bytes.NewBufferString(`{"duration_seconds":60}`))
+	extendResponse := httptest.NewRecorder()
+	handler.ServeHTTP(extendResponse, extend)
+	if extendResponse.Code != http.StatusOK {
+		t.Fatalf("extend status=%d body=%s", extendResponse.Code, extendResponse.Body.String())
+	}
+	assertJSONContains(t, extendResponse.Body.Bytes(), `"egress_mode":"restricted"`, `"acls":["openbox-default-deny"]`, `"state":"idle"`, `"denied_flows":0`)
+}
+
+type integrationNetworkPolicy struct {
+	status domain.NetworkPolicyStatus
+}
+
+func (p integrationNetworkPolicy) ApplyNetworkPolicy(context.Context, domain.Instance) error {
+	return nil
+}
+func (p integrationNetworkPolicy) RemoveNetworkPolicy(context.Context, domain.Instance) error {
+	return nil
+}
+func (p integrationNetworkPolicy) NetworkPolicyStatus(domain.Instance) domain.NetworkPolicyStatus {
+	return p.status
 }
 
 type integrationCreateResult struct {

@@ -16,6 +16,7 @@ CREATE INDEX instance_software_owner_instance ON instance_software(owner_id, ins
 
 -- Hard-cut: drop kind=devbox from the product surface (no production users).
 -- SQLite cannot ALTER CHECK constraints; rebuild instances without 'devbox'.
+-- Preserve egress_mode from migration 008.
 PRAGMA foreign_keys=OFF;
 
 CREATE TABLE instances_new (
@@ -36,6 +37,7 @@ CREATE TABLE instances_new (
     clone_source_instance_id TEXT NOT NULL DEFAULT '',
     clone_source_snapshot_id TEXT NOT NULL DEFAULT '',
     clone_source_image_id TEXT NOT NULL DEFAULT '',
+    egress_mode TEXT NOT NULL DEFAULT 'standard' CHECK(egress_mode IN ('standard','restricted')),
     UNIQUE(owner_id, name), UNIQUE(id, owner_id),
     FOREIGN KEY(image_id, owner_id) REFERENCES images(id, owner_id),
     CHECK(kind != 'sandbox' OR expires_at IS NOT NULL)
@@ -46,7 +48,8 @@ INSERT INTO instances_new (
     desired_state, observed_state, vcpus, memory_bytes, disk_bytes, expires_at,
     protected, runtime_ref, error_code, error_stage, error_retryable,
     created_at, updated_at, deleted_at,
-    clone_source_instance_id, clone_source_snapshot_id, clone_source_image_id
+    clone_source_instance_id, clone_source_snapshot_id, clone_source_image_id,
+    egress_mode
 )
 SELECT
     id, owner_id, name, kind, image_id, requested_isolation, actual_isolation,
@@ -55,7 +58,8 @@ SELECT
     created_at, updated_at, deleted_at,
     COALESCE(clone_source_instance_id, ''),
     COALESCE(clone_source_snapshot_id, ''),
-    COALESCE(clone_source_image_id, '')
+    COALESCE(clone_source_image_id, ''),
+    COALESCE(egress_mode, 'standard')
 FROM instances
 WHERE kind != 'devbox';
 

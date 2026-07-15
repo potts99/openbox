@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,6 +17,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/openbox-dev/openbox/internal/domain"
 )
 
 type staticProbe struct {
@@ -201,8 +205,8 @@ func TestBootstrapIsIdempotentAndLeavesUnknownResourcesUntouched(t *testing.T) {
 	if !reflect.DeepEqual(first, second) {
 		t.Fatalf("second bootstrap changed configuration:\nfirst=%#v\nsecond=%#v", first, second)
 	}
-	if api.posts != 4 {
-		t.Fatalf("POST count = %d, want 4", api.posts)
+	if api.posts != 6 {
+		t.Fatalf("POST count = %d, want 6", api.posts)
 	}
 	for key, value := range second {
 		if key == "project/unrelated" || key == "storage/default" {
@@ -217,6 +221,164 @@ func TestBootstrapIsIdempotentAndLeavesUnknownResourcesUntouched(t *testing.T) {
 	}
 	if second["project/openbox"].Config["features.images"] != "false" {
 		t.Fatalf("OpenBox project does not inherit default-project images: %#v", second["project/openbox"].Config)
+	}
+}
+
+func TestBootstrapCreatesACLAndAttachesItToManagedNICs(t *testing.T) {
+	api := newBootstrapAPI()
+	socket := serveUnixHTTP(t, api)
+	adapter, err := New(Options{SocketPath: socket})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.Bootstrap(context.Background(), BootstrapConfig{Project: "openbox", Network: "openbox0", StoragePool: "default"}); err != nil {
+		t.Fatal(err)
+	}
+
+	resources := api.snapshot()
+	aclResource, exists := resources["network-acl/openbox-default-deny"]
+	if !exists {
+		t.Fatal("managed default-deny ACL was not created")
+	}
+	if _, exists := resources["network-acl/"+StandardEgressACLName]; !exists {
+		t.Fatal("managed standard egress ACL was not created")
+	}
+	if aclResource.Config[ManagedLabel] != "true" || aclResource.Config[ResourceLabel] != "network-acl" {
+		t.Fatalf("ACL ownership labels = %#v", aclResource.Config)
+	}
+	for _, name := range []string{"openbox-container", "openbox-vm"} {
+		if got := resources["profile/"+name].Devices["eth0"]["security.acls"]; got != "openbox-default-deny" {
+			t.Fatalf("%s eth0 security.acls = %q, want openbox-default-deny", name, got)
+		}
+	}
+	for _, wanted := range []networkACLRule{
+		{Action: "allow", Destination: "10.42.0.1", Protocol: "udp", DestinationPort: "53"},
+		{Action: "allow", Destination: "10.42.0.1", Protocol: "tcp", DestinationPort: "53"},
+		{Action: "allow", Destination: "10.42.0.1", Protocol: "tcp", DestinationPort: "18789"},
+	} {
+		if !containsNetworkACLRule(aclResource.Egress, wanted) {
+			t.Fatalf("ACL egress rules = %#v, missing %#v", aclResource.Egress, wanted)
+		}
+	}
+	if !containsNetworkACLRule(aclResource.Ingress, networkACLRule{Action: "allow", Source: "10.42.0.1", Protocol: "tcp", DestinationPort: "22"}) {
+		t.Fatalf("ACL ingress rules = %#v, missing SSH gateway rule", aclResource.Ingress)
+	}
+}
+
+func TestManagedProfilesKeepHostPolicyAssetsOutOfGuests(t *testing.T) {
+	config := BootstrapConfig{Network: "openbox0", StoragePool: "default"}
+	container := profileResource("openbox-container", "container-profile", config)
+	if container.Config["security.privileged"] != "false" {
+		t.Fatalf("container security.privileged = %q, want false", container.Config["security.privileged"])
+	}
+	for name, profile := range map[string]resource{
+		"container": container,
+		"VM":        profileResource("openbox-vm", "vm-profile", config),
+	} {
+		for deviceName, device := range profile.Devices {
+			if device["type"] == "disk" && device["path"] != "/" {
+				t.Fatalf("%s profile exposes disk device %s at %q", name, deviceName, device["path"])
+			}
+			if source := device["source"]; source != "" {
+				t.Fatalf("%s profile exposes host source %q through device %s", name, source, deviceName)
+			}
+		}
+	}
+}
+
+func TestEgressACLResourcesAndNICComposition(t *testing.T) {
+	standard := standardEgressACLResource()
+	if standard.Name != StandardEgressACLName {
+		t.Fatalf("standard ACL name = %q, want %q", standard.Name, StandardEgressACLName)
+	}
+	if !containsNetworkACLRule(standard.Egress, networkACLRule{Action: "allow", Destination: "0.0.0.0/0"}) {
+		t.Fatalf("standard ACL egress rules = %#v, missing internet allow", standard.Egress)
+	}
+	if containsNetworkACLRule(standard.Egress, networkACLRule{Action: "allow", Destination: "10.42.0.0/24"}) {
+		t.Fatalf("standard ACL egress rules = %#v, must not allow peer CIDR", standard.Egress)
+	}
+	// Incus applies reject rules before allows across stacked ACLs. Rejects must
+	// therefore exclude the bridge gateway so baseline DNS and LLM rules remain
+	// usable when this ACL is attached.
+	for _, baselineRule := range networkACLResource().Egress {
+		if standardACLRejectsDestination(standard, baselineRule.Destination) {
+			t.Fatalf("standard ACL rejects baseline %s destination %s:%s under ACL stacking", baselineRule.Description, baselineRule.Destination, baselineRule.DestinationPort)
+		}
+	}
+	for _, peer := range []string{"10.42.0.2", "10.42.0.255"} {
+		if !standardACLRejectsDestination(standard, peer) {
+			t.Fatalf("standard ACL does not reject peer %s: %#v", peer, standard.Egress)
+		}
+	}
+
+	restricted := RestrictedACL("openbox-egress-restricted-profile-1", []string{"203.0.113.9", "198.51.100.0/24"})
+	if restricted.Name != "openbox-egress-restricted-profile-1" {
+		t.Fatalf("restricted ACL name = %q", restricted.Name)
+	}
+	if containsNetworkACLRule(restricted.Egress, networkACLRule{Action: "allow", Destination: "0.0.0.0/0"}) {
+		t.Fatalf("restricted ACL egress rules = %#v, must not allow the internet", restricted.Egress)
+	}
+	for _, destination := range []string{"203.0.113.9", "198.51.100.0/24"} {
+		if !containsNetworkACLRule(restricted.Egress, networkACLRule{Action: "allow", Destination: destination}) {
+			t.Fatalf("restricted ACL egress rules = %#v, missing %q", restricted.Egress, destination)
+		}
+	}
+	if len(restricted.Egress) != 2 {
+		t.Fatalf("restricted ACL egress rules = %#v, want only allowlisted destinations", restricted.Egress)
+	}
+
+	if got, want := NICACLs(domain.EgressStandard), []string{DefaultDenyACLName, StandardEgressACLName}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("standard NIC ACLs = %#v, want %#v", got, want)
+	}
+	if got, want := NICACLs(domain.EgressRestricted, restricted.Name), []string{DefaultDenyACLName, restricted.Name}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("restricted NIC ACLs = %#v, want %#v", got, want)
+	}
+}
+
+func TestEnsureRestrictedACLEnsuresNamedAllowlist(t *testing.T) {
+	api := newBootstrapAPI()
+	socket := serveUnixHTTP(t, api)
+	adapter, err := New(Options{SocketPath: socket})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := adapter.EnsureRestrictedACL(context.Background(), "openbox-egress-restricted-profile-1", []string{"203.0.113.9"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.EnsureRestrictedACL(context.Background(), "openbox-egress-restricted-profile-1", []string{"203.0.113.9"}); err != nil {
+		t.Fatal(err)
+	}
+	if api.posts != 1 {
+		t.Fatalf("restricted ACL POST count = %d, want 1", api.posts)
+	}
+	if _, exists := api.snapshot()["network-acl/openbox-egress-restricted-profile-1"]; !exists {
+		t.Fatal("restricted ACL was not created")
+	}
+}
+
+func TestBootstrapRefusesUnmanagedACLNameConflict(t *testing.T) {
+	api := newBootstrapAPI()
+	api.resources["project/openbox"] = resource{Name: "openbox", Config: managedConfig("project", map[string]string{
+		"features.images": "false", "features.networks": "false", "features.profiles": "true",
+	})}
+	api.resources["network/openbox0"] = networkResource(BootstrapConfig{Network: "openbox0"})
+	api.resources["network-acl/openbox-default-deny"] = resource{
+		Name: "openbox-default-deny", Config: map[string]string{"user.owner": "someone-else"},
+	}
+	socket := serveUnixHTTP(t, api)
+	adapter, err := New(Options{SocketPath: socket})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = adapter.Bootstrap(context.Background(), BootstrapConfig{Project: "openbox", Network: "openbox0", StoragePool: "default"})
+	var conflict *ConflictError
+	if !errors.As(err, &conflict) || conflict.Kind != "network ACL" {
+		t.Fatalf("error = %v, want network ACL ConflictError", err)
+	}
+	if api.posts != 0 {
+		t.Fatalf("bootstrap mutated resources before ACL conflict: %d POSTs", api.posts)
 	}
 }
 
@@ -303,22 +465,40 @@ func TestBootstrapRejectsLabelledConfigurationDriftBeforeMutation(t *testing.T) 
 	}
 }
 
-func TestRequiredDriftAcceptsExpandedAutoAddresses(t *testing.T) {
+func TestRequiredDriftRequiresManagedBridgeGateway(t *testing.T) {
 	desired := networkResource(BootstrapConfig{Network: "openbox0"})
 	existing := resource{
 		Name: "openbox0",
 		Type: "bridge",
 		Config: map[string]string{
 			ManagedLabel: "true", ResourceLabel: "network",
-			"ipv4.address": "10.84.217.1/24", "ipv4.nat": "true", "ipv6.address": "none",
+			"ipv4.address": ManagedBridgeGateway, "ipv4.nat": "true", "ipv6.address": "none",
 		},
 	}
 	if fields := requiredDrift(existing, desired); len(fields) != 0 {
-		t.Fatalf("expanded auto address reported as drift: %v", fields)
+		t.Fatalf("managed bridge gateway reported as drift: %v", fields)
 	}
-	existing.Config["ipv4.address"] = ""
+	existing.Config["ipv4.address"] = "10.42.1.1/24"
 	if fields := requiredDrift(existing, desired); !containsField(fields, "config.ipv4.address") {
 		t.Fatalf("fields = %v, want config.ipv4.address", fields)
+	}
+}
+
+func TestNetworkResourcePinsManagedBridgeGateway(t *testing.T) {
+	network := networkResource(BootstrapConfig{Network: "openbox0"})
+	if got := network.Config["ipv4.address"]; got != "10.42.0.1/24" {
+		t.Fatalf("ipv4.address = %q, want 10.42.0.1/24", got)
+	}
+}
+
+func TestRequiredDriftDetectsManagedACLRuleChanges(t *testing.T) {
+	desired := networkACLResource()
+	existing := desired
+	existing.Egress = append([]networkACLRule(nil), desired.Egress...)
+	existing.Egress[0].DestinationPort = "5353"
+
+	if fields := requiredDrift(existing, desired); !containsField(fields, "egress") {
+		t.Fatalf("fields = %v, want egress", fields)
 	}
 }
 
@@ -404,6 +584,114 @@ func TestRealIncusPreflightAndBootstrap(t *testing.T) {
 	}
 }
 
+func TestApplyNetworkPolicyUpdatesInstanceNICACLs(t *testing.T) {
+	var patched instanceRecord
+	current := instanceRecord{
+		Name: "instance-1", Type: "container", Status: "Stopped",
+		Devices: map[string]map[string]string{"eth0": {"type": "nic", "network": "openbox0", "name": "eth0"}},
+	}
+	socket := serveUnixHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/1.0/instances/instance-1" {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			writeSync(w, current)
+		case http.MethodPatch:
+			if err := json.NewDecoder(r.Body).Decode(&patched); err != nil {
+				t.Errorf("decode patch: %v", err)
+			}
+			current.Devices = patched.Devices
+			writeSync(w, nil)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	}))
+	adapter, err := New(Options{SocketPath: socket})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.ApplyNetworkPolicy(context.Background(), domain.Instance{
+		ID: "instance-1", RuntimeRef: "instance-1", EgressMode: domain.EgressStandard,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := patched.Devices["eth0"]["security.acls"]; got != DefaultDenyACLName+","+StandardEgressACLName {
+		t.Fatalf("security.acls=%q", got)
+	}
+}
+
+func TestApplyNetworkPolicyRejectsUnchangedNICACLs(t *testing.T) {
+	socket := serveUnixHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/1.0/instances/instance-1" {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			writeSync(w, instanceRecord{
+				Name: "instance-1", Type: "container", Status: "Stopped",
+				Devices: map[string]map[string]string{
+					"eth0": {"type": "nic", "network": "openbox0", "name": "eth0", "security.acls": DefaultDenyACLName},
+				},
+			})
+		case http.MethodPatch:
+			writeSync(w, nil)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	}))
+	adapter, err := New(Options{SocketPath: socket})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = adapter.ApplyNetworkPolicy(context.Background(), domain.Instance{
+		ID: "instance-1", RuntimeRef: "instance-1", EgressMode: domain.EgressStandard,
+	})
+	if err == nil || !strings.Contains(err.Error(), "NIC ACL mismatch") {
+		t.Fatalf("apply error=%v", err)
+	}
+}
+
+func TestNetworkPolicyStatusReportsEffectiveACLsAndApplyFailures(t *testing.T) {
+	socket := serveUnixHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeSync(w, instanceRecord{
+				Name: "instance-1", Type: "container", Status: "Stopped",
+				Devices: map[string]map[string]string{"eth0": {"type": "nic", "network": "openbox0", "name": "eth0"}},
+			})
+		case http.MethodPatch:
+			writeError(w, http.StatusInternalServerError, "policy backend unavailable")
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	}))
+	adapter, err := New(Options{SocketPath: socket})
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance := domain.Instance{ID: "instance-1", RuntimeRef: "instance-1", EgressMode: domain.EgressRestricted}
+
+	before := adapter.NetworkPolicyStatus(instance)
+	if before.Resolution.State != "idle" || len(before.Resolution.Resolved) != 0 {
+		t.Fatalf("resolution before apply = %#v, want idle with no resolved hostnames", before.Resolution)
+	}
+	if got, want := before.ACLs, []string{DefaultDenyACLName}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ACLs before apply = %#v, want %#v", got, want)
+	}
+
+	if err := adapter.ApplyNetworkPolicy(context.Background(), instance); err == nil {
+		t.Fatal("ApplyNetworkPolicy succeeded despite ACL update failure")
+	}
+	after := adapter.NetworkPolicyStatus(instance)
+	if after.DeniedFlows != 1 {
+		t.Fatalf("denied flows = %d, want 1", after.DeniedFlows)
+	}
+}
+
 func cleanupIntegrationResources(adapter *Adapter, config BootstrapConfig) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -442,8 +730,13 @@ func (a *bootstrapAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodPost && collection {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		var value resource
-		if err := json.NewDecoder(r.Body).Decode(&value); err != nil {
+		if err := json.Unmarshal(body, &value); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -481,6 +774,8 @@ func classifyPath(path string) (kind, name string, collection bool) {
 		kind = "profile"
 	case "storage-pools":
 		kind = "storage"
+	case "network-acls":
+		kind = "network-acl"
 	}
 	collection = len(parts) == 2
 	if len(parts) > 2 {
@@ -512,6 +807,33 @@ func cloneDevices(value map[string]map[string]string) map[string]map[string]stri
 func containsField(values []string, wanted string) bool {
 	for _, value := range values {
 		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func containsNetworkACLRule(rules []networkACLRule, wanted networkACLRule) bool {
+	for _, rule := range rules {
+		if rule.Action == wanted.Action &&
+			rule.Source == wanted.Source &&
+			rule.Destination == wanted.Destination &&
+			rule.Protocol == wanted.Protocol &&
+			rule.DestinationPort == wanted.DestinationPort {
+			return true
+		}
+	}
+	return false
+}
+
+func standardACLRejectsDestination(acl resource, destination string) bool {
+	address := netip.MustParseAddr(destination)
+	for _, rule := range acl.Egress {
+		if rule.Action != "reject" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(rule.Destination)
+		if err == nil && prefix.Contains(address) {
 			return true
 		}
 	}

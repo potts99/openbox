@@ -15,7 +15,10 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/openbox-dev/openbox/internal/domain"
 )
 
 const DefaultSocket = "/var/lib/incus/unix.socket"
@@ -48,6 +51,8 @@ type Adapter struct {
 	readinessTimeout time.Duration
 	readinessPoll    time.Duration
 	sshProbe         func(context.Context, string) (bool, error)
+	policyMu         sync.RWMutex
+	policyDenied     map[domain.InstanceID]uint64
 }
 
 func New(options Options) (*Adapter, error) {
@@ -126,6 +131,7 @@ func New(options Options) (*Adapter, error) {
 		network:          networkName,
 		readinessTimeout: readinessTimeout,
 		readinessPoll:    readinessPoll,
+		policyDenied:     make(map[domain.InstanceID]uint64),
 	}, nil
 }
 
