@@ -3,12 +3,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -30,6 +32,7 @@ import (
 	piprofile "github.com/openbox-dev/openbox/internal/profiles/pi"
 	"github.com/openbox-dev/openbox/internal/reconcile"
 	"github.com/openbox-dev/openbox/internal/routes"
+	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 	"github.com/openbox-dev/openbox/internal/runtime/incus"
 	"github.com/openbox-dev/openbox/internal/sandbox"
 	"github.com/openbox-dev/openbox/internal/snapshots"
@@ -166,6 +169,27 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
+	piApplier := piprofile.NewApplier(piProfiles, piprofile.NewExecGuestWriter(func(ctx context.Context, runtimeRef string, command []string, stdin []byte) error {
+		var stdinReader io.Reader
+		if len(stdin) > 0 {
+			stdinReader = bytes.NewReader(stdin)
+		}
+		result, err := runtime.Exec(ctx, runtimeapi.ExecRequest{Ref: runtimeRef, Command: command, Stdin: stdinReader})
+		if err != nil {
+			return err
+		}
+		if result.ExitCode != 0 {
+			msg := strings.TrimSpace(string(result.Stderr))
+			if msg == "" {
+				msg = strings.TrimSpace(string(result.Stdout))
+			}
+			if msg == "" {
+				msg = fmt.Sprintf("exit status %d", result.ExitCode)
+			}
+			return fmt.Errorf("guest command failed: %s", msg)
+		}
+		return nil
+	}, piprofile.DefaultGuestHome))
 	worker, err := operations.NewWorker(store, recovery.Executor{Instances: service, Snapshots: snapshotService, Clones: cloneService}, operations.Config{WorkerID: "openboxd-local", Concurrency: config.WorkerConcurrency, Lease: config.Lease, Mode: mode})
 	if err != nil {
 		return fail(err)
@@ -184,6 +208,7 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 		Console:       runtime,
 		TerminalAudit: durableTerminalAuditor{store: store, fallbackOwner: domain.OwnerID(config.OwnerID)},
 		PiProfiles:    piProfiles,
+		PiApplier:     piApplier,
 	})
 	if err != nil {
 		return fail(err)
