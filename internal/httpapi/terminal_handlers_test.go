@@ -15,6 +15,8 @@ import (
 
 	"github.com/openbox-dev/openbox/internal/auth"
 	"github.com/openbox-dev/openbox/internal/domain"
+	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
+	"github.com/openbox-dev/openbox/internal/runtime/fake"
 	"github.com/openbox-dev/openbox/internal/terminal"
 )
 
@@ -285,6 +287,142 @@ func TestTerminalWebSocketRejectsNonGet(t *testing.T) {
 	h.ServeHTTP(w, req)
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestTerminalRejectsUnmanagedAndHostRuntimeRefs(t *testing.T) {
+	cases := []struct {
+		name       string
+		runtimeRef string
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "unmanaged empty ref", runtimeRef: "", wantStatus: http.StatusConflict, wantCode: string(domain.CodeRuntimeMissing)},
+		{name: "host ref", runtimeRef: "host", wantStatus: http.StatusBadRequest, wantCode: string(domain.CodeInvalidArgument)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, m, bootstrap := newAuthHandler(t)
+			session, cookie, err := m.Bootstrap(context.Background(), "loopback", bootstrap, "a sufficiently long password")
+			if err != nil {
+				t.Fatal(err)
+			}
+			svc := h.service.(*fakeService)
+			svc.instances = []domain.Instance{{
+				ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+				RuntimeRef: tc.runtimeRef,
+			}}
+
+			req := httptest.NewRequest(http.MethodGet, "/v1/instances/inst-owned/terminal", nil)
+			req.Host = "127.0.0.1"
+			req.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: cookie})
+			req.Header.Set(auth.CSRFHeader, session.CSRFToken)
+			req.Header.Set("Origin", "http://127.0.0.1")
+			req.Header.Set("Upgrade", "websocket")
+			req.Header.Set("Connection", "Upgrade")
+			req.Header.Set("Sec-WebSocket-Version", "13")
+			req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			if w.Code != tc.wantStatus {
+				t.Fatalf("status=%d body=%s want %d", w.Code, w.Body.String(), tc.wantStatus)
+			}
+			if !strings.Contains(w.Body.String(), `"code":"`+tc.wantCode+`"`) {
+				t.Fatalf("body=%s want code %q", w.Body.String(), tc.wantCode)
+			}
+		})
+	}
+}
+
+func TestTerminalOpensPTYThroughRuntimeAdapterUsingStoredRef(t *testing.T) {
+	rt := fake.New(runtimeapi.Capabilities{})
+	rt.AddImage(runtimeapi.Image{Fingerprint: "sha256:base"})
+	if _, err := rt.CreateInstance(context.Background(), runtimeapi.CreateRequest{Ref: "incus-owned-ref", Image: "sha256:base"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.StartInstance(context.Background(), "incus-owned-ref"); err != nil {
+		t.Fatal(err)
+	}
+
+	h, m, bootstrap := newAuthHandlerWithOptions(t, Options{Console: rt})
+	session, cookie, err := m.Bootstrap(context.Background(), "loopback", bootstrap, "a sufficiently long password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := h.service.(*fakeService)
+	svc.instances = []domain.Instance{{
+		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+		RuntimeRef: "incus-owned-ref",
+	}}
+
+	server := httptest.NewServer(h)
+	t.Cleanup(server.Close)
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/instances/inst-owned/terminal?" +
+		auth.CSRFQuery + "=" + url.QueryEscape(session.CSRFToken)
+
+	conn, err := dialTerminal(t, wsURL, http.Header{
+		"Cookie": []string{auth.SessionCookie + "=" + cookie},
+		"Origin": []string{server.URL},
+	})
+	if err != nil {
+		t.Fatalf("authorized dial: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	openPayload, err := terminal.Encode(terminal.OpenFrame{
+		InstanceID: "client-supplied-incus-id", Cols: 80, Rows: 24,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, openPayload); err != nil {
+		t.Fatal(err)
+	}
+
+	_, data, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("read open ack: %v", err)
+	}
+	frame, err := terminal.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ack, ok := frame.(terminal.OpenFrame)
+	if !ok {
+		t.Fatalf("frame type %T, want OpenFrame", frame)
+	}
+	if ack.InstanceID != "inst-owned" {
+		t.Fatalf("open ack instance_id=%q, want openbox id", ack.InstanceID)
+	}
+	if rt.LastConsoleRef() != "incus-owned-ref" {
+		t.Fatalf("OpenConsole ref=%q, want stored RuntimeRef (not client-supplied id)", rt.LastConsoleRef())
+	}
+
+	inputPayload, err := terminal.Encode(terminal.InputFrame{Data: []byte("ping")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, inputPayload); err != nil {
+		t.Fatal(err)
+	}
+
+	_, data, err = conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	outFrame, err := terminal.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, ok := outFrame.(terminal.OutputFrame)
+	if !ok {
+		t.Fatalf("frame type %T, want OutputFrame", outFrame)
+	}
+	if string(output.Data) != "ping" {
+		t.Fatalf("output=%q", output.Data)
 	}
 }
 

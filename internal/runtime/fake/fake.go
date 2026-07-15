@@ -6,6 +6,7 @@ package fake
 import (
 	"context"
 	"fmt"
+	"io"
 	"sort"
 	"sync"
 
@@ -21,6 +22,12 @@ type Runtime struct {
 	failures       map[string][]error
 	calls          []string
 	createRequests []runtimeapi.CreateRequest
+	lastConsoleRef string
+	consoleSizes   map[string]consoleSize
+}
+
+type consoleSize struct {
+	cols, rows uint16
 }
 
 func New(capabilities runtimeapi.Capabilities) *Runtime {
@@ -30,6 +37,7 @@ func New(capabilities runtimeapi.Capabilities) *Runtime {
 		instances:    map[string]runtimeapi.Instance{},
 		execResults:  map[string]runtimeapi.ExecResult{},
 		failures:     map[string][]error{},
+		consoleSizes: map[string]consoleSize{},
 	}
 }
 
@@ -198,6 +206,117 @@ func (r *Runtime) Exec(ctx context.Context, request runtimeapi.ExecRequest) (run
 		return runtimeapi.ExecResult{}, fmt.Errorf("exec %s: %w", request.Ref, runtimeapi.ErrUnsupported)
 	}
 	return cloneExecResult(r.execResults[request.Ref]), nil
+}
+
+func (r *Runtime) LastConsoleRef() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lastConsoleRef
+}
+
+func (r *Runtime) LastConsoleSize(ref string) (cols, rows uint16) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	size := r.consoleSizes[ref]
+	return size.cols, size.rows
+}
+
+func (r *Runtime) OpenConsole(ctx context.Context, request runtimeapi.ConsoleRequest) (runtimeapi.ConsoleSession, error) {
+	if runtimeapi.IsHostConsoleTarget(request.Ref) {
+		return nil, runtimeapi.ErrHostTarget
+	}
+	if err := r.begin(ctx, "console.open"); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	instance, exists := r.instances[request.Ref]
+	if !exists {
+		return nil, runtimeapi.ErrNotFound
+	}
+	if instance.State != runtimeapi.StateRunning {
+		return nil, fmt.Errorf("console %s: %w", request.Ref, runtimeapi.ErrUnsupported)
+	}
+	command := append([]string(nil), request.Command...)
+	if len(command) == 0 {
+		command = []string{"/bin/bash"}
+	}
+	_ = command
+	r.lastConsoleRef = request.Ref
+	r.consoleSizes[request.Ref] = consoleSize{cols: request.Cols, rows: request.Rows}
+
+	stdinR, stdinW := io.Pipe()
+	stdoutR, stdoutW := io.Pipe()
+	session := &consoleSession{
+		runtime: r,
+		ref:     request.Ref,
+		stdin:   stdinW,
+		stdout:  stdoutR,
+		done:    make(chan struct{}),
+	}
+	go func() {
+		defer stdoutW.Close()
+		defer stdinR.Close()
+		_, _ = io.Copy(stdoutW, stdinR)
+		session.finish(0, nil)
+	}()
+	return session, nil
+}
+
+type consoleSession struct {
+	runtime *Runtime
+	ref     string
+	stdin   *io.PipeWriter
+	stdout  *io.PipeReader
+
+	mu       sync.Mutex
+	closed   bool
+	exitCode int
+	waitErr  error
+	done     chan struct{}
+}
+
+func (s *consoleSession) Stdin() io.WriteCloser { return s.stdin }
+func (s *consoleSession) Stdout() io.Reader     { return s.stdout }
+
+func (s *consoleSession) Resize(cols, rows uint16) error {
+	s.runtime.mu.Lock()
+	defer s.runtime.mu.Unlock()
+	s.runtime.consoleSizes[s.ref] = consoleSize{cols: cols, rows: rows}
+	return nil
+}
+
+func (s *consoleSession) Wait() (int, error) {
+	<-s.done
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.exitCode, s.waitErr
+}
+
+func (s *consoleSession) Close() error {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil
+	}
+	s.closed = true
+	s.mu.Unlock()
+	_ = s.stdin.Close()
+	s.finish(0, nil)
+	return nil
+}
+
+func (s *consoleSession) finish(exitCode int, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	select {
+	case <-s.done:
+		return
+	default:
+		s.exitCode = exitCode
+		s.waitErr = err
+		close(s.done)
+	}
 }
 
 func (r *Runtime) CreateSnapshot(ctx context.Context, ref, name string) error {
