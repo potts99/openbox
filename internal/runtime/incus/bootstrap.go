@@ -94,6 +94,7 @@ func (a *Adapter) Bootstrap(ctx context.Context, config BootstrapConfig) error {
 		}{
 			{kind: "network", path: "/1.0/networks/" + url.PathEscape(config.Network), query: nil, value: networkResource(config)},
 			{kind: "network ACL", path: "/1.0/network-acls/" + url.PathEscape(DefaultDenyACLName), query: nil, value: networkACLResource()},
+			{kind: "network ACL", path: "/1.0/network-acls/" + url.PathEscape(StandardEgressACLName), query: nil, value: standardEgressACLResource()},
 			{kind: "profile", path: "/1.0/profiles/" + url.PathEscape(config.ContainerProfile), query: projectQuery, value: profileResource(config.ContainerProfile, "container-profile", config)},
 			{kind: "profile", path: "/1.0/profiles/" + url.PathEscape(config.VMProfile), query: projectQuery, value: profileResource(config.VMProfile, "vm-profile", config)},
 		}
@@ -110,9 +111,10 @@ func (a *Adapter) Bootstrap(ctx context.Context, config BootstrapConfig) error {
 	if err := a.ensure(ctx, "network", "/1.0/networks/"+url.PathEscape(config.Network), "/1.0/networks", nil, network); err != nil {
 		return err
 	}
-	acl := networkACLResource()
-	if err := a.ensure(ctx, "network ACL", "/1.0/network-acls/"+url.PathEscape(acl.Name), "/1.0/network-acls", nil, acl); err != nil {
-		return err
+	for _, acl := range []resource{networkACLResource(), standardEgressACLResource()} {
+		if err := a.ensure(ctx, "network ACL", "/1.0/network-acls/"+url.PathEscape(acl.Name), "/1.0/network-acls", nil, acl); err != nil {
+			return err
+		}
 	}
 	for _, profile := range []struct {
 		name, kind string

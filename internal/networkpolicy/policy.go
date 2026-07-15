@@ -3,7 +3,13 @@
 // Package networkpolicy evaluates instance egress policy decisions.
 package networkpolicy
 
-import "github.com/openbox-dev/openbox/internal/domain"
+import (
+	"encoding/json"
+	"fmt"
+	"net/netip"
+
+	"github.com/openbox-dev/openbox/internal/domain"
+)
 
 type DestinationClass string
 
@@ -42,4 +48,31 @@ func Evaluate(mode domain.EgressMode, dest DestinationClass) Decision {
 	default:
 		return Deny
 	}
+}
+
+// ParseAllowedDestinations parses administrator allowlist entries into their
+// canonical IP address or masked CIDR forms. Hostname resolution is performed
+// outside the guest in a later task.
+func ParseAllowedDestinations(raw []byte) ([]string, error) {
+	var entries []string
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, fmt.Errorf("parse allowed destinations: %w", err)
+	}
+	if entries == nil {
+		return nil, fmt.Errorf("allowed destinations must be a JSON array")
+	}
+
+	destinations := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if address, err := netip.ParseAddr(entry); err == nil {
+			destinations = append(destinations, address.String())
+			continue
+		}
+		if prefix, err := netip.ParsePrefix(entry); err == nil {
+			destinations = append(destinations, prefix.Masked().String())
+			continue
+		}
+		return nil, fmt.Errorf("allowed destination %q must be an IP address or CIDR", entry)
+	}
+	return destinations, nil
 }
