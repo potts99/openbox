@@ -57,12 +57,12 @@ func Run(ctx context.Context, execer Execer, ref string, req ExecRequest, sink F
 		return err
 	}
 	if len(result.Stdout) > 0 {
-		if err := sink.Emit(execstream.StdoutFrame{Data: result.Stdout}); err != nil {
+		if err := emitChunked(sink, result.Stdout, true); err != nil {
 			return err
 		}
 	}
 	if len(result.Stderr) > 0 {
-		if err := sink.Emit(execstream.StderrFrame{Data: result.Stderr}); err != nil {
+		if err := emitChunked(sink, result.Stderr, false); err != nil {
 			return err
 		}
 	}
@@ -74,4 +74,28 @@ func stdinOrEmpty(r io.Reader) io.Reader {
 		return io.MultiReader()
 	}
 	return r
+}
+
+// maxExecChunk keeps base64+JSON frames under execstream.MaxFrameBytes.
+const maxExecChunk = 45 << 10
+
+func emitChunked(sink FrameSink, data []byte, stdout bool) error {
+	for len(data) > 0 {
+		n := maxExecChunk
+		if n > len(data) {
+			n = len(data)
+		}
+		chunk := append([]byte(nil), data[:n]...)
+		data = data[n:]
+		var frame execstream.Frame
+		if stdout {
+			frame = execstream.StdoutFrame{Data: chunk}
+		} else {
+			frame = execstream.StderrFrame{Data: chunk}
+		}
+		if err := sink.Emit(frame); err != nil {
+			return err
+		}
+	}
+	return nil
 }
