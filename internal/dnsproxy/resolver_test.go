@@ -38,6 +38,30 @@ func TestAllowlistResolverKeepsPublicIPv4AndIPv6(t *testing.T) {
 	}
 }
 
+func TestAllowlistResolverDropsRebindingAddressesWhenPublicAddressExists(t *testing.T) {
+	t.Parallel()
+
+	resolver := &fakeResolver{responses: []response{{
+		result: dnsproxy.LookupResult{
+			Addresses: []netip.Addr{
+				netip.MustParseAddr("198.51.100.7"),
+				netip.MustParseAddr("10.42.0.8"),
+			},
+			TTL: time.Minute,
+		},
+	}}}
+	allowlist, _ := newAllowlistResolver(t, resolver, time.Unix(0, 0), time.Second, 5*time.Minute)
+
+	addresses, err := allowlist.Resolve(context.Background(), "packages.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []netip.Addr{netip.MustParseAddr("198.51.100.7")}
+	if !reflect.DeepEqual(addresses, want) {
+		t.Fatalf("addresses = %v, want %v", addresses, want)
+	}
+}
+
 func TestAllowlistResolverRejectsRebindingAddresses(t *testing.T) {
 	t.Parallel()
 
@@ -149,6 +173,50 @@ func TestAllowlistResolverFailsClosedWhenExpiredRefreshFails(t *testing.T) {
 	fakeClock.Advance(time.Second)
 	if _, err := allowlist.Resolve(context.Background(), "packages.example.com"); err == nil {
 		t.Fatal("Resolve succeeded with stale addresses after failed refresh")
+	}
+}
+
+func TestAllowlistResolverFailsClosedWhenExpiredRefreshIsOnlyRebinding(t *testing.T) {
+	t.Parallel()
+
+	now := time.Unix(0, 0)
+	resolver := &fakeResolver{responses: []response{
+		{result: dnsproxy.LookupResult{Addresses: []netip.Addr{netip.MustParseAddr("198.51.100.7")}, TTL: time.Second}},
+		{result: dnsproxy.LookupResult{Addresses: []netip.Addr{netip.MustParseAddr("10.42.0.8")}, TTL: time.Second}},
+	}}
+	allowlist, fakeClock := newAllowlistResolver(t, resolver, now, time.Second, time.Minute)
+
+	if _, err := allowlist.Resolve(context.Background(), "packages.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	fakeClock.Advance(time.Second)
+	if _, err := allowlist.Resolve(context.Background(), "packages.example.com"); err == nil {
+		t.Fatal("Resolve succeeded with stale addresses after rebinding refresh")
+	}
+}
+
+func TestAllowlistResolverCanonicalizesHostnameCacheKeys(t *testing.T) {
+	t.Parallel()
+
+	resolver := &fakeResolver{responses: []response{
+		{result: dnsproxy.LookupResult{Addresses: []netip.Addr{netip.MustParseAddr("198.51.100.7")}, TTL: time.Minute}},
+		{result: dnsproxy.LookupResult{Addresses: []netip.Addr{netip.MustParseAddr("198.51.100.8")}, TTL: time.Minute}},
+	}}
+	allowlist, _ := newAllowlistResolver(t, resolver, time.Unix(0, 0), time.Second, 5*time.Minute)
+
+	first, err := allowlist.Resolve(context.Background(), "Packages.Example.COM.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := allowlist.Resolve(context.Background(), "packages.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(second, first) {
+		t.Fatalf("cached addresses = %v, want %v", second, first)
+	}
+	if got := resolver.calls; got != 1 {
+		t.Fatalf("lookup calls = %d, want 1 shared cache entry", got)
 	}
 }
 
