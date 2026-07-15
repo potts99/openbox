@@ -110,6 +110,7 @@ export function InstanceTerminal({
           <h1 id="terminal-heading">{instanceName}</h1>
         </div>
         <div className="terminal-actions">
+          <p className="terminal-hint">Copy/paste uses the system clipboard.</p>
           <p
             className="terminal-connection"
             role="status"
@@ -132,10 +133,6 @@ export function InstanceTerminal({
       </header>
       <main id="terminal-main" className="terminal-main" aria-labelledby="terminal-heading">
         <Surface onData={onData} onResize={onResize} onReady={onReady} />
-        <p className="terminal-hint">
-          Copy uses the terminal selection and the system clipboard. Paste (Ctrl/Cmd+V) sends
-          clipboard text to the instance PTY.
-        </p>
       </main>
     </div>
   );
