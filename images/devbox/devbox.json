@@ -1,0 +1,23 @@
+{
+  "name": "devbox",
+  "base": "ubuntu/24.04",
+  "packages": [
+    {
+      "manager": "apt",
+      "name": "tmux",
+      "version": "3.4-1ubuntu0.1"
+    },
+    {
+      "manager": "npm",
+      "name": "@earendil-works/pi-coding-agent",
+      "version": "0.80.7"
+    }
+  ],
+  "setup": [
+    "apt-get update"
+  ],
+  "verify": [
+    "pi --version",
+    "tmux -V"
+  ]
+}
