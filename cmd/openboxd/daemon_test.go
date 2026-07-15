@@ -135,6 +135,37 @@ func TestDurableSSHAuditorStoresOnlySafeStructuredMetadata(t *testing.T) {
 	}
 }
 
+func TestDurableTerminalAuditorStoresOnlySafeStructuredMetadata(t *testing.T) {
+	writer := &auditCapture{}
+	auditor := durableTerminalAuditor{store: writer, fallbackOwner: "owner-local"}
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	marker := "UNIQUE_PTY_MARKER_must_not_appear_in_metadata"
+	if err := auditor.Record(context.Background(), httpapi.TerminalAuditEvent{
+		At: now, OwnerID: "owner-1", InstanceID: "inst-1",
+		SessionID: "sess-1", SessionName: "pi",
+		Phase: httpapi.TerminalAuditPhaseEnd, Reason: httpapi.TerminalAuditReasonDetach,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var metadata map[string]string
+	if err := json.Unmarshal(writer.event.MetadataJSON, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if writer.event.Action != "terminal.session" || writer.event.TargetType != "instance" || writer.event.TargetID != "inst-1" {
+		t.Fatalf("event=%+v", writer.event)
+	}
+	if writer.event.Outcome != httpapi.TerminalAuditReasonDetach {
+		t.Fatalf("outcome=%q", writer.event.Outcome)
+	}
+	if metadata["phase"] != httpapi.TerminalAuditPhaseEnd || metadata["session_id"] != "sess-1" || metadata["session_name"] != "pi" || metadata["reason"] != httpapi.TerminalAuditReasonDetach {
+		t.Fatalf("metadata=%v", metadata)
+	}
+	raw, _ := json.Marshal(writer.event)
+	if strings.Contains(string(raw), marker) || strings.Contains(string(writer.event.MetadataJSON), "input") || strings.Contains(string(writer.event.MetadataJSON), "output") {
+		t.Fatalf("unsafe terminal audit payload: %s", raw)
+	}
+}
+
 func TestDaemonRestartRecoversWithoutDuplicateCreateOrStatusLoss(t *testing.T) {
 	ctx := context.Background()
 	database := t.TempDir() + "/openbox.db"

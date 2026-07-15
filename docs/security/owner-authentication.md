@@ -59,6 +59,13 @@ per-session CSRF value in `X-CSRF-Token`. The server stores only its digest and
 performs a constant-time comparison. Bearer-token requests do not use cookies
 and therefore do not require this CSRF header.
 
+Browser terminal WebSocket handshakes are an exception for header delivery only:
+because the browser `WebSocket` API cannot set custom headers, a cookie session
+may supply the same CSRF value as `?csrf=` on `GET` with `Upgrade: websocket`.
+Non-WebSocket mutations must not rely on the query parameter. See
+[browser terminal development notes](../development/browser-terminal.md) and
+[browser terminal operations](../operators/browser-terminal.md).
+
 ## API tokens
 
 Owner API tokens have an explicit `owner` scope and may have an expiry. A token
