@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { InstanceAction, InstanceDetail, OpenBoxApi } from "../api/client";
+import { LaunchPi, launchPiAvailable } from "../components/LaunchPi";
 
 interface InstancePageProps {
   api: OpenBoxApi;
   instanceId: string;
   onBack(): void;
-  onOpenTerminal(instance: { id: string; name: string }): void;
+  onOpenTerminal(instance: { id: string; name: string; launchPi?: boolean }): void;
 }
 
 type PageData =
@@ -86,6 +87,7 @@ export function InstancePage({ api, instanceId, onBack, onOpenTerminal }: Instan
   const canStop = observed === "running";
   const canRestart = observed === "running";
   const canOpenTerminal = observed === "running";
+  const showLaunchPi = instance ? launchPiAvailable(instance.kind) : false;
 
   return (
     <div className="console-layout">
@@ -107,8 +109,16 @@ export function InstancePage({ api, instanceId, onBack, onOpenTerminal }: Instan
               <h1>{instance?.name ?? "Instance"}</h1>
             </div>
             <div className="instance-actions">
+              {showLaunchPi ? (
+                <LaunchPi
+                  disabled={!canOpenTerminal || !instance}
+                  onLaunch={() => {
+                    if (instance) onOpenTerminal({ id: instance.id, name: instance.name, launchPi: true });
+                  }}
+                />
+              ) : null}
               <button
-                className="primary-action"
+                className={showLaunchPi ? "btn" : "primary-action"}
                 type="button"
                 disabled={!canOpenTerminal || !instance}
                 onClick={() => {

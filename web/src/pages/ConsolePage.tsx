@@ -21,7 +21,7 @@ type ConsoleData =
 type View =
   | { kind: "list" }
   | { kind: "detail"; instanceId: string }
-  | { kind: "terminal"; instanceId: string; instanceName: string };
+  | { kind: "terminal"; instanceId: string; instanceName: string; launchPi?: boolean };
 
 export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
   const [data, setData] = useState<ConsoleData>({ status: "loading" });
@@ -67,6 +67,7 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
         instanceId={view.instanceId}
         instanceName={view.instanceName}
         csrfToken={session.csrfToken || api.getCsrfToken()}
+        launchPi={view.launchPi}
         onBack={() => setView({ kind: "detail", instanceId: view.instanceId })}
       />
     );
@@ -82,6 +83,7 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
           kind: "terminal",
           instanceId: instance.id,
           instanceName: instance.name,
+          launchPi: instance.launchPi,
         })}
       />
     );
