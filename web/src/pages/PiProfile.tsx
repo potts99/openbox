@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { InstanceSummary, OpenBoxApi, PiProfileSummary, PiProfileVersion } from "../api/client";
 
 interface PiProfilePageProps {
@@ -29,9 +29,8 @@ export function PiProfilePage({ api, onBack }: PiProfilePageProps) {
   const [busy, setBusy] = useState("");
   const [actionError, setActionError] = useState("");
 
-  const load = useCallback(() => {
+  useEffect(() => {
     let active = true;
-    setData({ status: "loading" });
     void Promise.all([api.listPiProfiles(), api.listInstances()])
       .then(([profiles, instances]) => {
         if (!active) return;
@@ -49,13 +48,8 @@ export function PiProfilePage({ api, onBack }: PiProfilePageProps) {
     return () => { active = false; };
   }, [api]);
 
-  useEffect(() => load(), [load]);
-
   useEffect(() => {
-    if (!selectedId) {
-      setHistory([]);
-      return;
-    }
+    if (!selectedId) return;
     let active = true;
     void api.getPiProfileHistory(selectedId)
       .then((versions) => { if (active) setHistory(versions); })
@@ -63,6 +57,7 @@ export function PiProfilePage({ api, onBack }: PiProfilePageProps) {
     return () => { active = false; };
   }, [api, selectedId]);
 
+  const visibleHistory = selectedId ? history : [];
   const profile = data.status === "ready"
     ? data.profiles.find((item) => item.id === selectedId) ?? null
     : null;
@@ -166,7 +161,7 @@ export function PiProfilePage({ api, onBack }: PiProfilePageProps) {
                   <section aria-labelledby="pi-profile-history-heading">
                     <h2 id="pi-profile-history-heading">Version history</h2>
                     <ul className="pi-profile-history">
-                      {history.map((item) => (
+                      {visibleHistory.map((item) => (
                         <li key={item.version}>
                           <span>v{item.version}</span>
                           <button

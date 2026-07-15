@@ -3,7 +3,8 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { LaunchPi, launchPiAvailable } from "./LaunchPi";
+import { LaunchPi } from "./LaunchPi";
+import { launchPiAvailable } from "./launchPiAvailable";
 
 describe("launchPiAvailable", () => {
   it("allows Pi-enabled Devboxes and Sandboxes only", () => {
