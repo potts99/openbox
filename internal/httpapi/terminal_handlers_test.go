@@ -448,3 +448,247 @@ func dialTerminalHTTP(t *testing.T, wsURL string, header http.Header) (int, erro
 	}
 	return 0, err
 }
+
+func TestTerminalRejectsConcurrentSessionsAtCapacity(t *testing.T) {
+	rt := newRunningFakeRuntime(t, "incus-owned-ref")
+	limits := terminal.DefaultLimits()
+	limits.MaxSessionsPerOwner = 1
+	limits.MaxSessionsPerInstance = 1
+
+	h, m, bootstrap := newAuthHandlerWithOptions(t, Options{Console: rt, TerminalLimits: limits})
+	session, cookie, err := m.Bootstrap(context.Background(), "loopback", bootstrap, "a sufficiently long password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := h.service.(*fakeService)
+	svc.instances = []domain.Instance{{
+		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+		RuntimeRef: "incus-owned-ref",
+	}}
+
+	server := httptest.NewServer(h)
+	t.Cleanup(server.Close)
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/instances/inst-owned/terminal?" +
+		auth.CSRFQuery + "=" + url.QueryEscape(session.CSRFToken)
+	header := http.Header{
+		"Cookie": []string{auth.SessionCookie + "=" + cookie},
+		"Origin": []string{server.URL},
+	}
+
+	first, err := dialTerminal(t, wsURL, header)
+	if err != nil {
+		t.Fatalf("first dial: %v", err)
+	}
+	defer first.Close(websocket.StatusNormalClosure, "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	openPayload, err := terminal.Encode(terminal.OpenFrame{InstanceID: "inst-owned", Cols: 80, Rows: 24})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Write(ctx, websocket.MessageText, openPayload); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := first.Read(ctx); err != nil {
+		t.Fatalf("open ack: %v", err)
+	}
+
+	status, err := dialTerminalHTTP(t, wsURL, header)
+	if err == nil {
+		t.Fatal("expected second upgrade rejected")
+	}
+	if status != http.StatusTooManyRequests {
+		t.Fatalf("status=%d want %d", status, http.StatusTooManyRequests)
+	}
+}
+
+func TestTerminalRejectsOversizedInboundFrame(t *testing.T) {
+	rt := newRunningFakeRuntime(t, "incus-owned-ref")
+	h, conn, ctx := dialOpenTerminal(t, rt, terminal.DefaultLimits())
+	_ = h
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	// Bypass Encode (which refuses oversized frames) and write raw bytes over the limit.
+	oversized := []byte(`{"type":"input","data":"` + strings.Repeat("A", terminal.MaxFrameBytes) + `"}`)
+	if len(oversized) <= terminal.MaxFrameBytes {
+		t.Fatalf("test payload not oversized: %d", len(oversized))
+	}
+	if err := conn.Write(ctx, websocket.MessageText, oversized); err != nil {
+		// Client may fail on write if peer already closed; still wait for close.
+		t.Logf("write oversized: %v", err)
+	}
+
+	_, _, err := conn.Read(ctx)
+	if err == nil {
+		t.Fatal("expected read failure after oversized frame")
+	}
+}
+
+func TestTerminalEnforcesInboundRateLimit(t *testing.T) {
+	rt := newRunningFakeRuntime(t, "incus-owned-ref")
+	limits := terminal.DefaultLimits()
+	limits.MaxInboundFramesPerWindow = 3
+	limits.MaxInboundBytesPerWindow = 1 << 20
+	limits.RateWindow = time.Second
+
+	_, conn, ctx := dialOpenTerminal(t, rt, limits)
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	// Open already consumed 1 frame. Two more inputs are allowed; the next should trip the limiter.
+	for i := 0; i < 2; i++ {
+		payload, err := terminal.Encode(terminal.InputFrame{Data: []byte("x")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.Write(ctx, websocket.MessageText, payload); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := conn.Read(ctx); err != nil {
+			t.Fatalf("echo %d: %v", i, err)
+		}
+	}
+
+	payload, err := terminal.Encode(terminal.InputFrame{Data: []byte("y")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, payload); err != nil {
+		t.Fatal(err)
+	}
+
+	_, data, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("read rate-limit error: %v", err)
+	}
+	frame, err := terminal.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	errFrame, ok := frame.(terminal.ErrorFrame)
+	if !ok {
+		t.Fatalf("frame type %T, want ErrorFrame", frame)
+	}
+	if errFrame.Code != "rate_limited" {
+		t.Fatalf("code=%q want rate_limited", errFrame.Code)
+	}
+}
+
+func TestTerminalClosesIdleSessions(t *testing.T) {
+	rt := newRunningFakeRuntime(t, "incus-owned-ref")
+	limits := terminal.DefaultLimits()
+	limits.IdleTimeout = 80 * time.Millisecond
+
+	_, conn, ctx := dialOpenTerminal(t, rt, limits)
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	_, data, err := conn.Read(readCtx)
+	if err != nil {
+		if websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
+			t.Fatalf("idle close status=%v err=%v want StatusPolicyViolation or idle_timeout frame", websocket.CloseStatus(err), err)
+		}
+		return
+	}
+	frame, err := terminal.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	errFrame, ok := frame.(terminal.ErrorFrame)
+	if !ok {
+		t.Fatalf("frame type %T, want ErrorFrame", frame)
+	}
+	if errFrame.Code != "idle_timeout" {
+		t.Fatalf("code=%q want idle_timeout", errFrame.Code)
+	}
+}
+
+func TestTerminalEnforcesTotalBufferLimit(t *testing.T) {
+	rt := newRunningFakeRuntime(t, "incus-owned-ref")
+	limits := terminal.DefaultLimits()
+	limits.MaxTotalBufferBytes = 16
+
+	_, conn, ctx := dialOpenTerminal(t, rt, limits)
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	payload, err := terminal.Encode(terminal.InputFrame{Data: []byte("0123456789abcdef0123456789")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, payload); err != nil {
+		t.Fatal(err)
+	}
+
+	_, data, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("read buffer error: %v", err)
+	}
+	frame, err := terminal.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	errFrame, ok := frame.(terminal.ErrorFrame)
+	if !ok {
+		t.Fatalf("frame type %T, want ErrorFrame", frame)
+	}
+	if errFrame.Code != "buffer_limit" {
+		t.Fatalf("code=%q want buffer_limit", errFrame.Code)
+	}
+}
+
+func newRunningFakeRuntime(t *testing.T, ref string) *fake.Runtime {
+	t.Helper()
+	rt := fake.New(runtimeapi.Capabilities{})
+	rt.AddImage(runtimeapi.Image{Fingerprint: "sha256:base"})
+	if _, err := rt.CreateInstance(context.Background(), runtimeapi.CreateRequest{Ref: ref, Image: "sha256:base"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.StartInstance(context.Background(), ref); err != nil {
+		t.Fatal(err)
+	}
+	return rt
+}
+
+func dialOpenTerminal(t *testing.T, rt *fake.Runtime, limits terminal.Limits) (*Handler, *websocket.Conn, context.Context) {
+	t.Helper()
+	h, m, bootstrap := newAuthHandlerWithOptions(t, Options{Console: rt, TerminalLimits: limits})
+	session, cookie, err := m.Bootstrap(context.Background(), "loopback", bootstrap, "a sufficiently long password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := h.service.(*fakeService)
+	svc.instances = []domain.Instance{{
+		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+		RuntimeRef: "incus-owned-ref",
+	}}
+
+	server := httptest.NewServer(h)
+	t.Cleanup(server.Close)
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/instances/inst-owned/terminal?" +
+		auth.CSRFQuery + "=" + url.QueryEscape(session.CSRFToken)
+
+	conn, err := dialTerminal(t, wsURL, http.Header{
+		"Cookie": []string{auth.SessionCookie + "=" + cookie},
+		"Origin": []string{server.URL},
+	})
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(websocket.StatusNormalClosure, "") })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	t.Cleanup(cancel)
+
+	openPayload, err := terminal.Encode(terminal.OpenFrame{InstanceID: "inst-owned", Cols: 80, Rows: 24})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, openPayload); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := conn.Read(ctx); err != nil {
+		t.Fatalf("open ack: %v", err)
+	}
+	return h, conn, ctx
+}

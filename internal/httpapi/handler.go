@@ -23,6 +23,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/httpapi/generated"
 	"github.com/openbox-dev/openbox/internal/images"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
+	"github.com/openbox-dev/openbox/internal/terminal"
 	"github.com/openbox-dev/openbox/internal/version"
 )
 
@@ -70,6 +71,9 @@ type Options struct {
 	// Console opens interactive PTYs inside managed instances. When nil, the
 	// terminal WebSocket still authorizes but returns not_implemented.
 	Console runtimeapi.ConsoleOpener
+	// TerminalLimits bounds frame size, inbound rate, concurrent sessions,
+	// idle time, and pending buffers. Zero fields use terminal.DefaultLimits.
+	TerminalLimits terminal.Limits
 }
 
 type Handler struct {
@@ -81,6 +85,8 @@ type Handler struct {
 	maxBodyBytes      int64
 	eventBatchSize    int
 	console           runtimeapi.ConsoleOpener
+	terminalLimits    terminal.Limits
+	terminalSessions  *terminal.SessionRegistry
 }
 
 func New(service Service, options Options) (*Handler, error) {
@@ -102,10 +108,13 @@ func New(service Service, options Options) (*Handler, error) {
 	if options.EventBatchSize <= 0 {
 		options.EventBatchSize = defaultEventLimit
 	}
+	limits := options.TerminalLimits.WithDefaults()
 	return &Handler{
 		service: service, fixedOwnerID: options.OwnerID, auth: options.Auth, pollInterval: options.PollInterval,
 		heartbeatInterval: options.HeartbeatInterval, maxBodyBytes: options.MaxBodyBytes,
 		eventBatchSize: options.EventBatchSize, console: options.Console,
+		terminalLimits:   limits,
+		terminalSessions: terminal.NewSessionRegistry(limits.MaxSessionsPerOwner, limits.MaxSessionsPerInstance),
 	}, nil
 }
 
