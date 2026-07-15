@@ -141,6 +141,22 @@ describe("App", () => {
     expect(screen.queryByRole("complementary", { name: "Operations" })).not.toBeInTheDocument();
   });
 
+  it("renders runtime ready when VMs report supported availability", async () => {
+    const api = createApi({
+      getCapabilities: vi.fn().mockResolvedValue({
+        architecture: "x86_64",
+        containers: true,
+        virtualMachines: true,
+        vmAvailability: "supported",
+      }),
+    });
+    render(<App api={api} />);
+
+    const capability = await screen.findByRole("status", { name: "Runtime capability status" });
+    expect(capability).toHaveTextContent("Runtime ready");
+    expect(capability).toHaveTextContent("Containers and VMs available.");
+  });
+
   it("offers a uniquely named open-terminal action per instance", async () => {
     const api = createApi({
       listInstances: vi.fn().mockResolvedValue([

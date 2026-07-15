@@ -3,7 +3,7 @@
 import type { Capabilities } from "../api/client";
 
 export function CapabilityBanner({ capabilities }: { capabilities: Capabilities }) {
-  const virtualMachinesAvailable = capabilities.virtualMachines && capabilities.vmAvailability === "available";
+  const virtualMachinesAvailable = capabilities.virtualMachines && capabilities.vmAvailability === "supported";
   return (
     <section
       className={`capability-strip ${virtualMachinesAvailable ? "is-ready" : "is-limited"}`}
