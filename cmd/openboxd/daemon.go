@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/openbox-dev/openbox/internal/app/clones"
 	"github.com/openbox-dev/openbox/internal/app/instances"
 	"github.com/openbox-dev/openbox/internal/app/recovery"
 	"github.com/openbox-dev/openbox/internal/app/sshcommands"
@@ -155,7 +156,11 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
-	worker, err := operations.NewWorker(store, recovery.Executor{Instances: service, Snapshots: snapshotService}, operations.Config{WorkerID: "openboxd-local", Concurrency: config.WorkerConcurrency, Lease: config.Lease, Mode: mode})
+	cloneService, err := clones.New(runtime, store, clones.Options{})
+	if err != nil {
+		return fail(err)
+	}
+	worker, err := operations.NewWorker(store, recovery.Executor{Instances: service, Snapshots: snapshotService, Clones: cloneService}, operations.Config{WorkerID: "openboxd-local", Concurrency: config.WorkerConcurrency, Lease: config.Lease, Mode: mode})
 	if err != nil {
 		return fail(err)
 	}
@@ -173,7 +178,7 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 		return fail(err)
 	}
 	api := &daemonAPIServer{server: httpapi.NewServer(config.APIAddress, rootHandler(handler)), certificate: config.APITLSCertificate, key: config.APITLSKey}
-	dispatcher, err := sshcommands.New(service, instancePublicKey, nil)
+	dispatcher, err := sshcommands.New(service, instancePublicKey, sshCopyAdapter{clones: cloneService})
 	if err != nil {
 		return fail(err)
 	}
@@ -326,6 +331,14 @@ func (a durableSSHAuditor) Record(ctx context.Context, event sshgateway.AuditEve
 type durableTerminalAuditor struct {
 	store         sshAuditWriter
 	fallbackOwner domain.OwnerID
+}
+
+type sshCopyAdapter struct {
+	clones *clones.Service
+}
+
+func (a sshCopyAdapter) SubmitCopy(ctx context.Context, owner domain.OwnerID, source, destination, key string) (domain.Instance, domain.Operation, error) {
+	return a.clones.SubmitCopy(ctx, clones.CopyInput{OwnerID: owner, Source: source, Destination: destination, IdempotencyKey: key})
 }
 
 func (a durableTerminalAuditor) Record(ctx context.Context, event httpapi.TerminalAuditEvent) error {

@@ -89,25 +89,28 @@ type Resources struct {
 }
 
 type Instance struct {
-	ID                 InstanceID
-	OwnerID            OwnerID
-	Name               string
-	Kind               InstanceKind
-	ImageID            ImageID
-	RequestedIsolation IsolationRequest
-	ActualIsolation    IsolationType
-	DesiredState       DesiredState
-	ObservedState      ObservedState
-	Resources          Resources
-	ExpiresAt          *time.Time
-	Protected          bool
-	RuntimeRef         string
-	ErrorCode          ErrorCode
-	ErrorStage         string
-	ErrorRetryable     bool
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	DeletedAt          *time.Time
+	ID                    InstanceID
+	OwnerID               OwnerID
+	Name                  string
+	Kind                  InstanceKind
+	ImageID               ImageID
+	RequestedIsolation    IsolationRequest
+	ActualIsolation       IsolationType
+	DesiredState          DesiredState
+	ObservedState         ObservedState
+	Resources             Resources
+	ExpiresAt             *time.Time
+	Protected             bool
+	RuntimeRef            string
+	CloneSourceInstanceID InstanceID
+	CloneSourceSnapshotID SnapshotID
+	CloneSourceImageID    ImageID
+	ErrorCode             ErrorCode
+	ErrorStage            string
+	ErrorRetryable        bool
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	DeletedAt             *time.Time
 }
 
 type Image struct {
