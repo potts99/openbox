@@ -133,6 +133,23 @@ type ConsoleOpener interface {
 	OpenConsole(context.Context, ConsoleRequest) (ConsoleSession, error)
 }
 
+// UsageSnapshot is a point-in-time reading from the runtime's instance state.
+// Counter fields are cumulative; callers derive rates (CPU %, B/s) across samples.
+type UsageSnapshot struct {
+	Status        InstanceState
+	CPUNanos      int64
+	MemoryBytes   int64
+	DiskBytes     int64
+	NetRxBytes    int64
+	NetTxBytes    int64
+}
+
+// InstanceUsageReader reads live resource counters for a managed instance.
+// Ref is a runtime identity (never an OpenBox host target).
+type InstanceUsageReader interface {
+	InstanceUsage(context.Context, string) (UsageSnapshot, error)
+}
+
 // Runtime is deliberately provider-neutral. Implementations must honor context
 // cancellation and return the sentinel errors above through errors.Is.
 type Runtime interface {

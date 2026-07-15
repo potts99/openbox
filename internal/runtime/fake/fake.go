@@ -18,6 +18,7 @@ type Runtime struct {
 	capabilities       runtimeapi.Capabilities
 	images             map[string]runtimeapi.Image
 	instances          map[string]runtimeapi.Instance
+	usage              map[string]runtimeapi.UsageSnapshot
 	execResults        map[string]runtimeapi.ExecResult
 	failures           map[string][]error
 	calls              []string
@@ -38,11 +39,38 @@ func New(capabilities runtimeapi.Capabilities) *Runtime {
 		capabilities:   capabilities,
 		images:         map[string]runtimeapi.Image{},
 		instances:      map[string]runtimeapi.Instance{},
+		usage:          map[string]runtimeapi.UsageSnapshot{},
 		execResults:    map[string]runtimeapi.ExecResult{},
 		failures:       map[string][]error{},
 		consoleSizes:   map[string]consoleSize{},
 		activeConsoles: map[string]*consoleSession{},
 	}
+}
+
+func (r *Runtime) SetUsage(ref string, usage runtimeapi.UsageSnapshot) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.usage[ref] = usage
+}
+
+func (r *Runtime) InstanceUsage(ctx context.Context, ref string) (runtimeapi.UsageSnapshot, error) {
+	if err := r.begin(ctx, "instance_usage"); err != nil {
+		return runtimeapi.UsageSnapshot{}, err
+	}
+	if runtimeapi.IsHostConsoleTarget(ref) {
+		return runtimeapi.UsageSnapshot{}, runtimeapi.ErrHostTarget
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	usage, ok := r.usage[ref]
+	if !ok {
+		instance, exists := r.instances[ref]
+		if !exists {
+			return runtimeapi.UsageSnapshot{}, runtimeapi.ErrNotFound
+		}
+		return runtimeapi.UsageSnapshot{Status: instance.State}, nil
+	}
+	return usage, nil
 }
 
 func (r *Runtime) AddImage(image runtimeapi.Image) {
