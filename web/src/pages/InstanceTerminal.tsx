@@ -35,6 +35,7 @@ function statusLabel(state: ConnectionState): string {
 }
 
 const textEncoder = new TextEncoder();
+const PERSISTENT_SESSION_NAME = "main";
 
 export function InstanceTerminal({
   instanceId,
@@ -45,26 +46,19 @@ export function InstanceTerminal({
   Surface = XtermTerminalSurface,
 }: InstanceTerminalProps) {
   const [connection, setConnection] = useState<ConnectionState>({ status: "connecting" });
-  const [persistent, setPersistent] = useState(false);
-  const [sessionName, setSessionName] = useState("");
   const sessionRef = useRef<TerminalSession | null>(null);
   const surfaceRef = useRef<TerminalSurfaceHandle | null>(null);
   const colsRef = useRef(80);
   const rowsRef = useRef(24);
-  const persistentRef = useRef(false);
-  const sessionNameRef = useRef("");
-  const openedSessionNameRef = useRef<string | undefined>(undefined);
 
   const attachSession = useCallback(() => {
     sessionRef.current?.dispose();
-    const named = persistentRef.current ? sessionNameRef.current.trim() : "";
-    openedSessionNameRef.current = named || undefined;
     const session = new TerminalSession({
       instanceId,
       csrfToken,
       cols: colsRef.current,
       rows: rowsRef.current,
-      sessionName: named || undefined,
+      sessionName: PERSISTENT_SESSION_NAME,
       WebSocketImpl,
       onStateChange: setConnection,
       onOutput: (data) => surfaceRef.current?.write(data),
@@ -99,24 +93,12 @@ export function InstanceTerminal({
   const canTerminate = connection.status === "connected";
 
   const onReconnect = useCallback(() => {
-    const desired = persistentRef.current ? sessionNameRef.current.trim() : "";
-    const desiredOrUndef = desired || undefined;
-    if (!sessionRef.current || desiredOrUndef !== openedSessionNameRef.current) {
+    if (!sessionRef.current) {
       attachSession();
       return;
     }
     sessionRef.current.reconnect();
   }, [attachSession]);
-
-  const onPersistentChange = useCallback((checked: boolean) => {
-    persistentRef.current = checked;
-    setPersistent(checked);
-  }, []);
-
-  const onSessionNameChange = useCallback((value: string) => {
-    sessionNameRef.current = value;
-    setSessionName(value);
-  }, []);
 
   return (
     <div className="terminal-page">
@@ -128,30 +110,6 @@ export function InstanceTerminal({
           <h1 id="terminal-heading">{instanceName}</h1>
         </div>
         <div className="terminal-actions">
-          <fieldset className="terminal-session-opts">
-            <legend className="visually-hidden">Persistent session</legend>
-            <label className="terminal-persistent">
-              <input
-                type="checkbox"
-                checked={persistent}
-                onChange={(event) => onPersistentChange(event.target.checked)}
-              />
-              Persistent session
-            </label>
-            <label className="terminal-session-name">
-              <span className="visually-hidden">Session name</span>
-              <input
-                type="text"
-                value={sessionName}
-                onChange={(event) => onSessionNameChange(event.target.value)}
-                disabled={!persistent}
-                placeholder="session name"
-                autoComplete="off"
-                spellCheck={false}
-                aria-label="Session name"
-              />
-            </label>
-          </fieldset>
           <p
             className="terminal-connection"
             role="status"
