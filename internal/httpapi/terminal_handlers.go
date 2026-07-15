@@ -199,6 +199,7 @@ func (h *Handler) serveAuthorizedTerminal(ctx context.Context, conn *websocket.C
 		return
 	case <-sessionCtx.Done():
 		endReason = TerminalAuditReasonCanceled
+		return
 	case err := <-errCh:
 		cancel()
 		if errors.Is(err, errTerminalDetached) {

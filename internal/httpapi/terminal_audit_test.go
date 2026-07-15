@@ -7,7 +7,9 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/openbox-dev/openbox/internal/auth"
 	"github.com/openbox-dev/openbox/internal/domain"
 	"github.com/openbox-dev/openbox/internal/terminal"
 )
@@ -167,6 +170,73 @@ func TestTerminalAuditEndReasonExit(t *testing.T) {
 	if end == nil || end.Reason != TerminalAuditReasonExit {
 		t.Fatalf("end event=%#v", events)
 	}
+}
+
+func TestTerminalAuditEndReasonCanceledOnContextCancel(t *testing.T) {
+	rt := newRunningFakeRuntime(t, "incus-owned-ref")
+	audit := &memoryTerminalAudit{}
+	h, m, bootstrap := newAuthHandlerWithOptions(t, Options{
+		Console:        rt,
+		TerminalLimits: terminal.DefaultLimits(),
+		TerminalAudit:  audit,
+	})
+	session, cookie, err := m.Bootstrap(context.Background(), "loopback", bootstrap, "a sufficiently long password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := h.service.(*fakeService)
+	svc.instances = []domain.Instance{{
+		ID: "inst-owned", OwnerID: "owner-local", Name: "dev", Kind: domain.KindDevbox,
+		RuntimeRef: "incus-owned-ref",
+	}}
+
+	var cancelTerminal context.CancelFunc
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/terminal") && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			ctx, cancel := context.WithCancel(r.Context())
+			cancelTerminal = cancel
+			r = r.WithContext(ctx)
+		}
+		h.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/instances/inst-owned/terminal?" +
+		auth.CSRFQuery + "=" + url.QueryEscape(session.CSRFToken)
+	conn, err := dialTerminal(t, wsURL, http.Header{
+		"Cookie": []string{auth.SessionCookie + "=" + cookie},
+		"Origin": []string{server.URL},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := conn.Write(ctx, websocket.MessageText, mustEncodeTerminal(t, terminal.OpenFrame{
+		InstanceID: "inst-owned", Cols: 80, Rows: 24,
+	})); err != nil {
+		t.Fatal(err)
+	}
+	_ = readOpenAck(t, conn, ctx)
+
+	if cancelTerminal == nil {
+		t.Fatal("terminal handler did not register cancel func")
+	}
+	cancelTerminal()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		end := findTerminalPhase(audit.snapshot(), TerminalAuditPhaseEnd)
+		if end != nil {
+			if end.Reason != TerminalAuditReasonCanceled {
+				t.Fatalf("end reason=%q want %q events=%#v", end.Reason, TerminalAuditReasonCanceled, audit.snapshot())
+			}
+			_ = conn.Close(websocket.StatusNormalClosure, "")
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("no end audit event: %#v", audit.snapshot())
 }
 
 type memoryTerminalAudit struct {
