@@ -18,6 +18,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/images"
 	"github.com/openbox-dev/openbox/internal/operations"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
+	"github.com/openbox-dev/openbox/internal/sandbox"
 )
 
 const (
@@ -125,6 +126,7 @@ type CreateInput struct {
 	Image              string
 	RequestedIsolation domain.IsolationRequest
 	Resources          domain.Resources
+	Lifetime           time.Duration // Sandbox only; 0 means kind default
 	OwnerPublicKey     string
 	IdempotencyKey     string
 }
@@ -152,7 +154,7 @@ type mutationRecoveryPayload struct {
 // SubmitCreate validates and durably records a create without performing a
 // runtime mutation. Durable workers execute the returned operation separately.
 func (s *Service) SubmitCreate(ctx context.Context, input CreateInput) (domain.Instance, domain.Operation, error) {
-	if input.OwnerID == "" || input.Image == "" || input.OwnerPublicKey == "" || input.IdempotencyKey == "" {
+	if input.OwnerID == "" || input.OwnerPublicKey == "" || input.IdempotencyKey == "" {
 		return domain.Instance{}, domain.Operation{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "create"}
 	}
 	release, err := s.acquireMutation(ctx)
@@ -160,11 +162,9 @@ func (s *Service) SubmitCreate(ctx context.Context, input CreateInput) (domain.I
 		return domain.Instance{}, domain.Operation{}, err
 	}
 	defer release()
-	if input.Kind == "" {
-		input.Kind = domain.KindVPS
-	}
-	if input.RequestedIsolation == "" {
-		input.RequestedIsolation = domain.IsolationBestAvailable
+	lifetime, err := applyCreateDefaults(&input)
+	if err != nil {
+		return domain.Instance{}, domain.Operation{}, err
 	}
 	requestHash, err := hashCreateInput(input)
 	if err != nil {
@@ -231,6 +231,7 @@ func (s *Service) SubmitCreate(ctx context.Context, input CreateInput) (domain.I
 	instance.ActualIsolation = actualIsolation
 	instance.Resources = input.Resources
 	instance.RuntimeRef = runtimeReference(instanceID)
+	applyLifetime(&instance, lifetime, now)
 	if err := domain.ValidateInstance(instance); err != nil {
 		return domain.Instance{}, domain.Operation{}, err
 	}
@@ -381,7 +382,7 @@ func (s *Service) ListOperationEventsAfter(ctx context.Context, ownerID domain.O
 }
 
 func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instance, error) {
-	if input.OwnerID == "" || input.Image == "" || input.OwnerPublicKey == "" || input.IdempotencyKey == "" {
+	if input.OwnerID == "" || input.OwnerPublicKey == "" || input.IdempotencyKey == "" {
 		return domain.Instance{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "create"}
 	}
 	release, err := s.acquireMutation(ctx)
@@ -389,11 +390,9 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 		return domain.Instance{}, err
 	}
 	defer release()
-	if input.Kind == "" {
-		input.Kind = domain.KindVPS
-	}
-	if input.RequestedIsolation == "" {
-		input.RequestedIsolation = domain.IsolationBestAvailable
+	lifetime, err := applyCreateDefaults(&input)
+	if err != nil {
+		return domain.Instance{}, err
 	}
 	requestHash, err := hashCreateInput(input)
 	if err != nil {
@@ -468,6 +467,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 	instance.ActualIsolation = actualIsolation
 	instance.Resources = input.Resources
 	instance.RuntimeRef = runtimeRef
+	applyLifetime(&instance, lifetime, now)
 	if err := domain.ValidateInstance(instance); err != nil {
 		return domain.Instance{}, err
 	}
@@ -1233,6 +1233,46 @@ func hashCreateInput(input CreateInput) (string, error) {
 	}
 	sum := sha256.Sum256(encoded)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+// applyCreateDefaults fills kind-specific image, isolation, resource, and
+// lifetime gaps. Curated aliases are identical across arch/runtime, so a
+// container/x86_64 catalog lookup is enough before capabilities are known.
+func applyCreateDefaults(input *CreateInput) (time.Duration, error) {
+	applied, err := sandbox.ApplyDefaults(sandbox.CreateDefaults{
+		Kind:               input.Kind,
+		Architecture:       "x86_64",
+		Runtime:            "container",
+		Catalog:            images.DefaultCatalog(),
+		Image:              input.Image,
+		RequestedIsolation: input.RequestedIsolation,
+		Resources:          input.Resources,
+		Lifetime:           input.Lifetime,
+	})
+	if err != nil {
+		return 0, err
+	}
+	input.Kind = coalesceKind(input.Kind)
+	input.Image = applied.Image
+	input.RequestedIsolation = applied.RequestedIsolation
+	input.Resources = applied.Resources
+	input.Lifetime = applied.Lifetime
+	return applied.Lifetime, nil
+}
+
+func coalesceKind(kind domain.InstanceKind) domain.InstanceKind {
+	if kind == "" {
+		return domain.KindVPS
+	}
+	return kind
+}
+
+func applyLifetime(instance *domain.Instance, lifetime time.Duration, now time.Time) {
+	if lifetime <= 0 || instance.Kind != domain.KindSandbox {
+		return
+	}
+	expires := now.Add(lifetime)
+	instance.ExpiresAt = &expires
 }
 
 func randomID() string {

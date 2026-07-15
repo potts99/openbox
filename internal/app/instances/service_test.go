@@ -718,6 +718,44 @@ func TestProtectionIsDevboxOnly(t *testing.T) {
 	assertDomainCode(t, err, domain.CodeInvalidArgument)
 }
 
+func TestSandboxCreateAppliesKindDefaults(t *testing.T) {
+	runtime := fake.New(testCapabilities())
+	runtime.AddImage(runtimeapi.Image{
+		Fingerprint:  "sha256:sandbox",
+		Aliases:      []string{"openbox:sandbox/ubuntu/24.04"},
+		Architecture: "x86_64",
+		Type:         "container",
+		CloudInit:    true,
+	})
+	service, _, _ := newTestServiceWithIDs(t, runtime, newIDs("instance-1", "operation-1"), runtime)
+	created, err := service.Create(context.Background(), CreateInput{
+		OwnerID:        "owner-1",
+		Name:           "agent-box",
+		Kind:           domain.KindSandbox,
+		OwnerPublicKey: "ssh-ed25519 owner",
+		IdempotencyKey: "sandbox-create",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Kind != domain.KindSandbox {
+		t.Fatalf("kind=%q", created.Kind)
+	}
+	if created.ImageID != "sha256:sandbox" {
+		t.Fatalf("image_id=%q", created.ImageID)
+	}
+	if created.RequestedIsolation != domain.IsolationBestAvailable {
+		t.Fatalf("requested_isolation=%q", created.RequestedIsolation)
+	}
+	want := domain.Resources{VCPUs: 2, MemoryBytes: 2 << 30, DiskBytes: 10 << 30}
+	if created.Resources != want {
+		t.Fatalf("resources=%+v want=%+v", created.Resources, want)
+	}
+	if created.ExpiresAt == nil || !created.ExpiresAt.Equal(created.CreatedAt.Add(domain.DefaultSandboxLifetime)) {
+		t.Fatalf("expires_at=%v", created.ExpiresAt)
+	}
+}
+
 func assertDomainCode(t *testing.T, err error, code domain.ErrorCode) {
 	t.Helper()
 	var domainErr *domain.Error
