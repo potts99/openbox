@@ -219,9 +219,13 @@ func networkResource(config BootstrapConfig) resource {
 }
 
 func profileResource(name, kind string, config BootstrapConfig) resource {
+	profileConfig := managedConfig(kind, nil)
+	if kind == "container-profile" {
+		profileConfig["security.privileged"] = "false"
+	}
 	return resource{
 		Name: name, Description: "OpenBox managed profile",
-		Config: managedConfig(kind, nil),
+		Config: profileConfig,
 		Devices: map[string]map[string]string{
 			"eth0": {"type": "nic", "network": config.Network, "name": "eth0", "security.acls": DefaultDenyACLName},
 			"root": {"type": "disk", "path": "/", "pool": config.StoragePool},

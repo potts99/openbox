@@ -265,6 +265,27 @@ func TestBootstrapCreatesACLAndAttachesItToManagedNICs(t *testing.T) {
 	}
 }
 
+func TestManagedProfilesKeepHostPolicyAssetsOutOfGuests(t *testing.T) {
+	config := BootstrapConfig{Network: "openbox0", StoragePool: "default"}
+	container := profileResource("openbox-container", "container-profile", config)
+	if container.Config["security.privileged"] != "false" {
+		t.Fatalf("container security.privileged = %q, want false", container.Config["security.privileged"])
+	}
+	for name, profile := range map[string]resource{
+		"container": container,
+		"VM":        profileResource("openbox-vm", "vm-profile", config),
+	} {
+		for deviceName, device := range profile.Devices {
+			if device["type"] == "disk" && device["path"] != "/" {
+				t.Fatalf("%s profile exposes disk device %s at %q", name, deviceName, device["path"])
+			}
+			if source := device["source"]; source != "" {
+				t.Fatalf("%s profile exposes host source %q through device %s", name, source, deviceName)
+			}
+		}
+	}
+}
+
 func TestEgressACLResourcesAndNICComposition(t *testing.T) {
 	standard := standardEgressACLResource()
 	if standard.Name != StandardEgressACLName {
