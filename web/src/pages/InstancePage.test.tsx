@@ -72,6 +72,11 @@ describe("InstancePage", () => {
     expect(screen.getByText("standard")).toBeInTheDocument();
     const detailSection = document.getElementById("instance-detail-heading")?.closest("section");
     expect(detailSection?.querySelector(".state-pill")?.textContent).toBe("running");
+    const detailHeader = detailSection?.querySelector(".ledger-header");
+    expect(detailHeader?.querySelector(".detail-header-meta")).toHaveTextContent("Created");
+    expect(detailHeader?.querySelector(".detail-header-meta")).toHaveTextContent("Updated");
+    expect(detailSection?.querySelector(".detail-grid")?.textContent).not.toContain("Created");
+    expect(detailSection?.querySelector(".detail-grid")?.textContent).not.toContain("Updated");
 
     await user.click(screen.getByRole("button", { name: "Terminal" }));
     expect(onOpenTerminal).toHaveBeenCalledWith({ id: "box-1", name: "demo" });

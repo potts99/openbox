@@ -343,6 +343,18 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .instance-detail .ledger-header {
   padding: .4rem .65rem;
 }
+.detail-header-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: .2rem .65rem;
+}
+.detail-header-meta > span { white-space: nowrap; }
+.detail-header-meta b {
+  font-weight: 400;
+  color: var(--muted);
+}
 .software-list {
   list-style: none;
   margin: 0;

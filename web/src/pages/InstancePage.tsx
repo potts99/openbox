@@ -203,7 +203,11 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
             <section className="instance-detail" aria-labelledby="instance-detail-heading">
               <div className="ledger-header">
                 <h2 id="instance-detail-heading">Detail</h2>
-                <span className={`state-pill state-${observed}`}>{observed || "unknown"}</span>
+                <div className="detail-header-meta">
+                  <span><b>Created</b> {formatWhen(instance.createdAt)}</span>
+                  <span><b>Updated</b> {formatWhen(instance.updatedAt)}</span>
+                  <span className={`state-pill state-${observed}`}>{observed || "unknown"}</span>
+                </div>
               </div>
               <dl className="detail-grid">
                 <div>
@@ -241,14 +245,6 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
                 <div>
                   <dt>Image</dt>
                   <dd><code title={instance.imageId}>{shortenId(instance.imageId)}</code></dd>
-                </div>
-                <div>
-                  <dt>Created</dt>
-                  <dd>{formatWhen(instance.createdAt)}</dd>
-                </div>
-                <div>
-                  <dt>Updated</dt>
-                  <dd>{formatWhen(instance.updatedAt)}</dd>
                 </div>
                 <div className="detail-span">
                   <dt>ID</dt>
