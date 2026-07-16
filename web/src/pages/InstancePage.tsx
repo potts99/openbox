@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { InstanceAction, InstanceDetail, OpenBoxApi, SoftwarePackage } from "../api/client";
 import { InstanceMetrics } from "../components/InstanceMetrics";
+import { InstanceOperationLogs } from "../components/InstanceOperationLogs";
 import { SandboxStatus } from "./Sandbox";
 
 interface InstancePageProps {
@@ -55,6 +56,7 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
   const [actionError, setActionError] = useState("");
   const [installPending, setInstallPending] = useState<string | null>(null);
   const [installError, setInstallError] = useState("");
+  const [operationsRefreshKey, setOperationsRefreshKey] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -80,6 +82,7 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
       await api.mutateInstance(instanceId, action);
       const [instance, catalog] = await Promise.all([api.getInstance(instanceId), api.listSoftwareCatalog()]);
       setData({ status: "ready", instance, catalog });
+      setOperationsRefreshKey((value) => value + 1);
     } catch (error: unknown) {
       setActionError(error instanceof Error ? error.message : "Action failed");
     } finally {
@@ -94,6 +97,7 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
       await api.installSoftware(instanceId, packageId);
       const [instance, catalog] = await Promise.all([api.getInstance(instanceId), api.listSoftwareCatalog()]);
       setData({ status: "ready", instance, catalog });
+      setOperationsRefreshKey((value) => value + 1);
     } catch (error: unknown) {
       setInstallError(error instanceof Error ? error.message : "Install failed");
     } finally {
@@ -164,6 +168,14 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
               vcpus={instance.vcpus}
               memoryBytes={instance.memoryBytes}
               diskBytes={instance.diskBytes}
+            />
+          ) : null}
+
+          {instance ? (
+            <InstanceOperationLogs
+              api={api}
+              instanceId={instance.id}
+              refreshKey={operationsRefreshKey}
             />
           ) : null}
 
