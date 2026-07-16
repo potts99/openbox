@@ -26,7 +26,7 @@ func TestApplyDefaultsFillsSandboxPolicy(t *testing.T) {
 	if got.Image != "openbox:sandbox/ubuntu/24.04" {
 		t.Fatalf("image = %q", got.Image)
 	}
-	if got.RequestedIsolation != domain.IsolationBestAvailable {
+	if got.RequestedIsolation != domain.IsolationStandard {
 		t.Fatalf("isolation = %q", got.RequestedIsolation)
 	}
 	if got.Resources != sandbox.DefaultResources() {

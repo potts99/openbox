@@ -220,17 +220,17 @@ func (a *Adapter) setInstanceNICACLs(ctx context.Context, ref string, acls []str
 	if err := a.request(ctx, http.MethodGet, "/1.0/instances/"+url.PathEscape(ref), query, nil, &instance); err != nil {
 		return fmt.Errorf("inspect Incus instance NIC: %w", err)
 	}
-	eth0, ok := instance.Devices["eth0"]
-	if !ok || eth0["type"] != "nic" {
-		return fmt.Errorf("managed instance NIC eth0 is missing")
-	}
-	updated := make(map[string]map[string]string, len(instance.Devices))
-	for name, device := range instance.Devices {
-		copy := make(map[string]string, len(device))
-		for key, value := range device {
-			copy[key] = value
+	updated := cloneInstanceDevices(instance.Devices)
+	eth0, ok := updated["eth0"]
+	if !ok {
+		eth0, ok = instance.ExpandedDevices["eth0"]
+		if !ok || eth0["type"] != "nic" {
+			return fmt.Errorf("managed instance NIC eth0 is missing")
 		}
-		updated[name] = copy
+		updated["eth0"] = cloneDeviceMap(eth0)
+	}
+	if eth0["type"] != "nic" {
+		return fmt.Errorf("managed instance NIC eth0 is missing")
 	}
 	updated["eth0"]["security.acls"] = strings.Join(acls, ",")
 	if err := a.request(ctx, http.MethodPatch, "/1.0/instances/"+url.PathEscape(ref), query, struct {
@@ -248,10 +248,32 @@ func (a *Adapter) instanceNICACLs(ctx context.Context, ref string) ([]string, er
 		return nil, fmt.Errorf("inspect Incus instance NIC: %w", err)
 	}
 	eth0, ok := instance.Devices["eth0"]
+	if !ok {
+		eth0, ok = instance.ExpandedDevices["eth0"]
+	}
 	if !ok || eth0["type"] != "nic" {
 		return nil, fmt.Errorf("managed instance NIC eth0 is missing")
 	}
 	return splitACLs(eth0["security.acls"]), nil
+}
+
+func cloneInstanceDevices(devices map[string]map[string]string) map[string]map[string]string {
+	if len(devices) == 0 {
+		return map[string]map[string]string{}
+	}
+	updated := make(map[string]map[string]string, len(devices))
+	for name, device := range devices {
+		updated[name] = cloneDeviceMap(device)
+	}
+	return updated
+}
+
+func cloneDeviceMap(device map[string]string) map[string]string {
+	copy := make(map[string]string, len(device))
+	for key, value := range device {
+		copy[key] = value
+	}
+	return copy
 }
 
 func splitACLs(value string) []string {

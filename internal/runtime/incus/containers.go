@@ -32,12 +32,13 @@ type imageRecord struct {
 }
 
 type instanceRecord struct {
-	Name           string                       `json:"name"`
-	Type           string                       `json:"type"`
-	Status         string                       `json:"status"`
-	Config         map[string]string            `json:"config"`
-	ExpandedConfig map[string]string            `json:"expanded_config"`
-	Devices        map[string]map[string]string `json:"devices,omitempty"`
+	Name             string                       `json:"name"`
+	Type             string                       `json:"type"`
+	Status           string                       `json:"status"`
+	Config           map[string]string            `json:"config"`
+	ExpandedConfig   map[string]string            `json:"expanded_config"`
+	Devices          map[string]map[string]string `json:"devices,omitempty"`
+	ExpandedDevices  map[string]map[string]string `json:"expanded_devices,omitempty"`
 }
 
 func (a *Adapter) ListImages(ctx context.Context) ([]runtimeapi.Image, error) {

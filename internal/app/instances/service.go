@@ -19,6 +19,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/operations"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 	"github.com/openbox-dev/openbox/internal/sandbox"
+	sandboxpool "github.com/openbox-dev/openbox/internal/sandbox/pool"
 	"github.com/openbox-dev/openbox/internal/software"
 )
 
@@ -36,6 +37,7 @@ type InstanceRuntime interface {
 	CreateInstance(context.Context, runtimeapi.CreateRequest) (runtimeapi.Instance, error)
 	StartInstance(context.Context, string) error
 	WaitInstanceReady(context.Context, runtimeapi.ReadinessRequest) error
+	WaitSSHReady(context.Context, string) error
 	StopInstance(context.Context, string) error
 	Exec(context.Context, runtimeapi.ExecRequest) (runtimeapi.ExecResult, error)
 	WriteFile(context.Context, runtimeapi.WriteFileRequest) error
@@ -110,12 +112,21 @@ func (e *IdentityConflictError) Error() string {
 	return fmt.Sprintf("runtime resource %q belongs to identity %q, expected %q", e.RuntimeRef, e.Actual, e.Expected)
 }
 
+type SandboxPool interface {
+	Enabled() bool
+	Claim(context.Context) (sandboxpool.Claim, error)
+	Assign(context.Context, sandboxpool.AssignRequest) error
+	Discard(context.Context, string)
+	Replenish(context.Context)
+}
+
 type Options struct {
 	Now                      func() time.Time
 	NewID                    func() string
 	Mode                     *operations.Mode
 	InstanceGatewayPublicKey string
 	NetworkPolicy            NetworkPolicy
+	SandboxPool              SandboxPool
 }
 
 type Service struct {
@@ -126,6 +137,7 @@ type Service struct {
 	mode                     *operations.Mode
 	instanceGatewayPublicKey string
 	networkPolicy            NetworkPolicy
+	sandboxPool              SandboxPool
 	mutationGate             chan struct{}
 	execGate                 *sandbox.ExecGate
 	installSoftwareFn        func(context.Context, software.Guest, string, software.Package, software.InstallOptions) error
@@ -147,7 +159,7 @@ func New(runtime InstanceRuntime, repo Repository, options Options) (*Service, e
 	if options.Mode == nil {
 		options.Mode = &operations.Mode{}
 	}
-	service := &Service{runtime: runtime, repo: repo, now: options.Now, newID: options.NewID, mode: options.Mode, instanceGatewayPublicKey: strings.TrimSpace(options.InstanceGatewayPublicKey), networkPolicy: options.NetworkPolicy, mutationGate: make(chan struct{}, 1), execGate: sandbox.NewExecGate(sandbox.DefaultMaxConcurrentExecsPerInstance)}
+	service := &Service{runtime: runtime, repo: repo, now: options.Now, newID: options.NewID, mode: options.Mode, instanceGatewayPublicKey: strings.TrimSpace(options.InstanceGatewayPublicKey), networkPolicy: options.NetworkPolicy, sandboxPool: options.SandboxPool, mutationGate: make(chan struct{}, 1), execGate: sandbox.NewExecGate(sandbox.DefaultMaxConcurrentExecsPerInstance)}
 	service.mutationGate <- struct{}{}
 	return service, nil
 }
@@ -634,6 +646,9 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 	if err := s.repo.UpdateInstanceObservation(ctx, input.OwnerID, instance.ID, runtimeRef, actualIsolation, domain.ObservedCreating, "", s.now()); err != nil {
 		return domain.Instance{}, err
 	}
+	if result, ok, err := s.createFromPoolIfAvailable(ctx, input, instance, operation); ok {
+		return result, err
+	}
 	createdByOperation := false
 	stage := "creating_container"
 	if actualIsolation == domain.IsolationVM {
@@ -701,6 +716,12 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 			return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, fmt.Errorf("wait for VM readiness: %w", err))
 		}
 	}
+	if instance.Kind == domain.KindSandbox && actualIsolation == domain.IsolationContainer {
+		if err := s.waitForSandboxSSH(ctx, instance, operation); err != nil {
+			err = errors.Join(err, s.markError(ctx, instance))
+			return domain.Instance{}, fmt.Errorf("wait for sandbox SSH readiness: %w", err)
+		}
+	}
 	result, err := s.Refresh(ctx, input.OwnerID, instance.ID)
 	if err != nil {
 		return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, err)
@@ -757,6 +778,12 @@ func (s *Service) recoverCreate(ctx context.Context, operation domain.Operation)
 		return err
 	}
 	if !exists {
+		if _, ok, err := s.createFromPoolIfAvailable(ctx, CreateInput{
+			OwnerID: instance.OwnerID, Kind: instance.Kind, Resources: instance.Resources,
+			OwnerPublicKey: payload.OwnerPublicKey, Packages: payload.Packages,
+		}, instance, operation); ok {
+			return err
+		}
 		if operation.Stage != "runtime" && operation.Stage != "creating_container" && operation.Stage != "creating_vm" {
 			return s.recordRuntimeMissing(ctx, instance, runtimeapi.ErrNotFound)
 		}
@@ -819,6 +846,11 @@ func (s *Service) recoverCreate(ctx context.Context, operation domain.Operation)
 	if instance.ActualIsolation == domain.IsolationVM {
 		if err := s.waitForVMReady(ctx, instance, operation); err != nil {
 			return err
+		}
+	}
+	if instance.Kind == domain.KindSandbox && instance.ActualIsolation == domain.IsolationContainer {
+		if err := s.waitForSandboxSSH(ctx, instance, operation); err != nil {
+			return fmt.Errorf("wait for sandbox SSH readiness: %w", err)
 		}
 	}
 	if _, err := s.Refresh(ctx, instance.OwnerID, instance.ID); err != nil {
@@ -1336,6 +1368,69 @@ func (s *Service) waitForVMReady(ctx context.Context, instance domain.Instance, 
 		}
 		return s.repo.UpdateOperationStage(ctx, instance.OwnerID, operation.ID, stage, value, s.now())
 	}})
+}
+
+func (s *Service) waitForSandboxSSH(ctx context.Context, instance domain.Instance, operation domain.Operation) error {
+	if err := s.repo.UpdateOperationStage(ctx, instance.OwnerID, operation.ID, "waiting_for_ssh", 85, s.now()); err != nil {
+		return err
+	}
+	return s.runtime.WaitSSHReady(ctx, instance.RuntimeRef)
+}
+
+func (s *Service) createFromPoolIfAvailable(ctx context.Context, input CreateInput, instance domain.Instance, operation domain.Operation) (domain.Instance, bool, error) {
+	if s.sandboxPool == nil || !s.sandboxPool.Enabled() {
+		return domain.Instance{}, false, nil
+	}
+	if input.Kind != domain.KindSandbox || instance.ActualIsolation != domain.IsolationContainer {
+		return domain.Instance{}, false, nil
+	}
+	if !sandboxpool.UsesDefaultResources(input.Resources) || len(input.Packages) > 0 {
+		return domain.Instance{}, false, nil
+	}
+	if err := s.repo.UpdateOperationStage(ctx, input.OwnerID, operation.ID, "claiming_pool_slot", 55, s.now()); err != nil {
+		return domain.Instance{}, true, err
+	}
+	claim, err := s.sandboxPool.Claim(ctx)
+	if errors.Is(err, sandboxpool.ErrMiss) {
+		return domain.Instance{}, false, nil
+	}
+	if err != nil {
+		return domain.Instance{}, false, nil
+	}
+	if err := s.repo.UpdateOperationStage(ctx, input.OwnerID, operation.ID, "personalizing", 70, s.now()); err != nil {
+		s.sandboxPool.Discard(ctx, claim.Ref)
+		return domain.Instance{}, true, err
+	}
+	assignErr := s.sandboxPool.Assign(ctx, sandboxpool.AssignRequest{
+		SlotRef:        claim.Ref,
+		TargetRef:      instance.RuntimeRef,
+		OwnerPublicKey: authorizedKeys(input.OwnerPublicKey, s.instanceGatewayPublicKey),
+		Metadata:       managedMetadata(input.OwnerID, instance.ID),
+		WasRunning:     claim.Running,
+	})
+	if assignErr != nil {
+		if _, exists, inspectErr := s.inspectOptional(ctx, instance.RuntimeRef); inspectErr == nil && exists {
+			_ = s.runtime.DeleteInstance(ctx, instance.RuntimeRef)
+		}
+		s.sandboxPool.Discard(ctx, claim.Ref)
+		return domain.Instance{}, true, fmt.Errorf("assign pool slot: %w", assignErr)
+	}
+	if err := s.repo.UpdateOperationStage(ctx, input.OwnerID, operation.ID, "waiting_for_ssh", 85, s.now()); err != nil {
+		return domain.Instance{}, true, err
+	}
+	if err := s.applyNetworkPolicy(ctx, instance); err != nil {
+		err = errors.Join(err, s.markError(ctx, instance))
+		return domain.Instance{}, true, fmt.Errorf("apply network policy: %w", err)
+	}
+	result, err := s.Refresh(ctx, input.OwnerID, instance.ID)
+	if err != nil {
+		return domain.Instance{}, true, err
+	}
+	if err := s.repo.CompleteOperation(ctx, input.OwnerID, operation.ID, s.now()); err != nil {
+		return domain.Instance{}, true, err
+	}
+	go s.sandboxPool.Replenish(context.Background())
+	return result, true, nil
 }
 
 func (s *Service) withPartialVMCleanup(instance domain.Instance, created bool, cause error) error {
