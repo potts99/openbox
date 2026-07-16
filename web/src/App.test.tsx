@@ -20,6 +20,7 @@ function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
       vmAvailability: "unavailable",
       vmReason: "/dev/kvm is not available",
     }),
+    getConnection: vi.fn().mockResolvedValue({ ssh: { host: "app.example.com", port: 2222 } }),
     listImages: vi.fn().mockResolvedValue([{
       id: "img-1",
       alias: "ubuntu",

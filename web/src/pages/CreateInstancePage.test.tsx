@@ -12,6 +12,7 @@ function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
     getSession: vi.fn(),
     getCsrfToken: vi.fn().mockReturnValue("csrf"),
     getCapabilities: vi.fn(),
+    getConnection: vi.fn().mockResolvedValue({ ssh: { host: "app.example.com", port: 2222 } }),
     listImages: vi.fn().mockResolvedValue([
       {
         id: "22626b4b3561824d7ed0c109f818161bd5e479b839197ecf0f2602a12b8f8a05",

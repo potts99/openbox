@@ -136,6 +136,23 @@ describe("createHttpApi", () => {
     expect(MockEventSource.instances[0]?.closed).toBe(true);
   });
 
+  it("loads connection ssh endpoint and null when unset", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ssh: { host: "app.example.com", port: 2222 },
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ssh: null,
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+    const api = createHttpApi({ fetcher, csrfToken: "csrf" });
+
+    await expect(api.getConnection()).resolves.toEqual({
+      ssh: { host: "app.example.com", port: 2222 },
+    });
+    await expect(api.getConnection()).resolves.toEqual({ ssh: null });
+    expect(fetcher).toHaveBeenCalledWith("/v1/connection", expect.any(Object));
+  });
+
   it("lists images and ssh keys and creates instances with idempotency", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({
