@@ -296,14 +296,11 @@ func (m *Manager) Assign(ctx context.Context, request AssignRequest) error {
 	for key, value := range request.Metadata {
 		config[key] = value
 	}
-	if request.WasRunning {
-		if err := m.writeOwnerKeys(ctx, ref, request.OwnerPublicKey); err != nil {
-			return err
-		}
-	} else {
+	if !request.WasRunning {
 		if err := m.stopIfRunning(ctx, ref); err != nil {
 			return err
 		}
+		// Golden CoW slots already finished first boot, so this is best-effort only.
 		userData, err := cloudinit.OwnerKey(request.OwnerPublicKey)
 		if err != nil {
 			return fmt.Errorf("build owner cloud-init: %w", err)
@@ -324,6 +321,10 @@ func (m *Manager) Assign(ctx context.Context, request AssignRequest) error {
 	}
 	if err := m.runtime.StartInstance(ctx, ref); err != nil {
 		return fmt.Errorf("start assigned sandbox: %w", err)
+	}
+	// Authoritative key install for both stopped and running slots.
+	if err := m.writeOwnerKeys(ctx, ref, request.OwnerPublicKey); err != nil {
+		return err
 	}
 	readyCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()

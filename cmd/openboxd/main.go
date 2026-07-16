@@ -37,7 +37,7 @@ func main() {
 	flag.StringVar(&config.SSHKnownHostsPath, "ssh-known-hosts", "/var/lib/openbox/ssh/known_instances", "pinned instance SSH host keys")
 	flag.StringVar(&config.OwnerID, "owner-id", "owner-local", "stable local owner identifier")
 	flag.StringVar(&config.OwnerName, "owner-name", "Local owner", "local owner display name")
-	flag.Func("trusted-proxy-cidr", "CIDR permitted to provide X-Forwarded-* headers (repeatable)", func(value string) error {
+	flag.Func("trusted-proxy-cidr", "CIDR permitted to provide X-Forwarded-* headers (repeatable; defaults to loopback)", func(value string) error {
 		config.TrustedProxyCIDRs = append(config.TrustedProxyCIDRs, value)
 		return nil
 	})
@@ -47,6 +47,12 @@ func main() {
 	flag.DurationVar(&config.MetricsInterval, "metrics-interval", 10*time.Second, "instance usage sampling interval")
 	flag.DurationVar(&config.Lease, "operation-lease", time.Minute, "durable operation claim lease")
 	flag.Parse()
+	if len(config.TrustedProxyCIDRs) == 0 {
+		// Default-trust loopback so TLS-terminated reverse proxies on the same
+		// host (e.g. Caddy → 127.0.0.1:8443) can set Secure cookies via
+		// X-Forwarded-Proto without requiring a flag on every install.
+		config.TrustedProxyCIDRs = []string{"127.0.0.0/8", "::1/128"}
+	}
 	if err := config.validate(); err != nil {
 		log.Fatal(err)
 	}

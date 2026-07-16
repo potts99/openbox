@@ -117,7 +117,6 @@ type SandboxPool interface {
 	Claim(context.Context) (sandboxpool.Claim, error)
 	Assign(context.Context, sandboxpool.AssignRequest) error
 	Discard(context.Context, string)
-	Replenish(context.Context)
 }
 
 type Options struct {
@@ -1395,7 +1394,7 @@ func (s *Service) createFromPoolIfAvailable(ctx context.Context, input CreateInp
 		return domain.Instance{}, false, nil
 	}
 	if err != nil {
-		return domain.Instance{}, false, nil
+		return domain.Instance{}, true, fmt.Errorf("claim pool slot: %w", err)
 	}
 	if err := s.repo.UpdateOperationStage(ctx, input.OwnerID, operation.ID, "personalizing", 70, s.now()); err != nil {
 		s.sandboxPool.Discard(ctx, claim.Ref)
@@ -1429,7 +1428,6 @@ func (s *Service) createFromPoolIfAvailable(ctx context.Context, input CreateInp
 	if err := s.repo.CompleteOperation(ctx, input.OwnerID, operation.ID, s.now()); err != nil {
 		return domain.Instance{}, true, err
 	}
-	go s.sandboxPool.Replenish(context.Background())
 	return result, true, nil
 }
 
