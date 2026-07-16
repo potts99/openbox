@@ -210,7 +210,7 @@ describe("App", () => {
     const user = userEvent.setup();
     const api = createApi({
       listOperations: vi.fn().mockResolvedValue([
-        { id: "op-1", action: "create", status: "running", target: "workbench", updatedAt: "2026-07-15T09:30:00Z" },
+        { id: "op-1", action: "instance.create", status: "running", target: "workbench", updatedAt: "2026-07-15T09:30:00Z" },
       ]),
     });
 
@@ -221,10 +221,39 @@ describe("App", () => {
     const drawer = screen.getByRole("complementary", { name: "Operations" });
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(within(drawer).getByText("workbench")).toBeInTheDocument();
+    expect(within(drawer).getByText("instance · create")).toBeInTheDocument();
+    expect(within(drawer).getByText("running")).toBeInTheDocument();
+    expect(within(drawer).getByText(/1 total/)).toBeInTheDocument();
+    expect(within(drawer).getByText(/1 active/)).toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("complementary", { name: "Operations" })).not.toBeInTheDocument();
     await waitFor(() => expect(toggle).toHaveFocus());
+  });
+
+  it("refreshes operations while the drawer stays open", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const listOperations = vi.fn()
+      .mockResolvedValueOnce([
+        { id: "op-1", action: "instance.start", status: "running", target: "workbench", updatedAt: "2026-07-15T09:30:00Z" },
+      ])
+      .mockResolvedValue([
+        { id: "op-1", action: "instance.start", status: "succeeded", target: "workbench", updatedAt: "2026-07-15T09:31:00Z" },
+      ]);
+    const api = createApi({ listOperations });
+
+    render(<App api={api} />);
+    await user.click(await screen.findByRole("button", { name: "Show operations" }));
+
+    const drawer = screen.getByRole("complementary", { name: "Operations" });
+    expect(within(drawer).getByText("running")).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(3000);
+    await waitFor(() => expect(within(drawer).getByText("succeeded")).toBeInTheDocument());
+    expect(listOperations.mock.calls.length).toBeGreaterThan(1);
+
+    vi.useRealTimers();
   });
 
   it("stays authenticated and announces a safe message when logout fails", async () => {

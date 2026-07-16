@@ -45,6 +45,28 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
     return () => { active = false; };
   }, [api]);
 
+  useEffect(() => {
+    if (!drawerOpen) return;
+    let active = true;
+    const refresh = () => {
+      void api.listOperations()
+        .then((operations) => {
+          if (!active) return;
+          setData((current) => (
+            current.status === "ready" ? { ...current, operations } : current
+          ));
+        })
+        .catch(() => {
+          /* keep the last successful snapshot while the drawer stays open */
+        });
+    };
+    const timer = window.setInterval(refresh, 3000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [api, drawerOpen]);
+
   async function logout() {
     setLogoutError("");
     setLogoutPending(true);
