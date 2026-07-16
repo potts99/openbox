@@ -14,6 +14,7 @@ import { OperationDrawer } from "../components/OperationDrawer";
 import { CreateInstancePage } from "./CreateInstancePage";
 import { InstancePage } from "./InstancePage";
 import { InstanceTerminal } from "./InstanceTerminal";
+import { NetworkPolicyPage } from "./NetworkPolicy";
 import { PiProfilePage } from "./PiProfile";
 
 interface ConsolePageProps {
@@ -32,7 +33,8 @@ type View =
   | { kind: "create" }
   | { kind: "detail"; instanceId: string }
   | { kind: "terminal"; instanceId: string; instanceName: string }
-  | { kind: "pi-profile" };
+  | { kind: "pi-profile" }
+  | { kind: "network-policy" };
 
 export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
   const [data, setData] = useState<ConsoleData>({ status: "loading" });
@@ -146,6 +148,10 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
     return <PiProfilePage api={api} onBack={() => setView({ kind: "list" })} />;
   }
 
+  if (view.kind === "network-policy") {
+    return <NetworkPolicyPage api={api} onBack={() => setView({ kind: "list" })} />;
+  }
+
   if (view.kind === "create") {
     return (
       <CreateInstancePage
@@ -166,6 +172,9 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
           <a href="#instances" aria-current="page">Instances</a>
           <button className="nav-button" type="button" onClick={() => setView({ kind: "pi-profile" })}>
             Pi profile
+          </button>
+          <button className="nav-button" type="button" onClick={() => setView({ kind: "network-policy" })}>
+            Network policy
           </button>
           <button
             className="nav-button"

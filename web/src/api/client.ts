@@ -34,6 +34,15 @@ export interface NetworkPolicyStatus {
   deniedFlows: number;
 }
 
+export interface EgressProfile {
+  id: string;
+  name: string;
+  mode: "standard" | "restricted" | string;
+  allowedDestinations: string[];
+  system: boolean;
+  attachedInstanceCount?: number;
+}
+
 export interface InstanceSoftware {
   packageId: string;
   status: string;
@@ -66,6 +75,7 @@ export interface InstanceDetail {
   expiresAt?: string;
   errorCode?: string;
   errorStage?: string;
+  egressProfileId?: string;
   networkPolicy: NetworkPolicyStatus;
   software: InstanceSoftware[];
 }
@@ -173,6 +183,14 @@ export interface OpenBoxApi {
   getPiProfileHistory(id: string): Promise<PiProfileVersion[]>;
   rollbackPiProfile(id: string, version: number): Promise<PiProfileSummary>;
   applyPiProfile(id: string, instanceIds: string[]): Promise<void>;
+  listEgressProfiles(): Promise<EgressProfile[]>;
+  createEgressProfile(input: { name: string; mode: string; allowedDestinations: string[] }): Promise<EgressProfile>;
+  updateEgressProfile(id: string, input: { name?: string; mode?: string; allowedDestinations?: string[] }): Promise<{
+    profile: EgressProfile;
+    applyErrors: Array<{ instanceId: string; message: string }>;
+  }>;
+  deleteEgressProfile(id: string): Promise<void>;
+  attachEgressProfile(instanceId: string, profileId: string): Promise<InstanceDetail>;
   setup(input: { secret: string; password: string }): Promise<Session>;
   login(input: { password: string }): Promise<Session>;
   logout(): Promise<void>;
@@ -245,6 +263,7 @@ function normalizeInstance(value: unknown): InstanceDetail {
     expiresAt: text(row.expires_at) || undefined,
     errorCode: text(row.error_code) || undefined,
     errorStage: text(row.error_stage) || undefined,
+    egressProfileId: text(row.egress_profile_id) || undefined,
     networkPolicy: {
       egressMode: text(networkPolicy.egress_mode),
       acls: Array.isArray(networkPolicy.acls) ? networkPolicy.acls.filter((acl): acl is string => typeof acl === "string") : [],
@@ -252,6 +271,21 @@ function normalizeInstance(value: unknown): InstanceDetail {
       deniedFlows: number(networkPolicy.denied_flows),
     },
     software: softwareRaw.map(normalizeInstanceSoftware),
+  };
+}
+
+function normalizeEgressProfile(value: unknown): EgressProfile {
+  const row = asRecord(value);
+  const destinations = Array.isArray(row.allowed_destinations)
+    ? row.allowed_destinations.filter((item): item is string => typeof item === "string")
+    : [];
+  return {
+    id: text(row.id),
+    name: text(row.name),
+    mode: text(row.mode),
+    allowedDestinations: destinations,
+    system: bool(row.system),
+    attachedInstanceCount: number(row.attached_instance_count) || undefined,
   };
 }
 
@@ -493,6 +527,48 @@ export function createHttpApi(options: HttpApiOptions = {}): OpenBoxApi {
         method: "POST",
         body: JSON.stringify({ instance_ids: instanceIds }),
       });
+    },
+    async listEgressProfiles() {
+      const body = asRecord(await request("/v1/network/egress-profiles"));
+      const items = Array.isArray(body.items) ? body.items : [];
+      return items.map(normalizeEgressProfile);
+    },
+    async createEgressProfile(input) {
+      return normalizeEgressProfile(await request("/v1/network/egress-profiles", {
+        method: "POST",
+        body: JSON.stringify({
+          name: input.name,
+          mode: input.mode,
+          allowed_destinations: input.allowedDestinations,
+        }),
+      }));
+    },
+    async updateEgressProfile(id, input) {
+      const body = asRecord(await request(`/v1/network/egress-profiles/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: input.name,
+          mode: input.mode,
+          allowed_destinations: input.allowedDestinations,
+        }),
+      }));
+      const errorsRaw = Array.isArray(body.apply_errors) ? body.apply_errors : [];
+      return {
+        profile: normalizeEgressProfile(body.profile ?? body),
+        applyErrors: errorsRaw.map((item) => {
+          const row = asRecord(item);
+          return { instanceId: text(row.instance_id), message: text(row.message) };
+        }),
+      };
+    },
+    async deleteEgressProfile(id) {
+      await request(`/v1/network/egress-profiles/${encodeURIComponent(id)}`, { method: "DELETE" }, [204]);
+    },
+    async attachEgressProfile(instanceId, profileId) {
+      return normalizeInstance(await request(
+        `/v1/instances/${encodeURIComponent(instanceId)}/network/egress-profile`,
+        { method: "PUT", body: JSON.stringify({ egress_profile_id: profileId }) },
+      ));
     },
     async setup(input) {
       return normalizeSession(await request("/v1/bootstrap", { method: "POST", body: JSON.stringify(input) }), csrfToken);
