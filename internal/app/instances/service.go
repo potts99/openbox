@@ -118,6 +118,7 @@ type SandboxPool interface {
 	Enabled() bool
 	Claim(context.Context) (sandboxpool.Claim, error)
 	Assign(context.Context, sandboxpool.AssignRequest) error
+	Substrate() sandboxpool.Substrate
 	Discard(context.Context, string)
 }
 
@@ -1423,7 +1424,13 @@ func (s *Service) createFromPoolIfAvailable(ctx context.Context, input CreateInp
 	if s.sandboxPool == nil || !s.sandboxPool.Enabled() {
 		return domain.Instance{}, false, nil
 	}
-	if input.Kind != domain.KindSandbox || instance.ActualIsolation != domain.IsolationContainer {
+	if input.Kind != domain.KindSandbox {
+		return domain.Instance{}, false, nil
+	}
+	switch {
+	case instance.ActualIsolation == domain.IsolationVM && s.sandboxPool.Substrate() == sandboxpool.SubstrateVM:
+	case instance.ActualIsolation == domain.IsolationContainer && s.sandboxPool.Substrate() == sandboxpool.SubstrateContainer:
+	default:
 		return domain.Instance{}, false, nil
 	}
 	if !sandboxpool.UsesDefaultResources(input.Resources) || len(input.Packages) > 0 {

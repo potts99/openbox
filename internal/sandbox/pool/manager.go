@@ -41,6 +41,7 @@ type Stats struct {
 	Running     int
 	Claiming    int
 	CoWStorage  bool
+	Substrate   Substrate
 }
 
 // Manager maintains the hybrid warm pool in Incus and memory.
@@ -50,11 +51,12 @@ type Manager struct {
 	now     func() time.Time
 	newID   func() string
 
-	mu       sync.Mutex
-	image    string
-	stopped  []string
-	running  []string
-	claiming map[string]time.Time
+	mu        sync.Mutex
+	image     string
+	substrate Substrate
+	stopped   []string
+	running   []string
+	claiming  map[string]time.Time
 }
 
 // Options configures a warm-pool manager.
@@ -108,9 +110,23 @@ func (m *Manager) Enabled() bool {
 	return m.config.Enabled
 }
 
+// Substrate reports the active pool runtime shape (empty when disabled).
+func (m *Manager) Substrate() Substrate {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.substrate
+}
+
 // SetImageForTest pins the sandbox image fingerprint in unit tests.
 func (m *Manager) SetImageForTest(fingerprint string) {
 	m.image = fingerprint
+}
+
+// SetSubstrateForTest pins the pool substrate in unit tests.
+func (m *Manager) SetSubstrateForTest(substrate Substrate) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.substrate = substrate
 }
 
 func (m *Manager) Stats(ctx context.Context) (Stats, error) {
@@ -118,20 +134,26 @@ func (m *Manager) Stats(ctx context.Context) (Stats, error) {
 		return Stats{}, nil
 	}
 	m.mu.Lock()
-	stats := Stats{Stopped: len(m.stopped), Running: len(m.running), Claiming: len(m.claiming)}
+	stats := Stats{Stopped: len(m.stopped), Running: len(m.running), Claiming: len(m.claiming), Substrate: m.substrate}
 	m.mu.Unlock()
 	if _, err := m.runtime.InspectInstance(ctx, GoldenRef); err == nil {
 		stats.GoldenReady = true
 	}
 	caps, capErr := m.runtime.DiscoverCapabilities(ctx)
 	if capErr == nil {
-		stats.CoWStorage = storageEfficientCopy(caps.StorageDrivers)
+		stats.CoWStorage = storageIsZFS(caps.StorageDrivers)
 	}
 	return stats, capErr
 }
 
-// Bootstrap ensures the golden template and snapshot exist.
+// Bootstrap selects the host substrate, then ensures the golden template and snapshot exist.
 func (m *Manager) Bootstrap(ctx context.Context) error {
+	if !m.config.Enabled {
+		return nil
+	}
+	if err := m.selectSubstrate(ctx); err != nil {
+		return err
+	}
 	if !m.config.Enabled {
 		return nil
 	}
@@ -362,6 +384,43 @@ func (m *Manager) Discard(ctx context.Context, ref string) {
 	_ = m.runtime.DeleteInstance(ctx, ref)
 }
 
+func (m *Manager) selectSubstrate(ctx context.Context) error {
+	caps, err := m.runtime.DiscoverCapabilities(ctx)
+	if err != nil {
+		return fmt.Errorf("discover capabilities for pool substrate: %w", err)
+	}
+	if !storageIsZFS(caps.StorageDrivers) {
+		log.Printf("openboxd: sandbox pool disabled: ZFS storage required")
+		m.config.Enabled = false
+		return nil
+	}
+	vmUsable := caps.VirtualMachines && caps.VMAvailability == runtimeapi.VMAvailable
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if vmUsable {
+		m.substrate = SubstrateVM
+		containerDefaults := DefaultConfig()
+		vmDefaults := VMConfig()
+		if m.config.StoppedTarget == containerDefaults.StoppedTarget {
+			m.config.StoppedTarget = vmDefaults.StoppedTarget
+		}
+		if m.config.RunningTarget == containerDefaults.RunningTarget {
+			m.config.RunningTarget = vmDefaults.RunningTarget
+		}
+		if m.config.SSHReadyTimeout == containerDefaults.SSHReadyTimeout {
+			m.config.SSHReadyTimeout = vmDefaults.SSHReadyTimeout
+		}
+		return nil
+	}
+	if !caps.Containers {
+		log.Printf("openboxd: sandbox pool disabled: neither KVM VMs nor containers are available")
+		m.config.Enabled = false
+		return nil
+	}
+	m.substrate = SubstrateContainer
+	return nil
+}
+
 func (m *Manager) resolveSandboxImage(ctx context.Context) error {
 	if m.image != "" {
 		return nil
@@ -374,7 +433,14 @@ func (m *Manager) resolveSandboxImage(ctx context.Context) error {
 	if arch == "" {
 		arch = "x86_64"
 	}
-	manifest, err := images.DefaultCatalog().DefaultFor(domain.KindSandbox, arch, "container")
+	runtimeType := "container"
+	m.mu.Lock()
+	substrate := m.substrate
+	m.mu.Unlock()
+	if substrate == SubstrateVM {
+		runtimeType = "virtual-machine"
+	}
+	manifest, err := images.DefaultCatalog().DefaultFor(domain.KindSandbox, arch, runtimeType)
 	if err != nil {
 		return err
 	}
@@ -382,7 +448,7 @@ func (m *Manager) resolveSandboxImage(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list runtime images: %w", err)
 	}
-	image, err := images.ResolveForType(manifest.Alias, "container", available)
+	image, err := images.ResolveForType(manifest.Alias, runtimeType, available)
 	if err != nil {
 		return fmt.Errorf("resolve sandbox pool image: %w", err)
 	}
@@ -392,8 +458,11 @@ func (m *Manager) resolveSandboxImage(ctx context.Context) error {
 
 func (m *Manager) buildGolden(ctx context.Context) error {
 	placeholderKey := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG9wZW5ib3gtcG9vbC1wb29sLWdvbGRlbi1pbnRlcm5hbA="
+	m.mu.Lock()
+	substrate := m.substrate
+	m.mu.Unlock()
 	_, err := m.runtime.CreatePoolContainer(ctx, PoolCreateRequest{
-		Ref: GoldenRef, Image: m.image, OwnerPublicKey: placeholderKey,
+		Ref: GoldenRef, Image: m.image, OwnerPublicKey: placeholderKey, VM: substrate == SubstrateVM,
 		Metadata: map[string]string{
 			"user.openbox.managed":  "true",
 			"user.openbox.resource": "pool",
@@ -410,7 +479,11 @@ func (m *Manager) buildGolden(ctx context.Context) error {
 	if err := m.runtime.EnableBootstrapEgress(ctx, GoldenRef); err != nil {
 		return fmt.Errorf("enable golden bootstrap egress: %w", err)
 	}
-	readyCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	timeout := 2 * time.Minute
+	if substrate == SubstrateVM {
+		timeout = 5 * time.Minute
+	}
+	readyCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	if err := m.waitSSH(readyCtx, GoldenRef); err != nil {
 		return fmt.Errorf("golden template SSH readiness: %w", err)
@@ -566,10 +639,9 @@ func randomID() string {
 	return strings.ToLower(fmt.Sprintf("%016x", time.Now().UnixNano()))
 }
 
-func storageEfficientCopy(drivers []string) bool {
+func storageIsZFS(drivers []string) bool {
 	for _, driver := range drivers {
-		switch strings.ToLower(strings.TrimSpace(driver)) {
-		case "btrfs", "zfs", "lvm", "ceph", "cephfs", "powerflex", "pure":
+		if strings.EqualFold(strings.TrimSpace(driver), "zfs") {
 			return true
 		}
 	}

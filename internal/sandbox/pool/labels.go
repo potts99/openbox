@@ -21,3 +21,11 @@ const (
 	InternalOwnerID    = "openbox-pool"
 	InternalInstanceID = "pool-internal"
 )
+
+// Substrate is the active warm-pool runtime shape for this host.
+type Substrate string
+
+const (
+	SubstrateContainer Substrate = "container"
+	SubstrateVM        Substrate = "virtual_machine"
+)

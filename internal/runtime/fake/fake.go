@@ -584,7 +584,7 @@ func (r *Runtime) CreatePoolContainer(ctx context.Context, request sandboxpool.P
 	}
 	instance := runtimeapi.Instance{
 		Ref: request.Ref, Image: request.Image, State: runtimeapi.StateStopped,
-		Metadata: cloneStringMap(request.Metadata),
+		IsVM: request.VM, Metadata: cloneStringMap(request.Metadata),
 	}
 	r.instances[request.Ref] = instance
 	return cloneInstance(instance), nil
