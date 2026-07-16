@@ -809,45 +809,6 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .data-message { padding: .75rem 0; color: var(--muted); font-size: .875rem; text-align: center; }
 .data-message.is-error { color: var(--danger); }
 
-.pi-profile-layout {
-  display: grid;
-  gap: 1.5rem;
-  padding: 0 0 2rem;
-}
-.pi-profile-list, .pi-profile-history, .pi-profile-instances {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: .5rem;
-}
-.pi-profile-list button {
-  width: 100%;
-  justify-content: space-between;
-  background: var(--surface);
-}
-.pi-profile-list button.is-selected {
-  border-color: var(--focus);
-}
-.pi-profile-preview {
-  margin: 0;
-  padding: .85rem 1rem;
-  overflow: auto;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: .75rem;
-  white-space: pre-wrap;
-}
-.pi-profile-history li, .pi-profile-instances li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: .75rem;
-  padding: .55rem 0;
-  border-bottom: 1px solid var(--line);
-}
-
 .operation-drawer-backdrop {
   position: fixed;
   inset: 0;
