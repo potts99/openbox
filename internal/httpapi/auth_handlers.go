@@ -143,12 +143,12 @@ func (h *Handler) routeSession(w http.ResponseWriter, r *http.Request, requestID
 			h.writeError(w, requestID, http.StatusUnauthorized, "unauthenticated", "authorization")
 			return true
 		}
-		owner, err := h.auth.AuthenticateSession(r.Context(), cookie.Value, "", false)
+		session, err := h.auth.RefreshCSRF(r.Context(), cookie.Value)
 		if err != nil {
 			h.writeAuthError(w, requestID, err)
 			return true
 		}
-		h.writeJSON(w, http.StatusOK, auth.Session{OwnerID: owner})
+		h.writeJSON(w, http.StatusOK, session)
 	case http.MethodDelete:
 		c, _ := r.Cookie(auth.SessionCookie)
 		if c != nil {

@@ -12,7 +12,8 @@ needed, and rely on durable expiry cleanup.
 | Maximum TTL from create time | 24 hours |
 | Default resources | 2 vCPU, 2 GiB RAM, 10 GiB disk |
 | Default image | curated `openbox:sandbox/ubuntu/24.04` |
-| Default isolation | `best_available` |
+| Default isolation | `standard` (container; warm pool) |
+| Warm pool | Hybrid stopped + running clones from golden snapshot when `--storage-pool` is set |
 | Egress label (v0.1) | `default` (network profiles arrive in slice 14) |
 | Concurrent execs per instance | 2 |
 | Output rate limit | 1 MiB framed stdout/stderr per second |

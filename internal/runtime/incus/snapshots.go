@@ -28,6 +28,9 @@ func (a *Adapter) CreateSnapshot(ctx context.Context, ref, name string) error {
 		return runtimeapi.ErrAlreadyExists
 	}
 	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "already exists") {
+			return runtimeapi.ErrAlreadyExists
+		}
 		return fmt.Errorf("create Incus snapshot: %w", err)
 	}
 	return nil

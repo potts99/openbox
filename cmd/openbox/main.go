@@ -204,6 +204,20 @@ func runNew(ctx context.Context, api *openbox.Client, args []string, jsonOutput 
 	if len(positionals) != 1 {
 		return usageError(stderr, "usage: openbox new NAME [OPTIONS]")
 	}
+	if *kind == "sandbox" {
+		if *isolation == "best_available" {
+			*isolation = "standard"
+		}
+		if *image == "ubuntu" {
+			*image = "openbox:sandbox/ubuntu/24.04"
+		}
+		if *memory == "8GiB" {
+			*memory = "2GiB"
+		}
+		if *disk == "20GiB" {
+			*disk = "10GiB"
+		}
+	}
 	memoryBytes, err := parseBytes(*memory)
 	if err != nil {
 		return usageError(stderr, "invalid --memory: "+err.Error())

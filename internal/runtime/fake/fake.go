@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/openbox-dev/openbox/internal/domain"
+	sandboxpool "github.com/openbox-dev/openbox/internal/sandbox/pool"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 )
 
@@ -227,6 +228,34 @@ func (r *Runtime) WaitInstanceReady(ctx context.Context, request runtimeapi.Read
 	}
 	if !instance.IsVM || instance.State != runtimeapi.StateRunning {
 		return runtimeapi.ErrUnsupported
+	}
+	return nil
+}
+
+func (r *Runtime) EnableBootstrapEgress(ctx context.Context, ref string) error {
+	if err := r.begin(ctx, "instance.bootstrap_egress"); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.instances[ref]; !exists {
+		return runtimeapi.ErrNotFound
+	}
+	return nil
+}
+
+func (r *Runtime) WaitSSHReady(ctx context.Context, ref string) error {
+	if err := r.begin(ctx, "instance.wait_ssh"); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	instance, exists := r.instances[ref]
+	if !exists {
+		return runtimeapi.ErrNotFound
+	}
+	if instance.State != runtimeapi.StateRunning {
+		return fmt.Errorf("instance %s is not running", ref)
 	}
 	return nil
 }
@@ -517,6 +546,69 @@ func (r *Runtime) DeleteInstance(ctx context.Context, ref string) error {
 		return runtimeapi.ErrNotFound
 	}
 	delete(r.instances, ref)
+	return nil
+}
+
+func (r *Runtime) CreatePoolContainer(ctx context.Context, request sandboxpool.PoolCreateRequest) (runtimeapi.Instance, error) {
+	if err := r.begin(ctx, "pool.create"); err != nil {
+		return runtimeapi.Instance{}, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.instances[request.Ref]; exists {
+		return runtimeapi.Instance{}, runtimeapi.ErrAlreadyExists
+	}
+	if _, exists := r.images[request.Image]; !exists {
+		return runtimeapi.Instance{}, runtimeapi.ErrNotFound
+	}
+	instance := runtimeapi.Instance{
+		Ref: request.Ref, Image: request.Image, State: runtimeapi.StateStopped,
+		Metadata: cloneStringMap(request.Metadata),
+	}
+	r.instances[request.Ref] = instance
+	return cloneInstance(instance), nil
+}
+
+func (r *Runtime) UpdateInstanceConfig(ctx context.Context, ref string, values map[string]string) error {
+	if err := r.begin(ctx, "instance.update_config"); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	instance, exists := r.instances[ref]
+	if !exists {
+		return runtimeapi.ErrNotFound
+	}
+	if instance.Metadata == nil {
+		instance.Metadata = map[string]string{}
+	}
+	for key, value := range values {
+		if value == "" {
+			delete(instance.Metadata, key)
+			continue
+		}
+		instance.Metadata[key] = value
+	}
+	r.instances[ref] = instance
+	return nil
+}
+
+func (r *Runtime) RenameInstance(ctx context.Context, ref, newRef string) error {
+	if err := r.begin(ctx, "instance.rename"); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	instance, exists := r.instances[ref]
+	if !exists {
+		return runtimeapi.ErrNotFound
+	}
+	if _, taken := r.instances[newRef]; taken {
+		return runtimeapi.ErrAlreadyExists
+	}
+	instance.Ref = newRef
+	delete(r.instances, ref)
+	r.instances[newRef] = instance
 	return nil
 }
 

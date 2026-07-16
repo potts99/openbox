@@ -72,6 +72,7 @@ type Store interface {
 	UpdateCredential(context.Context, domain.OwnerID, string, time.Time) error
 	CreateSession(context.Context, []byte, domain.OwnerID, []byte, time.Time, time.Time) error
 	RotateSession(context.Context, []byte, []byte, domain.OwnerID, []byte, time.Time, time.Time) error
+	UpdateSessionCSRF(context.Context, []byte, []byte, time.Time) error
 	Session(context.Context, []byte, time.Time) (domain.OwnerID, []byte, time.Time, error)
 	RevokeSession(context.Context, []byte, time.Time) error
 	CreateToken(context.Context, Token, domain.OwnerID, []byte) error
@@ -219,6 +220,24 @@ func (m *Manager) RotateSession(ctx context.Context, oldSecret string, owner dom
 		return Session{}, "", ErrUnauthenticated
 	}
 	return Session{OwnerID: owner, ExpiresAt: expires, CSRFToken: csrf}, secret, nil
+}
+func (m *Manager) RefreshCSRF(ctx context.Context, secret string) (Session, error) {
+	raw, err := decodeSecret(secret)
+	if err != nil {
+		return Session{}, ErrUnauthenticated
+	}
+	owner, _, expires, err := m.store.Session(ctx, digest(raw), m.now())
+	if err != nil {
+		return Session{}, ErrUnauthenticated
+	}
+	csrf, csrfRaw, err := randomSecret(32)
+	if err != nil {
+		return Session{}, err
+	}
+	if err := m.store.UpdateSessionCSRF(ctx, digest(raw), digest(csrfRaw), m.now()); err != nil {
+		return Session{}, ErrUnauthenticated
+	}
+	return Session{OwnerID: owner, ExpiresAt: expires, CSRFToken: csrf}, nil
 }
 func (m *Manager) CookieMaxAge(expires time.Time) int {
 	seconds := int(math.Ceil(expires.Sub(m.now()).Seconds()))
