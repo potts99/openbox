@@ -57,6 +57,8 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
   const [actionError, setActionError] = useState("");
   const [installPending, setInstallPending] = useState<string | null>(null);
   const [installError, setInstallError] = useState("");
+  const [extendPending, setExtendPending] = useState(false);
+  const [extendError, setExtendError] = useState("");
   const [operationsRefreshKey, setOperationsRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -87,6 +89,22 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
       api.getConnection().catch(() => ({ ssh: null }) as ConnectionInfo),
     ]);
     setData({ status: "ready", instance, catalog, connection });
+  }
+
+  async function extendTTL(durationSeconds: number) {
+    setExtendError("");
+    setExtendPending(true);
+    try {
+      const instance = await api.extendInstance(instanceId, durationSeconds);
+      setData((current) => {
+        if (current.status !== "ready") return current;
+        return { ...current, instance };
+      });
+    } catch (error: unknown) {
+      setExtendError(error instanceof Error ? error.message : "Could not extend TTL");
+    } finally {
+      setExtendPending(false);
+    }
   }
 
   async function runAction(action: InstanceAction) {
@@ -247,28 +265,42 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
                 </div>
                 <div>
                   <dt>Isolation</dt>
-                  <dd>{instance.actualIsolation || instance.requestedIsolation}</dd>
+                  <dd>
+                    {instance.actualIsolation || instance.requestedIsolation}
+                    {instance.kind === "sandbox" && instance.actualIsolation === "container"
+                      ? " (container; omitted requests select this when KVM is unavailable)"
+                      : ""}
+                  </dd>
                 </div>
-                <div>
-                  <dt>Egress</dt>
-                  <dd>{instance.networkPolicy?.egressMode || "unknown"}</dd>
-                </div>
-                <div>
-                  <dt>Egress profile</dt>
-                  <dd>{instance.egressProfileId || "—"}</dd>
-                </div>
-                <div>
-                  <dt>Network ACLs</dt>
-                  <dd>{instance.networkPolicy?.acls?.join(", ") || "—"}</dd>
-                </div>
-                <div>
-                  <dt>Resolution</dt>
-                  <dd>{instance.networkPolicy?.resolutionState || "idle"}</dd>
-                </div>
-                <div>
-                  <dt>Denied flows</dt>
-                  <dd>{instance.networkPolicy?.deniedFlows ?? 0}</dd>
-                </div>
+                {instance.kind !== "sandbox" ? (
+                  <>
+                    <div>
+                      <dt>Egress</dt>
+                      <dd>{instance.networkPolicy?.egressMode || "unknown"}</dd>
+                    </div>
+                    <div>
+                      <dt>Egress profile</dt>
+                      <dd>{instance.egressProfileId || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Network ACLs</dt>
+                      <dd>{instance.networkPolicy?.acls?.join(", ") || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Resolution</dt>
+                      <dd>{instance.networkPolicy?.resolutionState || "idle"}</dd>
+                    </div>
+                    <div>
+                      <dt>Denied flows</dt>
+                      <dd>{instance.networkPolicy?.deniedFlows ?? 0}</dd>
+                    </div>
+                  </>
+                ) : (
+                  <div>
+                    <dt>Egress profile</dt>
+                    <dd>{instance.egressProfileId || "—"}</dd>
+                  </div>
+                )}
                 <div>
                   <dt>Desired</dt>
                   <dd>{instance.desiredState}</dd>
@@ -316,6 +348,14 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
               errorCode={instance.errorCode}
               errorStage={instance.errorStage}
               egressPolicy={instance.networkPolicy?.egressMode || "restricted"}
+              isolationNote={
+                instance.actualIsolation === "container"
+                  ? "Running as a container. Explicit strong never silently downgrades; omitted requests select container when KVM is unavailable."
+                  : undefined
+              }
+              extendPending={extendPending}
+              extendError={extendError}
+              onExtend={(seconds) => { void extendTTL(seconds); }}
             />
           ) : null}
         </main>

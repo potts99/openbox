@@ -24,6 +24,7 @@ type Runtime struct {
 	instances          map[string]runtimeapi.Instance
 	usage              map[string]runtimeapi.UsageSnapshot
 	execResults        map[string]runtimeapi.ExecResult
+	execHook           func(context.Context, runtimeapi.ExecRequest) error
 	failures           map[string][]error
 	calls              []string
 	createRequests     []runtimeapi.CreateRequest
@@ -129,6 +130,14 @@ func (r *Runtime) SetExecResult(ref string, result runtimeapi.ExecResult) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.execResults[ref] = cloneExecResult(result)
+}
+
+// SetExecHook installs an optional hook invoked during Exec before the result
+// is returned. Useful for concurrency-gate tests.
+func (r *Runtime) SetExecHook(hook func(context.Context, runtimeapi.ExecRequest) error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.execHook = hook
 }
 
 func (r *Runtime) FailNext(operation string, err error) {
@@ -297,15 +306,22 @@ func (r *Runtime) Exec(ctx context.Context, request runtimeapi.ExecRequest) (run
 		return runtimeapi.ExecResult{}, err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	hook := r.execHook
 	instance, exists := r.instances[request.Ref]
+	result := cloneExecResult(r.execResults[request.Ref])
+	r.mu.Unlock()
 	if !exists {
 		return runtimeapi.ExecResult{}, runtimeapi.ErrNotFound
 	}
 	if instance.State != runtimeapi.StateRunning {
 		return runtimeapi.ExecResult{}, fmt.Errorf("exec %s: %w", request.Ref, runtimeapi.ErrUnsupported)
 	}
-	return cloneExecResult(r.execResults[request.Ref]), nil
+	if hook != nil {
+		if err := hook(ctx, request); err != nil {
+			return runtimeapi.ExecResult{}, err
+		}
+	}
+	return result, nil
 }
 
 func (r *Runtime) WriteFile(ctx context.Context, request runtimeapi.WriteFileRequest) error {

@@ -138,6 +138,7 @@ export interface CreateInstanceInput {
   diskBytes: number;
   ownerPublicKey: string;
   packages?: string[];
+  lifetimeSeconds?: number;
 }
 
 export interface CreateInstanceResult {
@@ -174,6 +175,7 @@ export interface OpenBoxApi {
   listInstances(): Promise<InstanceSummary[]>;
   getInstance(id: string): Promise<InstanceDetail>;
   createInstance(input: CreateInstanceInput): Promise<CreateInstanceResult>;
+  extendInstance(id: string, durationSeconds: number): Promise<InstanceDetail>;
   listSoftwareCatalog(): Promise<SoftwarePackage[]>;
   installSoftware(instanceId: string, packageId: string): Promise<InstanceSoftware>;
   mutateInstance(id: string, action: InstanceAction): Promise<OperationSummary>;
@@ -428,28 +430,38 @@ export function createHttpApi(options: HttpApiOptions = {}): OpenBoxApi {
       return normalizeInstance(await request(`/v1/instances/${encodeURIComponent(id)}`));
     },
     async createInstance(input) {
+      const payload: Record<string, unknown> = {
+        name: input.name,
+        kind: input.kind,
+        image: input.image,
+        requested_isolation: input.requestedIsolation,
+        resources: {
+          vcpus: input.vcpus,
+          memory_bytes: input.memoryBytes,
+          disk_bytes: input.diskBytes,
+        },
+        owner_public_key: input.ownerPublicKey,
+        packages: input.packages ?? [],
+      };
+      if (input.lifetimeSeconds && input.lifetimeSeconds > 0) {
+        payload.lifetime_seconds = input.lifetimeSeconds;
+      }
       const body = asRecord(await request("/v1/instances", {
         method: "POST",
         headers: { "Idempotency-Key": newIdempotencyKey() },
-        body: JSON.stringify({
-          name: input.name,
-          kind: input.kind,
-          image: input.image,
-          requested_isolation: input.requestedIsolation,
-          resources: {
-            vcpus: input.vcpus,
-            memory_bytes: input.memoryBytes,
-            disk_bytes: input.diskBytes,
-          },
-          owner_public_key: input.ownerPublicKey,
-          packages: input.packages ?? [],
-        }),
+        body: JSON.stringify(payload),
       }));
       const instanceRaw = body.instance;
       return {
         operation: normalizeOperation(body.operation),
         instance: instanceRaw ? normalizeInstance(instanceRaw) : undefined,
       };
+    },
+    async extendInstance(id, durationSeconds) {
+      return normalizeInstance(await request(`/v1/instances/${encodeURIComponent(id)}/extend`, {
+        method: "POST",
+        body: JSON.stringify({ duration_seconds: durationSeconds }),
+      }));
     },
     async listSoftwareCatalog() {
       const body = asRecord(await request("/v1/software"));

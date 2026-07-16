@@ -46,6 +46,7 @@ function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
     listInstances: vi.fn(),
     getInstance: vi.fn(),
     createInstance: vi.fn(),
+    extendInstance: vi.fn(),
     listSoftwareCatalog: vi.fn(),
     installSoftware: vi.fn(),
     mutateInstance: vi.fn(),

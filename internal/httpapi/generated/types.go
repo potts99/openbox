@@ -220,13 +220,16 @@ type CreateInstanceRequest struct {
 	EgressProfileId *string                    `json:"egress_profile_id,omitempty"`
 	Image           string                     `json:"image"`
 	Kind            *CreateInstanceRequestKind `json:"kind,omitempty"`
-	Name            string                     `json:"name"`
-	OwnerPublicKey  string                     `json:"owner_public_key"`
+
+	// LifetimeSeconds Sandbox TTL from create time. Defaults to 3600 (1h) for sandboxes. Ignored for non-sandbox kinds. Must not exceed 86400 (24h).
+	LifetimeSeconds *int   `json:"lifetime_seconds,omitempty"`
+	Name            string `json:"name"`
+	OwnerPublicKey  string `json:"owner_public_key"`
 
 	// Packages Catalog package IDs to install after the instance is ready.
 	Packages *[]string `json:"packages,omitempty"`
 
-	// RequestedIsolation Omit to let the server choose strong when KVM is usable, otherwise container.
+	// RequestedIsolation Omit to let the server choose strong when KVM is usable, otherwise container. Explicit strong fails with capability_unavailable when VMs are not usable.
 	RequestedIsolation *CreateInstanceRequestRequestedIsolation `json:"requested_isolation,omitempty"`
 	Resources          *Resources                               `json:"resources,omitempty"`
 }
@@ -234,7 +237,7 @@ type CreateInstanceRequest struct {
 // CreateInstanceRequestKind defines model for CreateInstanceRequest.Kind.
 type CreateInstanceRequestKind string
 
-// CreateInstanceRequestRequestedIsolation Omit to let the server choose strong when KVM is usable, otherwise container.
+// CreateInstanceRequestRequestedIsolation Omit to let the server choose strong when KVM is usable, otherwise container. Explicit strong fails with capability_unavailable when VMs are not usable.
 type CreateInstanceRequestRequestedIsolation string
 
 // CreateInstanceResult defines model for CreateInstanceResult.
@@ -315,17 +318,25 @@ type ErrorEnvelope struct {
 
 // ExecInstanceRequest defines model for ExecInstanceRequest.
 type ExecInstanceRequest struct {
-	Argv []string           `json:"argv"`
-	Env  *map[string]string `json:"env,omitempty"`
+	// Argv Argv tokens only; whitespace inside a token is rejected. No shell string.
+	Argv []string `json:"argv"`
+
+	// Env Filtered to an allowlist (PATH, HOME, USER, LOGNAME, LANG, LC_*, TERM, TMP*).
+	Env *map[string]string `json:"env,omitempty"`
 
 	// StdinBase64 Optional base64-encoded stdin payload.
-	StdinBase64    *string `json:"stdin_base64,omitempty"`
-	TimeoutSeconds *int    `json:"timeout_seconds,omitempty"`
-	WorkingDir     *string `json:"working_dir,omitempty"`
+	StdinBase64 *string `json:"stdin_base64,omitempty"`
+
+	// TimeoutSeconds Defaults to 300 (5m); maximum 1800 (30m).
+	TimeoutSeconds *int `json:"timeout_seconds,omitempty"`
+
+	// WorkingDir Absolute guest working directory.
+	WorkingDir *string `json:"working_dir,omitempty"`
 }
 
 // ExtendInstanceRequest defines model for ExtendInstanceRequest.
 type ExtendInstanceRequest struct {
+	// DurationSeconds Seconds to add to expires_at.
 	DurationSeconds int `json:"duration_seconds"`
 }
 
@@ -356,30 +367,41 @@ type Image struct {
 
 // Instance defines model for Instance.
 type Instance struct {
+	// ActualIsolation Runtime type that was provisioned. Never silently differs from a successful strong request.
 	ActualIsolation InstanceActualIsolation `json:"actual_isolation"`
 	CreatedAt       time.Time               `json:"created_at"`
 	DesiredState    InstanceDesiredState    `json:"desired_state"`
 	EgressProfileId *string                 `json:"egress_profile_id,omitempty"`
-	ErrorCode       *string                 `json:"error_code,omitempty"`
-	ErrorRetryable  *bool                   `json:"error_retryable,omitempty"`
-	ErrorStage      *string                 `json:"error_stage,omitempty"`
-	ExpiresAt       *time.Time              `json:"expires_at"`
-	Id              string                  `json:"id"`
-	ImageId         string                  `json:"image_id"`
-	Kind            InstanceKind            `json:"kind"`
-	Name            string                  `json:"name"`
+
+	// ErrorCode Machine-readable failure code when observed_state is error.
+	ErrorCode      *string `json:"error_code,omitempty"`
+	ErrorRetryable *bool   `json:"error_retryable,omitempty"`
+
+	// ErrorStage Stage or phase where cleanup/runtime failure was recorded.
+	ErrorStage *string `json:"error_stage,omitempty"`
+
+	// ExpiresAt Required for sandboxes. Absolute UTC expiry; max created_at + 24h.
+	ExpiresAt *time.Time `json:"expires_at"`
+	Id        string     `json:"id"`
+
+	// ImageId Immutable image fingerprint pinned at create time.
+	ImageId string       `json:"image_id"`
+	Kind    InstanceKind `json:"kind"`
+	Name    string       `json:"name"`
 
 	// NetworkPolicy Effective host-enforced network policy metadata without packet or DNS-answer payloads.
-	NetworkPolicy      NetworkPolicyStatus        `json:"network_policy"`
-	ObservedState      InstanceObservedState      `json:"observed_state"`
-	Protected          bool                       `json:"protected"`
+	NetworkPolicy NetworkPolicyStatus   `json:"network_policy"`
+	ObservedState InstanceObservedState `json:"observed_state"`
+	Protected     bool                  `json:"protected"`
+
+	// RequestedIsolation Resolved isolation request after create acceptance. An omitted create request is filled with strong when KVM is usable, otherwise container.
 	RequestedIsolation InstanceRequestedIsolation `json:"requested_isolation"`
 	Resources          Resources                  `json:"resources"`
 	Software           *[]InstanceSoftware        `json:"software,omitempty"`
 	UpdatedAt          time.Time                  `json:"updated_at"`
 }
 
-// InstanceActualIsolation defines model for Instance.ActualIsolation.
+// InstanceActualIsolation Runtime type that was provisioned. Never silently differs from a successful strong request.
 type InstanceActualIsolation string
 
 // InstanceDesiredState defines model for Instance.DesiredState.
@@ -391,7 +413,7 @@ type InstanceKind string
 // InstanceObservedState defines model for Instance.ObservedState.
 type InstanceObservedState string
 
-// InstanceRequestedIsolation defines model for Instance.RequestedIsolation.
+// InstanceRequestedIsolation Resolved isolation request after create acceptance. An omitted create request is filled with strong when KVM is usable, otherwise container.
 type InstanceRequestedIsolation string
 
 // InstanceSoftware defines model for InstanceSoftware.

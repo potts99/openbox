@@ -42,6 +42,7 @@ function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
     listInstances: vi.fn(),
     getInstance: vi.fn().mockResolvedValue(detail),
     createInstance: vi.fn(),
+    extendInstance: vi.fn(),
     listSoftwareCatalog: vi.fn().mockResolvedValue([
       { id: "pi", name: "Pi coding agent", description: "Installs Pi CLI and tmux" },
     ]),
