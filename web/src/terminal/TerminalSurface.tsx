@@ -8,6 +8,7 @@ import "@xterm/xterm/css/xterm.css";
 export interface TerminalSurfaceHandle {
   write(data: Uint8Array): void;
   focus(): void;
+  fit(): void;
   dispose(): void;
 }
 
@@ -51,6 +52,10 @@ export function XtermTerminalSurface({ onData, onResize, onReady }: TerminalSurf
       },
       focus() {
         term.focus();
+      },
+      fit() {
+        fit.fit();
+        onResize(term.cols, term.rows);
       },
       dispose() {
         dataDisposable.dispose();

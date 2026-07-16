@@ -14,6 +14,7 @@ function TestTerminalSurface({ onData, onResize, onReady }: TerminalSurfaceProps
   const handleRef = useRef<TerminalSurfaceHandle>({
     write() { /* test surface ignores PTY output */ },
     focus() { /* focus is handled by the host element */ },
+    fit() { /* test surface has no xterm fit addon */ },
     dispose() { /* nothing to dispose */ },
   });
 
@@ -221,24 +222,30 @@ describe("InstanceTerminal", () => {
     renderTerminal();
 
     const toolbar = document.querySelector(".terminal-toolbar");
+    const page = document.querySelector(".terminal-page");
     expect(toolbar).not.toHaveClass("terminal-toolbar--hidden");
+    expect(page).toHaveClass("terminal-page--chrome-visible");
 
     openConnectedSocket();
     expect(await screen.findByRole("status", { name: "Terminal connection state" })).toHaveTextContent(/connected/i);
 
     await waitFor(() => {
       expect(toolbar).toHaveClass("terminal-toolbar--hidden");
+      expect(page).not.toHaveClass("terminal-page--chrome-visible");
     }, { timeout: 2500 });
 
     await user.keyboard("{Escape}");
     expect(toolbar).not.toHaveClass("terminal-toolbar--hidden");
+    expect(page).toHaveClass("terminal-page--chrome-visible");
 
     await user.keyboard("{Escape}");
     expect(toolbar).toHaveClass("terminal-toolbar--hidden");
+    expect(page).not.toHaveClass("terminal-page--chrome-visible");
 
     FakeWebSocket.instances[0]?.close();
     expect(await screen.findByRole("status", { name: "Terminal connection state" })).toHaveTextContent(/disconnected/i);
     expect(toolbar).not.toHaveClass("terminal-toolbar--hidden");
+    expect(page).toHaveClass("terminal-page--chrome-visible");
     expect(screen.getByRole("button", { name: "Reconnect" })).toBeInTheDocument();
   });
 
