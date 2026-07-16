@@ -135,6 +135,10 @@ export interface CreateInstanceResult {
   instance?: InstanceDetail;
 }
 
+export type ConnectionInfo =
+  | { ssh: { host: string; port: number } }
+  | { ssh: null };
+
 export interface PiProfileSummary {
   id: string;
   name: string;
@@ -154,6 +158,7 @@ export interface OpenBoxApi {
   getSession(): Promise<Session>;
   getCsrfToken(): string;
   getCapabilities(): Promise<Capabilities>;
+  getConnection(): Promise<ConnectionInfo>;
   listImages(): Promise<ImageSummary[]>;
   listSSHKeys(): Promise<SSHKeySummary[]>;
   listInstances(): Promise<InstanceSummary[]>;
@@ -340,6 +345,14 @@ export function createHttpApi(options: HttpApiOptions = {}): OpenBoxApi {
         vmAvailability: text(body.vm_availability, "unknown"),
         vmReason: text(body.vm_reason) || undefined,
       };
+    },
+    async getConnection() {
+      const body = asRecord(await request("/v1/connection"));
+      if (body.ssh == null) {
+        return { ssh: null };
+      }
+      const ssh = asRecord(body.ssh);
+      return { ssh: { host: text(ssh.host), port: number(ssh.port) } };
     },
     async listImages() {
       const body = asRecord(await request("/v1/images"));
