@@ -29,6 +29,7 @@ func NewInstance(id InstanceID, ownerID OwnerID, name string, kind InstanceKind,
 		RequestedIsolation: IsolationBestAvailable,
 		ActualIsolation:    IsolationUnknown,
 		EgressMode:         defaultEgressMode(kind),
+		EgressProfileID:    DefaultEgressProfileID(kind),
 		DesiredState:       DesiredRunning, ObservedState: ObservedPending,
 		CreatedAt: now, UpdatedAt: now,
 	}

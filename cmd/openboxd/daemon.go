@@ -22,11 +22,13 @@ import (
 	"time"
 
 	"github.com/openbox-dev/openbox/internal/app/clones"
+	"github.com/openbox-dev/openbox/internal/app/egress"
 	"github.com/openbox-dev/openbox/internal/app/instances"
 	"github.com/openbox-dev/openbox/internal/app/metrics"
 	"github.com/openbox-dev/openbox/internal/app/recovery"
 	"github.com/openbox-dev/openbox/internal/app/sshcommands"
 	"github.com/openbox-dev/openbox/internal/auth"
+	"github.com/openbox-dev/openbox/internal/dnsproxy"
 	"github.com/openbox-dev/openbox/internal/domain"
 	"github.com/openbox-dev/openbox/internal/httpapi"
 	"github.com/openbox-dev/openbox/internal/operations"
@@ -177,7 +179,22 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	}
 	instancePublicKey := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(instanceSigner.PublicKey())))
 	mode := &operations.Mode{}
-	service, err := instances.New(runtime, store, instances.Options{Mode: mode, InstanceGatewayPublicKey: instancePublicKey, NetworkPolicy: runtime, SandboxPool: sandboxPool})
+	if err := store.EnsureSystemEgressProfiles(ctx); err != nil {
+		return fail(fmt.Errorf("ensure system egress profiles: %w", err))
+	}
+	allowlistResolver, err := dnsproxy.NewAllowlistResolver(dnsproxy.Config{})
+	if err != nil {
+		return fail(fmt.Errorf("dns allowlist resolver: %w", err))
+	}
+	egressApplicator := egress.NewApplicator(allowlistResolver, egress.AdapterRuntime{Adapter: runtime})
+	egressService, err := egress.New(store, egressApplicator, egress.Options{})
+	if err != nil {
+		return fail(fmt.Errorf("egress profiles: %w", err))
+	}
+	networkPolicy := &egress.PolicyBridge{
+		Profiles: store, Applicator: egressApplicator, Backend: runtime,
+	}
+	service, err := instances.New(runtime, store, instances.Options{Mode: mode, InstanceGatewayPublicKey: instancePublicKey, NetworkPolicy: networkPolicy, SandboxPool: sandboxPool})
 	if err != nil {
 		return fail(err)
 	}
@@ -287,6 +304,7 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 		TerminalAudit:     durableTerminalAuditor{store: store, fallbackOwner: domain.OwnerID(config.OwnerID)},
 		PiProfiles:        piProfiles,
 		PiApplier:         piApplier,
+		EgressProfiles:    egressService,
 		Metrics:           metricsHub,
 		TrustedProxyCIDRs: config.TrustedProxyCIDRs,
 		SSHPublicHost:     config.SSHPublicHost,

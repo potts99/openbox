@@ -254,6 +254,22 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
                   <dd>{instance.networkPolicy?.egressMode || "unknown"}</dd>
                 </div>
                 <div>
+                  <dt>Egress profile</dt>
+                  <dd>{instance.egressProfileId || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Network ACLs</dt>
+                  <dd>{instance.networkPolicy?.acls?.join(", ") || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Resolution</dt>
+                  <dd>{instance.networkPolicy?.resolutionState || "idle"}</dd>
+                </div>
+                <div>
+                  <dt>Denied flows</dt>
+                  <dd>{instance.networkPolicy?.deniedFlows ?? 0}</dd>
+                </div>
+                <div>
                   <dt>Desired</dt>
                   <dd>{instance.desiredState}</dd>
                 </div>
@@ -299,7 +315,7 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
               expiresAt={instance.expiresAt}
               errorCode={instance.errorCode}
               errorStage={instance.errorStage}
-              egressPolicy="default"
+              egressPolicy={instance.networkPolicy?.egressMode || "restricted"}
             />
           ) : null}
         </main>

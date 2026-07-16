@@ -21,21 +21,36 @@ guest DNS configuration cannot modify its results.
 This boundary does not cover guest eBPF, TLS interception, or cross-host
 policy.
 
+## Egress profiles
+
+Host-global egress profiles own `egress_mode` and the administrator allowlist.
+Instances reference a profile via `egress_profile_id`. Create defaults attach
+sandboxes to the seeded `restricted` profile and VPS instances to `standard`.
+
+Restricted apply resolves allowlist hostnames in `openboxd` through
+`dnsproxy` (rebinding-safe), programs a per-instance Incus ACL
+(`RestrictedACLName`), and stacks it with `openbox-default-deny`. Profile edits
+persist first, then re-apply to attached instances; failed instances are marked
+error while the saved profile is kept (`apply_errors` in the API response).
+
+See [docs/operators/egress-profiles.md](../operators/egress-profiles.md).
+
 ## Operator-visible policy status
 
 Instance inspect responses expose `network_policy` without logging or returning
 packet payloads or DNS answers. The field reports:
 
-- `egress_mode`: the effective `standard` or `restricted` mode;
+- `egress_mode`: the effective `standard` or `restricted` mode (from the
+  attached profile);
 - `acls`: the Incus ACL names attached to the instance NIC;
 - `resolution`: hostname allowlist state (`idle`, `pending`, `resolved`, or
   `failed`) and hostname names only, never resolved IP addresses; and
 - `denied_flows`: a best-effort counter of host-side policy application
   failures that fail closed, such as an Incus ACL update failure.
 
-`openbox inspect` displays the same egress mode, ACL names, resolution state,
-and denied-flow counter. The counter is in-memory and resets when `openboxd`
-restarts; it is operational telemetry, not an audit trail.
+`openbox inspect` displays the egress profile id, egress mode, ACL names,
+resolution state, and denied-flow counter. The counter is in-memory and resets
+when `openboxd` restarts; it is operational telemetry, not an audit trail.
 
 ## Policy programming verification
 

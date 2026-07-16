@@ -251,6 +251,59 @@ func (c *Client) PublishRoute(ctx context.Context, id string) (Route, error) {
 	return route, err
 }
 
+func (c *Client) ListEgressProfiles(ctx context.Context) ([]EgressProfile, error) {
+	var envelope struct {
+		Items []EgressProfile `json:"items"`
+	}
+	_, err := c.do(ctx, http.MethodGet, "/v1/network/egress-profiles", "", nil, &envelope)
+	if err != nil {
+		return nil, err
+	}
+	if envelope.Items == nil {
+		return []EgressProfile{}, nil
+	}
+	return envelope.Items, nil
+}
+
+func (c *Client) GetEgressProfile(ctx context.Context, id string) (EgressProfile, error) {
+	var profile EgressProfile
+	_, err := c.do(ctx, http.MethodGet, resourcePath("/v1/network/egress-profiles", id), "", nil, &profile)
+	return profile, err
+}
+
+func (c *Client) CreateEgressProfile(ctx context.Context, name, mode string, destinations []string) (EgressProfile, error) {
+	var profile EgressProfile
+	_, err := c.do(ctx, http.MethodPost, "/v1/network/egress-profiles", "", map[string]any{
+		"name": name, "mode": mode, "allowed_destinations": destinations,
+	}, &profile)
+	return profile, err
+}
+
+func (c *Client) UpdateEgressProfile(ctx context.Context, id string, patch map[string]any) (EgressProfile, []map[string]string, error) {
+	var envelope struct {
+		Profile     EgressProfile      `json:"profile"`
+		ApplyErrors []map[string]string `json:"apply_errors"`
+	}
+	_, err := c.do(ctx, http.MethodPatch, resourcePath("/v1/network/egress-profiles", id), "", patch, &envelope)
+	return envelope.Profile, envelope.ApplyErrors, err
+}
+
+func (c *Client) DeleteEgressProfile(ctx context.Context, id string) error {
+	_, err := c.do(ctx, http.MethodDelete, resourcePath("/v1/network/egress-profiles", id), "", nil, nil)
+	return err
+}
+
+func (c *Client) AttachEgressProfile(ctx context.Context, instanceID, profileID string) (Instance, error) {
+	var instance Instance
+	_, err := c.do(ctx, http.MethodPut, resourcePath("/v1/instances", instanceID, "network", "egress-profile"), "", map[string]any{
+		"egress_profile_id": profileID,
+	}, &instance)
+	if err == nil {
+		err = instance.validate()
+	}
+	return instance, err
+}
+
 func (c *Client) ListSuggestedPorts(ctx context.Context, instanceID string) ([]int, error) {
 	var envelope struct {
 		Items []int `json:"items"`

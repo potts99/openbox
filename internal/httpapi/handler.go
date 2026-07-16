@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openbox-dev/openbox/internal/app/egress"
 	"github.com/openbox-dev/openbox/internal/app/instances"
 	"github.com/openbox-dev/openbox/internal/app/metrics"
 	"github.com/openbox-dev/openbox/internal/auth"
@@ -70,6 +71,7 @@ type Service interface {
 	ExtendExpiry(context.Context, domain.OwnerID, domain.InstanceID, time.Duration) (domain.Instance, error)
 	ListSoftware(context.Context, domain.OwnerID, domain.InstanceID) ([]domain.InstanceSoftware, error)
 	InstallSoftware(context.Context, domain.OwnerID, domain.InstanceID, string) (domain.InstanceSoftware, error)
+	AttachEgressProfile(context.Context, domain.OwnerID, domain.InstanceID, domain.EgressProfileID) (domain.Instance, error)
 }
 
 type Options struct {
@@ -93,6 +95,8 @@ type Options struct {
 	PiProfiles *pi.Service
 	// PiApplier materializes profiles into selected instances. When nil, apply returns not_implemented.
 	PiApplier *pi.Applier
+	// EgressProfiles serves host-global egress profile CRUD and fan-out.
+	EgressProfiles *egress.Service
 	// Metrics is the in-memory sample hub for instance monitoring WebSockets.
 	// When nil, /metrics returns not_implemented.
 	Metrics *metrics.Hub
@@ -123,6 +127,7 @@ type Handler struct {
 	terminalAudit      TerminalAuditor
 	piProfiles         *pi.Service
 	piApplier          *pi.Applier
+	egressProfiles     *egress.Service
 	metrics            *metrics.Hub
 	trustedProxies     []*net.IPNet
 	sshPublicHost      string
@@ -167,6 +172,7 @@ func New(service Service, options Options) (*Handler, error) {
 		terminalAudit:      options.TerminalAudit,
 		piProfiles:         options.PiProfiles,
 		piApplier:          options.PiApplier,
+		egressProfiles:     options.EgressProfiles,
 		metrics:            options.Metrics,
 		trustedProxies:     trustedProxies,
 		sshPublicHost:      strings.TrimSpace(options.SSHPublicHost),
@@ -275,6 +281,10 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		if h.routePiProfiles(response, request, requestID, segments[2:]) {
 			return
 		}
+	case "network":
+		if h.routeNetwork(response, request, requestID, segments[2:]) {
+			return
+		}
 	case "certificates":
 		if len(segments) == 3 && segments[2] == "allow" && h.requireMethod(response, request, requestID, http.MethodGet) {
 			h.certificateAllow(response, request, requestID)
@@ -368,6 +378,13 @@ func (h *Handler) routeInstances(response http.ResponseWriter, request *http.Req
 			return true
 		}
 		h.installSoftware(response, request, requestID, rest[0], rest[2])
+		return true
+	}
+	if len(rest) == 3 && rest[1] == "network" && rest[2] == "egress-profile" {
+		if !h.requireMethod(response, request, requestID, http.MethodPut) {
+			return true
+		}
+		h.attachInstanceEgressProfile(response, request, requestID, rest[0])
 		return true
 	}
 	return false
@@ -499,10 +516,15 @@ func (h *Handler) createInstance(response http.ResponseWriter, request *http.Req
 	if input.Packages != nil {
 		packages = *input.Packages
 	}
+	var egressProfileID domain.EgressProfileID
+	if input.EgressProfileId != nil {
+		egressProfileID = domain.EgressProfileID(*input.EgressProfileId)
+	}
 	instance, operation, err := h.service.SubmitCreate(request.Context(), instances.CreateInput{
 		OwnerID: h.requestOwner(request), Name: input.Name, Kind: kind, Image: input.Image,
 		RequestedIsolation: isolation,
 		Resources:          resources,
+		EgressProfileID:    egressProfileID,
 		OwnerPublicKey:     input.OwnerPublicKey, IdempotencyKey: key,
 		Packages: packages,
 	})
@@ -736,6 +758,9 @@ func mapInstance(value domain.Instance, softwareRows []domain.InstanceSoftware) 
 		Resources: generated.Resources{Vcpus: value.Resources.VCPUs, MemoryBytes: value.Resources.MemoryBytes, DiskBytes: value.Resources.DiskBytes},
 		ExpiresAt: value.ExpiresAt, Protected: value.Protected, ErrorCode: optionalString(string(value.ErrorCode)), ErrorStage: optionalString(value.ErrorStage),
 		ErrorRetryable: pointer(value.ErrorRetryable), NetworkPolicy: mapNetworkPolicy(value.NetworkPolicy), CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}
+	if value.EgressProfileID != "" {
+		out.EgressProfileId = optionalString(string(value.EgressProfileID))
 	}
 	if len(softwareRows) > 0 {
 		items := make([]generated.InstanceSoftware, 0, len(softwareRows))

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/openbox-dev/openbox/internal/domain"
+	"github.com/openbox-dev/openbox/internal/networkpolicy"
 )
 
 type staticProbe struct {
@@ -656,17 +657,29 @@ func TestApplyNetworkPolicyRejectsUnchangedNICACLs(t *testing.T) {
 }
 
 func TestNetworkPolicyStatusReportsEffectiveACLsAndApplyFailures(t *testing.T) {
+	restrictedName := networkpolicy.RestrictedACLName("instance-1")
 	socket := serveUnixHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			writeSync(w, instanceRecord{
-				Name: "instance-1", Type: "container", Status: "Stopped",
-				Devices: map[string]map[string]string{"eth0": {"type": "nic", "network": "openbox0", "name": "eth0"}},
-			})
-		case http.MethodPatch:
-			writeError(w, http.StatusInternalServerError, "policy backend unavailable")
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/1.0/network-acls/") || r.URL.Path == "/1.0/network-acls":
+			if r.Method == http.MethodGet {
+				writeError(w, http.StatusNotFound, "not found")
+				return
+			}
+			writeSync(w, nil)
+		case r.URL.Path == "/1.0/instances/instance-1":
+			switch r.Method {
+			case http.MethodGet:
+				writeSync(w, instanceRecord{
+					Name: "instance-1", Type: "container", Status: "Stopped",
+					Devices: map[string]map[string]string{"eth0": {"type": "nic", "network": "openbox0", "name": "eth0"}},
+				})
+			case http.MethodPatch:
+				writeError(w, http.StatusInternalServerError, "policy backend unavailable")
+			default:
+				writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			}
 		default:
-			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			writeError(w, http.StatusNotFound, "not found")
 		}
 	}))
 	adapter, err := New(Options{SocketPath: socket})
@@ -679,7 +692,7 @@ func TestNetworkPolicyStatusReportsEffectiveACLsAndApplyFailures(t *testing.T) {
 	if before.Resolution.State != "idle" || len(before.Resolution.Resolved) != 0 {
 		t.Fatalf("resolution before apply = %#v, want idle with no resolved hostnames", before.Resolution)
 	}
-	if got, want := before.ACLs, []string{DefaultDenyACLName}; !reflect.DeepEqual(got, want) {
+	if got, want := before.ACLs, []string{DefaultDenyACLName, restrictedName}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("ACLs before apply = %#v, want %#v", got, want)
 	}
 

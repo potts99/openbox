@@ -51,8 +51,9 @@ type Adapter struct {
 	readinessTimeout time.Duration
 	readinessPoll    time.Duration
 	sshProbe         func(context.Context, string) (bool, error)
-	policyMu         sync.RWMutex
-	policyDenied     map[domain.InstanceID]uint64
+	policyMu          sync.RWMutex
+	policyDenied      map[domain.InstanceID]uint64
+	policyResolution  map[domain.InstanceID]domain.AllowlistResolution
 }
 
 func New(options Options) (*Adapter, error) {
@@ -132,6 +133,7 @@ func New(options Options) (*Adapter, error) {
 		readinessTimeout: readinessTimeout,
 		readinessPoll:    readinessPoll,
 		policyDenied:     make(map[domain.InstanceID]uint64),
+		policyResolution: make(map[domain.InstanceID]domain.AllowlistResolution),
 	}, nil
 }
 
