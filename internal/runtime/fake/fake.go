@@ -25,6 +25,7 @@ type Runtime struct {
 	failures           map[string][]error
 	calls              []string
 	createRequests     []runtimeapi.CreateRequest
+	writtenFiles       map[string]map[string]string
 	lastConsoleRef     string
 	lastConsoleCommand []string
 	consoleSizes       map[string]consoleSize
@@ -44,6 +45,7 @@ func New(capabilities runtimeapi.Capabilities) *Runtime {
 		usage:          map[string]runtimeapi.UsageSnapshot{},
 		execResults:    map[string]runtimeapi.ExecResult{},
 		failures:       map[string][]error{},
+		writtenFiles:   map[string]map[string]string{},
 		consoleSizes:   map[string]consoleSize{},
 		activeConsoles: map[string]*consoleSession{},
 	}
@@ -290,6 +292,10 @@ func (r *Runtime) WriteFile(ctx context.Context, request runtimeapi.WriteFileReq
 	if request.Path == "" || request.Body == nil {
 		return fmt.Errorf("write file: path and body are required")
 	}
+	body, err := io.ReadAll(request.Body)
+	if err != nil {
+		return fmt.Errorf("write file: read body: %w", err)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	instance, exists := r.instances[request.Ref]
@@ -299,8 +305,23 @@ func (r *Runtime) WriteFile(ctx context.Context, request runtimeapi.WriteFileReq
 	if instance.State != runtimeapi.StateRunning {
 		return fmt.Errorf("write file %s: %w", request.Ref, runtimeapi.ErrUnsupported)
 	}
-	_, _ = io.Copy(io.Discard, request.Body)
+	if r.writtenFiles[request.Ref] == nil {
+		r.writtenFiles[request.Ref] = map[string]string{}
+	}
+	r.writtenFiles[request.Ref][request.Path] = string(body)
 	return nil
+}
+
+// WrittenFile returns the last body written to path on ref, if any.
+func (r *Runtime) WrittenFile(ref, path string) (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	files, ok := r.writtenFiles[ref]
+	if !ok {
+		return "", false
+	}
+	body, ok := files[path]
+	return body, ok
 }
 
 func (r *Runtime) LastConsoleRef() string {

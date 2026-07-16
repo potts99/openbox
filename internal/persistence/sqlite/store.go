@@ -28,6 +28,10 @@ var historicalMigrationChecksums = map[string]map[string]struct{}{
 	"009_instance_software": {
 		"c2ec2fec361cc8ddd55f2554c4b1174404d370d15d39736673f0c12c9946a615": {},
 	},
+	// Pre-dedup form of 010 that could hard-fail on case-only hostname collisions.
+	"010_route_hostname_integrity": {
+		"10981827a0af8baf3cca568c4e542adc22d4ec8793c36e8ce38b39f525b37435": {},
+	},
 }
 
 type Store struct {
