@@ -84,11 +84,15 @@ func (s *Service) Get(ctx context.Context, id domain.EgressProfileID) (domain.Eg
 	if err != nil {
 		return domain.EgressProfile{}, 0, err
 	}
-	count, err := s.store.CountInstancesWithEgressProfile(ctx, id)
+	count, err := s.CountInstancesWithEgressProfile(ctx, id)
 	if err != nil {
 		return domain.EgressProfile{}, 0, err
 	}
 	return profile, count, nil
+}
+
+func (s *Service) CountInstancesWithEgressProfile(ctx context.Context, id domain.EgressProfileID) (int, error) {
+	return s.store.CountInstancesWithEgressProfile(ctx, id)
 }
 
 type CreateProfileInput struct {
