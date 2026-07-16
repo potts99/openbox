@@ -26,7 +26,7 @@ func NewInstance(id InstanceID, ownerID OwnerID, name string, kind InstanceKind,
 	now = now.UTC()
 	i := Instance{
 		ID: id, OwnerID: ownerID, Name: name, Kind: kind,
-		RequestedIsolation: IsolationBestAvailable,
+		RequestedIsolation: IsolationStrong, // create path may overwrite after capability resolve
 		ActualIsolation:    IsolationUnknown,
 		EgressMode:         defaultEgressMode(kind),
 		EgressProfileID:    DefaultEgressProfileID(kind),
@@ -81,7 +81,7 @@ func ValidateInstance(i Instance) error {
 		return newError(CodeInvalidArgument, "kind")
 	}
 	switch i.RequestedIsolation {
-	case IsolationBestAvailable, IsolationStandard, IsolationStrong:
+	case "", IsolationStrong, IsolationContainerReq:
 	default:
 		return newError(CodeInvalidArgument, "requested_isolation")
 	}

@@ -64,13 +64,8 @@ func ApplyDefaults(in CreateDefaults) (AppliedDefaults, error) {
 	if out.Image == "" {
 		out.Image = manifest.Alias
 	}
-	if out.RequestedIsolation == "" {
-		if in.Kind == domain.KindSandbox {
-			out.RequestedIsolation = domain.IsolationStandard
-		} else {
-			out.RequestedIsolation = domain.IsolationBestAvailable
-		}
-	}
+	// RequestedIsolation left empty when omitted; instances.Service resolves
+	// strong vs container from runtime capabilities at create time.
 	if out.Resources == (domain.Resources{}) {
 		out.Resources = DefaultResources()
 	}

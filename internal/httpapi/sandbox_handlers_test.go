@@ -66,7 +66,7 @@ func TestExtendUpdatesExpiry(t *testing.T) {
 	service := &fakeService{
 		extended: domain.Instance{
 			ID: "box-1", OwnerID: "owner-local", Name: "box", Kind: domain.KindSandbox,
-			RequestedIsolation: domain.IsolationBestAvailable, ActualIsolation: domain.IsolationContainer,
+			RequestedIsolation: domain.IsolationStrong, ActualIsolation: domain.IsolationContainer,
 			DesiredState: domain.DesiredRunning, ObservedState: domain.ObservedRunning,
 			ExpiresAt: &expires, CreatedAt: expires.Add(-time.Hour), UpdatedAt: expires,
 		},

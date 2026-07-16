@@ -126,7 +126,7 @@ func TestCreateRequiresIdempotencyAndReturnsOperation(t *testing.T) {
 		operation: domain.Operation{ID: "operation-1", OwnerID: "owner-local", Status: domain.OperationPending},
 	}
 	handler := newTestHandler(t, service)
-	body := []byte(`{"name":"dev","kind":"vps","image":"ubuntu","owner_public_key":"ssh-ed25519 AAAA","requested_isolation":"best_available","resources":{"vcpus":2,"memory_bytes":4294967296,"disk_bytes":21474836480}}`)
+	body := []byte(`{"name":"dev","kind":"vps","image":"ubuntu","owner_public_key":"ssh-ed25519 AAAA","requested_isolation":"strong","resources":{"vcpus":2,"memory_bytes":4294967296,"disk_bytes":21474836480}}`)
 
 	missing := httptest.NewRecorder()
 	handler.ServeHTTP(missing, httptest.NewRequest(http.MethodPost, "/v1/instances", bytes.NewReader(body)))

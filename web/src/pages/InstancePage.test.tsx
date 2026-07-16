@@ -11,7 +11,7 @@ const detail: InstanceDetail = {
   name: "demo",
   kind: "vps",
   imageId: "22626b4b3561824d7ed0c109f818161bd5e479b839197ecf0f2602a12b8f8a05",
-  requestedIsolation: "best_available",
+  requestedIsolation: "strong",
   actualIsolation: "virtual_machine",
   desiredState: "running",
   observedState: "running",

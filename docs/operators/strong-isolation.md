@@ -1,16 +1,26 @@
-# Strong isolation with Incus VMs
+# Isolation: strong (VM) and container
 
-OpenBox uses KVM-backed Incus virtual machines for strong isolation. Standard isolation always means an unprivileged system container. OpenBox never labels a container as strong isolation and never silently falls back from an explicit strong request.
+OpenBox instances are either KVM-backed Incus **virtual machines** (`strong`) or unprivileged Incus **system containers** (`container`). OpenBox never labels a container as a VM and never silently downgrades an explicit `strong` request.
 
 ## Selection policy
 
-- `standard` selects an unprivileged container even when KVM is available.
-- `strong` requires accessible KVM and Incus virtual-machine support. The request fails before an operation or instance record is created when either is unavailable.
-- `best_available` selects a VM only when KVM can be opened and Incus advertises VM support; otherwise it selects a container.
+Public `requested_isolation` values:
 
-The selected runtime type is stored as the instance's actual isolation and is verified on every later lifecycle or destructive action.
+| Request | Result |
+|---------|--------|
+| `strong` | Incus virtual machine. Fails before create if KVM / VM support is unavailable. |
+| `container` | Unprivileged system container (even when KVM is available). |
+| *omitted* | `strong` if KVM is usable, otherwise `container`. |
 
-`openbox doctor` distinguishes an absent `/dev/kvm`, permission denial, unavailable nested virtualization, and an Incus daemon without VM support. A container-capable host remains usable when strong isolation is unavailable.
+There is no `best_available` or `standard` request value.
+
+The selected runtime type is stored as `actual_isolation` (`virtual_machine` or `container`) and is verified on later lifecycle actions.
+
+`openbox doctor` distinguishes an absent `/dev/kvm`, permission denial, unavailable nested virtualization, and an Incus daemon without VM support. A container-capable host remains usable when strong isolation is unavailable; default creates then use `container`.
+
+## Fast path
+
+On KVM + ZFS hosts, sandbox creates prefer a **VM warm pool** (golden VM snapshot + CoW clones). On hosts without KVM, the existing **system-container warm pool** remains the fast path. See the VM-first isolation design for details.
 
 ## VM image requirements
 

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import type {
+  Capabilities,
   ConnectionInfo,
   CreateInstanceResult,
   ImageSummary,
@@ -23,7 +24,7 @@ interface CreateInstancePageProps {
 type PageData =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; images: ImageSummary[]; keys: SSHKeySummary[]; catalog: SoftwarePackage[] }
+  | { status: "ready"; images: ImageSummary[]; keys: SSHKeySummary[]; catalog: SoftwarePackage[]; capabilities: Capabilities }
   | { status: "created"; result: CreateInstanceResult; connection: ConnectionInfo };
 
 interface KindDefaults {
@@ -37,10 +38,15 @@ interface KindDefaults {
 const PASTE_KEY = "__paste__";
 const GIB = 1024 ** 3;
 
-function defaultsForKind(kind: InstanceKind): KindDefaults {
+function vmsAvailable(capabilities: Capabilities): boolean {
+  return capabilities.virtualMachines && capabilities.vmAvailability === "supported";
+}
+
+function defaultsForKind(kind: InstanceKind, capabilities?: Capabilities): KindDefaults {
+  const isolation: IsolationRequest = capabilities && vmsAvailable(capabilities) ? "strong" : "container";
   if (kind === "sandbox") {
     return {
-      isolation: "standard",
+      isolation,
       vcpus: 2,
       memoryGib: 2,
       diskGib: 10,
@@ -48,7 +54,7 @@ function defaultsForKind(kind: InstanceKind): KindDefaults {
     };
   }
   return {
-    isolation: "best_available",
+    isolation,
     vcpus: 2,
     memoryGib: 8,
     diskGib: 20,
@@ -101,7 +107,7 @@ export function CreateInstancePage({ api, onBack, onCreated }: CreateInstancePag
   const [name, setName] = useState("");
   const [kind, setKind] = useState<InstanceKind>("vps");
   const [image, setImage] = useState("");
-  const [isolation, setIsolation] = useState<IsolationRequest>("best_available");
+  const [isolation, setIsolation] = useState<IsolationRequest>("container");
   const [vcpus, setVcpus] = useState(2);
   const [memoryGib, setMemoryGib] = useState(8);
   const [diskGib, setDiskGib] = useState(20);
@@ -113,11 +119,12 @@ export function CreateInstancePage({ api, onBack, onCreated }: CreateInstancePag
 
   useEffect(() => {
     let active = true;
-    void Promise.all([api.listImages(), api.listSSHKeys(), api.listSoftwareCatalog()])
-      .then(([images, keys, catalog]) => {
+    void Promise.all([api.listImages(), api.listSSHKeys(), api.listSoftwareCatalog(), api.getCapabilities()])
+      .then(([images, keys, catalog, capabilities]) => {
         if (!active) return;
-        setData({ status: "ready", images, keys, catalog });
-        const defaults = defaultsForKind("vps");
+        setData({ status: "ready", images, keys, catalog, capabilities });
+        const defaults = defaultsForKind("vps", capabilities);
+        setIsolation(defaults.isolation);
         setImage(pickImage(images, defaults.preferredImage));
         setKeyChoice(keys[0]?.id ?? PASTE_KEY);
       })
@@ -139,7 +146,7 @@ export function CreateInstancePage({ api, onBack, onCreated }: CreateInstancePag
 
   function applyKind(next: InstanceKind) {
     setKind(next);
-    const defaults = defaultsForKind(next);
+    const defaults = defaultsForKind(next, data.status === "ready" ? data.capabilities : undefined);
     setIsolation(defaults.isolation);
     setVcpus(defaults.vcpus);
     setMemoryGib(defaults.memoryGib);
@@ -333,9 +340,8 @@ export function CreateInstancePage({ api, onBack, onCreated }: CreateInstancePag
                   value={isolation}
                   onChange={(event) => setIsolation(event.target.value as IsolationRequest)}
                 >
-                  <option value="best_available">best_available</option>
-                  <option value="standard">standard</option>
-                  <option value="strong">strong</option>
+                  <option value="strong">strong (VM)</option>
+                  <option value="container">container</option>
                 </select>
               </label>
 

@@ -165,8 +165,9 @@ describe("App", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Instances" })).toBeInTheDocument();
     const capability = await screen.findByRole("status", { name: "Runtime capability status" });
-    expect(capability).toHaveTextContent("VMs unavailable");
+    expect(capability).toHaveTextContent("Limited (no KVM)");
     expect(capability).toHaveTextContent("/dev/kvm is not available");
+    expect(capability).toHaveTextContent("Default isolation is container");
     expect(screen.getByText("No instances")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create an instance" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New" })).toBeEnabled();
@@ -194,7 +195,7 @@ describe("App", () => {
         name: "fresh",
         kind: "vps",
         imageId: "ubuntu",
-        requestedIsolation: "best_available",
+        requestedIsolation: "strong",
         actualIsolation: "virtual_machine",
         desiredState: "running",
         observedState: "pending",
@@ -218,7 +219,7 @@ describe("App", () => {
         name: "fresh",
         kind: "vps",
         imageId: "ubuntu",
-        requestedIsolation: "best_available",
+        requestedIsolation: "strong",
         actualIsolation: "virtual_machine",
         desiredState: "running",
         observedState: "pending",
@@ -260,7 +261,7 @@ describe("App", () => {
 
     const capability = await screen.findByRole("status", { name: "Runtime capability status" });
     expect(capability).toHaveTextContent("Runtime ready");
-    expect(capability).toHaveTextContent("Containers and VMs available.");
+    expect(capability).toHaveTextContent("KVM VMs available. Default isolation is strong.");
   });
 
   it("offers a uniquely named open-terminal action per instance", async () => {
@@ -274,7 +275,7 @@ describe("App", () => {
         name: id === "box-1" ? "workbench" : "staging",
         kind: "vps",
         imageId: "img",
-        requestedIsolation: "standard",
+        requestedIsolation: "container",
         actualIsolation: "container",
         desiredState: "running",
         observedState: id === "box-1" ? "running" : "stopped",

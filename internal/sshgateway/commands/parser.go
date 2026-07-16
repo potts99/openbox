@@ -142,7 +142,7 @@ func parseNew(args []string) (Command, error) {
 
 	command := New{
 		InstanceName: positional[0], Kind: domain.KindVPS, Image: "ubuntu",
-		Isolation: domain.IsolationBestAvailable,
+		Isolation: "", // server resolves strong vs container from capabilities
 		Resources: domain.Resources{VCPUs: 2, MemoryBytes: 8 << 30, DiskBytes: 20 << 30},
 		JSON:      jsonOutput,
 	}
@@ -164,7 +164,7 @@ func parseNew(args []string) (Command, error) {
 		command.Isolation = domain.IsolationRequest(value)
 	}
 	switch command.Isolation {
-	case domain.IsolationBestAvailable, domain.IsolationStandard, domain.IsolationStrong:
+	case "", domain.IsolationStrong, domain.IsolationContainerReq:
 	default:
 		return nil, invalid("invalid --isolation")
 	}

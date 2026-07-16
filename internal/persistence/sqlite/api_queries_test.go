@@ -27,7 +27,7 @@ func TestOwnerScopedAPIQueriesDoNotLeakResources(t *testing.T) {
 		if err := store.EnsureImage(ctx, image); err != nil {
 			t.Fatal(err)
 		}
-		instance := domain.Instance{ID: domain.InstanceID("instance-" + suffix), OwnerID: ownerID, Name: "box-" + suffix, Kind: domain.KindVPS, ImageID: image.ID, RequestedIsolation: domain.IsolationStandard, ActualIsolation: domain.IsolationContainer, DesiredState: domain.DesiredRunning, ObservedState: domain.ObservedPending, RuntimeRef: "runtime-" + suffix, CreatedAt: now, UpdatedAt: now}
+		instance := domain.Instance{ID: domain.InstanceID("instance-" + suffix), OwnerID: ownerID, Name: "box-" + suffix, Kind: domain.KindVPS, ImageID: image.ID, RequestedIsolation: domain.IsolationContainerReq, ActualIsolation: domain.IsolationContainer, DesiredState: domain.DesiredRunning, ObservedState: domain.ObservedPending, RuntimeRef: "runtime-" + suffix, CreatedAt: now, UpdatedAt: now}
 		operation := domain.Operation{ID: domain.OperationID("operation-" + suffix), OwnerID: ownerID, Type: "instance.create", TargetType: "instance", TargetID: string(instance.ID), Status: domain.OperationPending, Stage: "runtime", IdempotencyKey: "key-" + suffix, RequestHash: "hash-" + suffix, CreatedAt: now, UpdatedAt: now}
 		if _, _, err := store.CreateInstance(ctx, instance, operation); err != nil {
 			t.Fatal(err)

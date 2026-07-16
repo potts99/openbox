@@ -10,10 +10,10 @@ export function CapabilityBanner({ capabilities }: { capabilities: Capabilities 
       role="status"
       aria-label="Runtime capability status"
     >
-      <strong>{virtualMachinesAvailable ? "Runtime ready" : "VMs unavailable"}</strong>
+      <strong>{virtualMachinesAvailable ? "Runtime ready" : "Limited (no KVM)"}</strong>
       <p>{virtualMachinesAvailable
-        ? "Containers and VMs available."
-        : `${capabilities.vmReason ?? "KVM not detected."} Containers ${capabilities.containers ? "ok" : "unavailable"}.`}</p>
+        ? "KVM VMs available. Default isolation is strong."
+        : `${capabilities.vmReason ?? "KVM not detected."} Default isolation is container. Strong requests will fail.`}</p>
       <code>{capabilities.architecture}</code>
     </section>
   );

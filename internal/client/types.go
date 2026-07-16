@@ -117,7 +117,7 @@ func (i Instance) validate() error {
 	if !oneOf(i.ActualIsolation, "unknown", "container", "virtual_machine") {
 		return fmt.Errorf("instance %q: unknown actual_isolation %q", i.ID, i.ActualIsolation)
 	}
-	if !oneOf(i.RequestedIsolation, "best_available", "standard", "strong") {
+	if !oneOf(i.RequestedIsolation, "strong", "container") {
 		return fmt.Errorf("instance %q: unknown requested_isolation %q", i.ID, i.RequestedIsolation)
 	}
 	if !oneOf(i.DesiredState, "running", "stopped", "deleted") {

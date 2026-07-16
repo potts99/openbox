@@ -150,7 +150,7 @@ func TestRetriesInterruptedSuccessfulMutationResponseWithSameKey(t *testing.T) {
 
 func TestUnknownEnumsFailWithContext(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"items":[{"id":"box-1","kind":"quantum","requested_isolation":"best_available","desired_state":"running","observed_state":"running","actual_isolation":"container"}]}`))
+		_, _ = w.Write([]byte(`{"items":[{"id":"box-1","kind":"quantum","requested_isolation":"strong","desired_state":"running","observed_state":"running","actual_isolation":"container"}]}`))
 	}))
 	defer server.Close()
 
@@ -162,7 +162,7 @@ func TestUnknownEnumsFailWithContext(t *testing.T) {
 
 func TestClientToleratesAdditiveUnknownFields(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"items":[{"id":"box-1","kind":"vps","requested_isolation":"standard","desired_state":"running","observed_state":"running","actual_isolation":"container","future_instance_field":true}],"future_envelope_field":{"enabled":true}}`))
+		_, _ = w.Write([]byte(`{"items":[{"id":"box-1","kind":"vps","requested_isolation":"container","desired_state":"running","observed_state":"running","actual_isolation":"container","future_instance_field":true}],"future_envelope_field":{"enabled":true}}`))
 	}))
 	defer server.Close()
 

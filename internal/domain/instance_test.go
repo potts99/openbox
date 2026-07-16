@@ -63,6 +63,18 @@ func TestValidateInstancePolicies(t *testing.T) {
 	assertCode(t, domain.ValidateDesiredTransition(i, domain.DesiredDeleted), domain.CodeProtectedBase)
 	i.RequestedIsolation = domain.IsolationRequest("magic")
 	assertCode(t, domain.ValidateInstance(i), domain.CodeInvalidArgument)
+	i.RequestedIsolation = domain.IsolationRequest("best_available")
+	assertCode(t, domain.ValidateInstance(i), domain.CodeInvalidArgument)
+	i.RequestedIsolation = domain.IsolationRequest("standard")
+	assertCode(t, domain.ValidateInstance(i), domain.CodeInvalidArgument)
+	i.RequestedIsolation = domain.IsolationStrong
+	if err := domain.ValidateInstance(i); err != nil {
+		t.Fatalf("strong isolation should be valid: %v", err)
+	}
+	i.RequestedIsolation = domain.IsolationContainerReq
+	if err := domain.ValidateInstance(i); err != nil {
+		t.Fatalf("container isolation should be valid: %v", err)
+	}
 }
 
 func TestSandboxExpiryMaxTTL(t *testing.T) {
