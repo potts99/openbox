@@ -142,6 +142,81 @@ func TestAssignWritesOwnerKeysForRunningSlot(t *testing.T) {
 	}
 }
 
+func TestBootstrapSelectsVMSubstrateOnKVMAndZFS(t *testing.T) {
+	t.Parallel()
+	r := fake.New(runtimeapi.Capabilities{
+		Architecture: "x86_64", Containers: true, KVM: true, VirtualMachines: true,
+		VMAvailability: runtimeapi.VMAvailable, StorageDrivers: []string{"zfs"},
+	})
+	r.AddImage(runtimeapi.Image{
+		Fingerprint: "sha256:sandbox-vm", Aliases: []string{"openbox:sandbox/ubuntu/24.04"},
+		Architecture: "x86_64", Type: "virtual-machine", CloudInit: true,
+	})
+	manager, err := pool.New(r, pool.Options{Config: pool.DefaultConfig()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Bootstrap(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.Substrate(); got != pool.SubstrateVM {
+		t.Fatalf("substrate = %q, want %q", got, pool.SubstrateVM)
+	}
+	golden, err := r.InspectInstance(context.Background(), pool.GoldenRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !golden.IsVM {
+		t.Fatal("golden template is not a VM")
+	}
+	stats, err := manager.Stats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Substrate != pool.SubstrateVM || !stats.GoldenReady {
+		t.Fatalf("stats = %+v", stats)
+	}
+}
+
+func TestBootstrapFallsBackToContainerWithoutKVM(t *testing.T) {
+	t.Parallel()
+	r := fake.New(runtimeapi.Capabilities{
+		Architecture: "x86_64", Containers: true, StorageDrivers: []string{"zfs"},
+	})
+	r.AddImage(runtimeapi.Image{
+		Fingerprint: "sha256:sandbox", Aliases: []string{"openbox:sandbox/ubuntu/24.04"},
+		Architecture: "x86_64", Type: "container", CloudInit: true,
+	})
+	manager, err := pool.New(r, pool.Options{Config: pool.DefaultConfig()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Bootstrap(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.Substrate(); got != pool.SubstrateContainer {
+		t.Fatalf("substrate = %q, want %q", got, pool.SubstrateContainer)
+	}
+}
+
+func TestBootstrapDisablesPoolWithoutZFS(t *testing.T) {
+	t.Parallel()
+	r := fake.New(runtimeapi.Capabilities{
+		Architecture: "x86_64", Containers: true, KVM: true, VirtualMachines: true,
+		VMAvailability: runtimeapi.VMAvailable, StorageDrivers: []string{"dir"},
+	})
+	manager, err := pool.New(r, pool.Options{Config: pool.DefaultConfig()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Bootstrap(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if manager.Enabled() {
+		t.Fatal("pool should be disabled without ZFS")
+	}
+}
+
 func newTestManager(t *testing.T, r *fake.Runtime) *pool.Manager {
 	t.Helper()
 	cfg := pool.DefaultConfig()
@@ -152,6 +227,7 @@ func newTestManager(t *testing.T, r *fake.Runtime) *pool.Manager {
 		t.Fatal(err)
 	}
 	manager.SetImageForTest("sha256:sandbox")
+	manager.SetSubstrateForTest(pool.SubstrateContainer)
 	return manager
 }
 

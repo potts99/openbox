@@ -162,7 +162,7 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 			log.Printf("openboxd: sandbox pool reconcile: %v", err)
 		}
 		if stats, statsErr := sandboxPool.Stats(ctx); statsErr == nil {
-			log.Printf("openboxd: sandbox pool golden=%v stopped=%d running=%d cow=%v", stats.GoldenReady, stats.Stopped, stats.Running, stats.CoWStorage)
+			log.Printf("openboxd: sandbox pool substrate=%s golden=%v stopped=%d running=%d zfs=%v", stats.Substrate, stats.GoldenReady, stats.Stopped, stats.Running, stats.CoWStorage)
 		}
 	}
 	if config.StoragePool == "" {

@@ -28,10 +28,11 @@ type Runtime interface {
 	WriteFile(context.Context, runtimeapi.WriteFileRequest) error
 }
 
-// PoolCreateRequest creates an internal pool container without user ownership.
+// PoolCreateRequest creates an internal pool instance without user ownership.
 type PoolCreateRequest struct {
 	Ref            string
 	Image          string
 	OwnerPublicKey string
 	Metadata       map[string]string
+	VM             bool // true for KVM virtual-machine golden/slots
 }

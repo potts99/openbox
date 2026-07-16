@@ -16,7 +16,7 @@ type Config struct {
 	ClaimTimeout      time.Duration
 }
 
-// DefaultConfig returns v1 hybrid pool defaults.
+// DefaultConfig returns hybrid pool defaults for the system-container substrate.
 func DefaultConfig() Config {
 	return Config{
 		Enabled:           true,
@@ -28,4 +28,13 @@ func DefaultConfig() Config {
 		SSHReadyPoll:      250 * time.Millisecond,
 		ClaimTimeout:      time.Second,
 	}
+}
+
+// VMConfig returns conservative hybrid pool defaults for KVM VM slots.
+func VMConfig() Config {
+	cfg := DefaultConfig()
+	cfg.StoppedTarget = 4
+	cfg.RunningTarget = 2
+	cfg.SSHReadyTimeout = 2 * time.Minute
+	return cfg
 }

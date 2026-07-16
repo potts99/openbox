@@ -20,14 +20,17 @@ import (
 
 const poolResourceLabel = "user.openbox.resource"
 
-// CreatePoolContainer provisions an internal warm-pool container.
+// CreatePoolContainer provisions an internal warm-pool container or VM.
 func (a *Adapter) CreatePoolContainer(ctx context.Context, request sandboxpool.PoolCreateRequest) (runtimeapi.Instance, error) {
 	if request.Ref == "" || request.Image == "" {
 		return runtimeapi.Instance{}, errors.New("pool ref and image fingerprint are required")
 	}
+	if request.VM {
+		return a.createPoolVM(ctx, request)
+	}
 	config := map[string]string{
-		ManagedLabel:    "true",
-		poolResourceLabel: "pool",
+		ManagedLabel:          "true",
+		poolResourceLabel:     "pool",
 		"security.privileged": "false",
 	}
 	for key, value := range request.Metadata {
@@ -61,7 +64,7 @@ func (a *Adapter) CreatePoolContainer(ctx context.Context, request sandboxpool.P
 		Devices  map[string]map[string]string `json:"devices,omitempty"`
 	}{
 		Name: request.Ref, Type: "container",
-		Source: map[string]string{"type": "image", "fingerprint": request.Image},
+		Source:   map[string]string{"type": "image", "fingerprint": request.Image},
 		Profiles: []string{a.containerProfile}, Config: config, Devices: devices,
 	}
 	err := a.request(ctx, http.MethodPost, "/1.0/instances", url.Values{"project": {a.project}}, body, nil)
@@ -71,6 +74,63 @@ func (a *Adapter) CreatePoolContainer(ctx context.Context, request sandboxpool.P
 			return runtimeapi.Instance{}, runtimeapi.ErrAlreadyExists
 		}
 		return runtimeapi.Instance{}, fmt.Errorf("create pool container: %w", err)
+	}
+	return a.InspectInstance(ctx, request.Ref)
+}
+
+func (a *Adapter) createPoolVM(ctx context.Context, request sandboxpool.PoolCreateRequest) (runtimeapi.Instance, error) {
+	if a.storagePool == "" {
+		return runtimeapi.Instance{}, fmt.Errorf("pool VM requires configured storage pool: %w", runtimeapi.ErrUnsupported)
+	}
+	config := map[string]string{
+		ManagedLabel:      "true",
+		poolResourceLabel: "pool",
+	}
+	for key, value := range request.Metadata {
+		if !strings.HasPrefix(key, "user.openbox.") {
+			return runtimeapi.Instance{}, fmt.Errorf("unsupported pool metadata key %q", key)
+		}
+		config[key] = value
+	}
+	if config[sandboxpool.RoleLabel] == "" {
+		return runtimeapi.Instance{}, errors.New("pool role metadata is required")
+	}
+	if request.OwnerPublicKey != "" {
+		userData, err := cloudinit.OwnerKey(request.OwnerPublicKey)
+		if err != nil {
+			return runtimeapi.Instance{}, fmt.Errorf("build pool VM cloud-init data: %w", err)
+		}
+		config["cloud-init.user-data"] = userData
+	}
+	config["limits.cpu"] = strconv.Itoa(sandboxpool.DefaultVCPUs)
+	config["limits.memory"] = strconv.FormatInt(sandboxpool.DefaultMemoryBytes, 10) + "B"
+	devices := map[string]map[string]string{
+		"root": {
+			"type": "disk", "path": "/", "pool": a.storagePool,
+			"size": strconv.FormatInt(sandboxpool.DefaultDiskBytes, 10) + "B",
+		},
+		"cloud-init": {"type": "disk", "source": "cloud-init:config"},
+		"eth0":       {"type": "nic", "network": a.network, "name": "eth0"},
+	}
+	body := struct {
+		Name     string                       `json:"name"`
+		Type     string                       `json:"type"`
+		Source   map[string]string            `json:"source"`
+		Profiles []string                     `json:"profiles"`
+		Config   map[string]string            `json:"config"`
+		Devices  map[string]map[string]string `json:"devices"`
+	}{
+		Name: request.Ref, Type: "virtual-machine",
+		Source:   map[string]string{"type": "image", "fingerprint": request.Image},
+		Profiles: []string{a.vmProfile}, Config: config, Devices: devices,
+	}
+	err := a.request(ctx, http.MethodPost, "/1.0/instances", url.Values{"project": {a.project}}, body, nil)
+	if err != nil {
+		var httpErr *HTTPError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusConflict {
+			return runtimeapi.Instance{}, runtimeapi.ErrAlreadyExists
+		}
+		return runtimeapi.Instance{}, fmt.Errorf("create pool VM: %w", err)
 	}
 	return a.InspectInstance(ctx, request.Ref)
 }
