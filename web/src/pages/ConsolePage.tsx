@@ -1,9 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useEffect, useRef, useState } from "react";
-import type { Capabilities, InstanceSummary, OpenBoxApi, OperationSummary, Session } from "../api/client";
+import type {
+  Capabilities,
+  CreateInstanceResult,
+  InstanceSummary,
+  OpenBoxApi,
+  OperationSummary,
+  Session,
+} from "../api/client";
 import { CapabilityBanner } from "../components/CapabilityBanner";
 import { OperationDrawer } from "../components/OperationDrawer";
+import { CreateInstancePage } from "./CreateInstancePage";
 import { InstancePage } from "./InstancePage";
 import { InstanceTerminal } from "./InstanceTerminal";
 import { PiProfilePage } from "./PiProfile";
@@ -21,6 +29,7 @@ type ConsoleData =
 
 type View =
   | { kind: "list" }
+  | { kind: "create" }
   | { kind: "detail"; instanceId: string }
   | { kind: "terminal"; instanceId: string; instanceName: string }
   | { kind: "pi-profile" };
@@ -85,6 +94,27 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
     queueMicrotask(() => operationsButton.current?.focus());
   }
 
+  async function refreshInventory() {
+    const [instances, operations] = await Promise.all([api.listInstances(), api.listOperations()]);
+    setData((current) => (
+      current.status === "ready" ? { ...current, instances, operations } : current
+    ));
+  }
+
+  async function handleCreated(result: CreateInstanceResult) {
+    try {
+      await refreshInventory();
+    } catch {
+      /* keep prior inventory if refresh fails; create already succeeded */
+    }
+    if (result.instance?.id) {
+      setView({ kind: "detail", instanceId: result.instance.id });
+      return;
+    }
+    setDrawerOpen(true);
+    setView({ kind: "list" });
+  }
+
   if (view.kind === "terminal") {
     return (
       <InstanceTerminal
@@ -114,6 +144,16 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
 
   if (view.kind === "pi-profile") {
     return <PiProfilePage api={api} onBack={() => setView({ kind: "list" })} />;
+  }
+
+  if (view.kind === "create") {
+    return (
+      <CreateInstancePage
+        api={api}
+        onBack={() => setView({ kind: "list" })}
+        onCreated={(result) => { void handleCreated(result); }}
+      />
+    );
   }
 
   const operations = data.status === "ready" ? data.operations : [];
@@ -151,7 +191,7 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
         <main id="main-content" tabIndex={-1}>
           <div className="page-heading">
             <h1 id="instances">Instances</h1>
-            <button className="primary-action" type="button" disabled title="Instance creation arrives in a later slice">
+            <button className="primary-action" type="button" onClick={() => setView({ kind: "create" })}>
               New
             </button>
           </div>
@@ -169,7 +209,10 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
                 {data.instances.length === 0 ? (
                   <div className="empty-inventory">
                     <h3>No instances</h3>
-                    <p>Create instances from the CLI once the runtime is available.</p>
+                    <p>Create an instance to get started.</p>
+                    <button className="primary-action" type="button" onClick={() => setView({ kind: "create" })}>
+                      Create an instance
+                    </button>
                   </div>
                 ) : (
                   <table>

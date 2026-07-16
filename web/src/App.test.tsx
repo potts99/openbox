@@ -20,9 +20,18 @@ function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
       vmAvailability: "unavailable",
       vmReason: "/dev/kvm is not available",
     }),
+    listImages: vi.fn().mockResolvedValue([{ id: "img-1", alias: "ubuntu", architecture: "x86_64", compatibility: "general" }]),
+    listSSHKeys: vi.fn().mockResolvedValue([{
+      id: "key-1",
+      label: "laptop",
+      fingerprint: "SHA256:abc",
+      publicKey: "ssh-ed25519 AAAA test",
+      createdAt: "now",
+    }]),
     listInstances: vi.fn().mockResolvedValue([]),
     getInstance: vi.fn(),
-    listSoftwareCatalog: vi.fn().mockResolvedValue([]),
+    createInstance: vi.fn(),
+    listSoftwareCatalog: vi.fn().mockResolvedValue([{ id: "pi", name: "Pi", description: "Coding agent" }]),
     installSoftware: vi.fn(),
     mutateInstance: vi.fn(),
     listOperations: vi.fn().mockResolvedValue([]),
@@ -147,8 +156,79 @@ describe("App", () => {
     expect(capability).toHaveTextContent("VMs unavailable");
     expect(capability).toHaveTextContent("/dev/kvm is not available");
     expect(screen.getByText("No instances")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create an instance" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Show operations" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("complementary", { name: "Operations" })).not.toBeInTheDocument();
+  });
+
+  it("creates an instance from the console and opens its detail page", async () => {
+    const user = userEvent.setup();
+    const createInstance = vi.fn().mockResolvedValue({
+      operation: {
+        id: "op-1",
+        action: "create",
+        status: "pending",
+        targetType: "instance",
+        target: "box-9",
+        stage: "queued",
+        progress: 0,
+        attempts: 0,
+        createdAt: "now",
+        updatedAt: "now",
+      },
+      instance: {
+        id: "box-9",
+        name: "fresh",
+        kind: "vps",
+        imageId: "ubuntu",
+        requestedIsolation: "best_available",
+        actualIsolation: "virtual_machine",
+        desiredState: "running",
+        observedState: "pending",
+        vcpus: 2,
+        memoryBytes: 8 * 1024 ** 3,
+        diskBytes: 20 * 1024 ** 3,
+        protected: false,
+        createdAt: "now",
+        updatedAt: "now",
+        networkPolicy: { egressMode: "standard", acls: [], resolutionState: "idle", deniedFlows: 0 },
+        software: [],
+      },
+    });
+    const api = createApi({
+      createInstance,
+      listInstances: vi.fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValue([{ id: "box-9", name: "fresh", kind: "vps", status: "pending" }]),
+      getInstance: vi.fn().mockResolvedValue({
+        id: "box-9",
+        name: "fresh",
+        kind: "vps",
+        imageId: "ubuntu",
+        requestedIsolation: "best_available",
+        actualIsolation: "virtual_machine",
+        desiredState: "running",
+        observedState: "pending",
+        vcpus: 2,
+        memoryBytes: 8 * 1024 ** 3,
+        diskBytes: 20 * 1024 ** 3,
+        protected: false,
+        createdAt: "now",
+        updatedAt: "now",
+        networkPolicy: { egressMode: "standard", acls: [], resolutionState: "idle", deniedFlows: 0 },
+        software: [],
+      }),
+    });
+
+    render(<App api={api} />);
+    await user.click(await screen.findByRole("button", { name: "New" }));
+    expect(await screen.findByRole("heading", { name: "New instance" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Name"), "fresh");
+    await user.click(screen.getByRole("button", { name: "Create instance" }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "fresh" })).toBeInTheDocument();
+    expect(createInstance).toHaveBeenCalled();
   });
 
   it("renders runtime ready when VMs report supported availability", async () => {

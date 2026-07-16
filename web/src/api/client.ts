@@ -99,6 +99,41 @@ export interface OperationEventSubscription {
 
 export type InstanceAction = "start" | "stop" | "restart";
 
+export type InstanceKind = "vps" | "sandbox";
+export type IsolationRequest = "best_available" | "standard" | "strong";
+
+export interface ImageSummary {
+  id: string;
+  alias: string;
+  architecture: string;
+  compatibility: string;
+}
+
+export interface SSHKeySummary {
+  id: string;
+  label: string;
+  fingerprint: string;
+  publicKey: string;
+  createdAt: string;
+}
+
+export interface CreateInstanceInput {
+  name: string;
+  kind: InstanceKind;
+  image: string;
+  requestedIsolation: IsolationRequest;
+  vcpus: number;
+  memoryBytes: number;
+  diskBytes: number;
+  ownerPublicKey: string;
+  packages?: string[];
+}
+
+export interface CreateInstanceResult {
+  operation: OperationSummary;
+  instance?: InstanceDetail;
+}
+
 export interface PiProfileSummary {
   id: string;
   name: string;
@@ -118,8 +153,11 @@ export interface OpenBoxApi {
   getSession(): Promise<Session>;
   getCsrfToken(): string;
   getCapabilities(): Promise<Capabilities>;
+  listImages(): Promise<ImageSummary[]>;
+  listSSHKeys(): Promise<SSHKeySummary[]>;
   listInstances(): Promise<InstanceSummary[]>;
   getInstance(id: string): Promise<InstanceDetail>;
+  createInstance(input: CreateInstanceInput): Promise<CreateInstanceResult>;
   listSoftwareCatalog(): Promise<SoftwarePackage[]>;
   installSoftware(instanceId: string, packageId: string): Promise<InstanceSoftware>;
   mutateInstance(id: string, action: InstanceAction): Promise<OperationSummary>;
@@ -302,6 +340,33 @@ export function createHttpApi(options: HttpApiOptions = {}): OpenBoxApi {
         vmReason: text(body.vm_reason) || undefined,
       };
     },
+    async listImages() {
+      const body = asRecord(await request("/v1/images"));
+      const items = Array.isArray(body.items) ? body.items : [];
+      return items.map((item): ImageSummary => {
+        const row = asRecord(item);
+        return {
+          id: text(row.id),
+          alias: text(row.alias),
+          architecture: text(row.architecture),
+          compatibility: text(row.compatibility),
+        };
+      });
+    },
+    async listSSHKeys() {
+      const body = asRecord(await request("/v1/ssh-keys"));
+      const items = Array.isArray(body.items) ? body.items : [];
+      return items.map((item): SSHKeySummary => {
+        const row = asRecord(item);
+        return {
+          id: text(row.id),
+          label: text(row.label),
+          fingerprint: text(row.fingerprint),
+          publicKey: text(row.public_key),
+          createdAt: text(row.created_at),
+        };
+      });
+    },
     async listInstances() {
       const body = asRecord(await request("/v1/instances"));
       const items = Array.isArray(body.items) ? body.items : Array.isArray(body.instances) ? body.instances : [];
@@ -312,6 +377,30 @@ export function createHttpApi(options: HttpApiOptions = {}): OpenBoxApi {
     },
     async getInstance(id) {
       return normalizeInstance(await request(`/v1/instances/${encodeURIComponent(id)}`));
+    },
+    async createInstance(input) {
+      const body = asRecord(await request("/v1/instances", {
+        method: "POST",
+        headers: { "Idempotency-Key": newIdempotencyKey() },
+        body: JSON.stringify({
+          name: input.name,
+          kind: input.kind,
+          image: input.image,
+          requested_isolation: input.requestedIsolation,
+          resources: {
+            vcpus: input.vcpus,
+            memory_bytes: input.memoryBytes,
+            disk_bytes: input.diskBytes,
+          },
+          owner_public_key: input.ownerPublicKey,
+          packages: input.packages ?? [],
+        }),
+      }));
+      const instanceRaw = body.instance;
+      return {
+        operation: normalizeOperation(body.operation),
+        instance: instanceRaw ? normalizeInstance(instanceRaw) : undefined,
+      };
     },
     async listSoftwareCatalog() {
       const body = asRecord(await request("/v1/software"));

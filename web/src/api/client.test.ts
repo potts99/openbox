@@ -136,6 +136,77 @@ describe("createHttpApi", () => {
     expect(MockEventSource.instances[0]?.closed).toBe(true);
   });
 
+  it("lists images and ssh keys and creates instances with idempotency", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        items: [{
+          id: "img-1", alias: "ubuntu", source: "local", digest: "sha256:abc",
+          architecture: "x86_64", compatibility: "general", created_at: "now", updated_at: "now",
+        }],
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        items: [{
+          id: "key-1", label: "laptop", fingerprint: "SHA256:abc",
+          public_key: "ssh-ed25519 AAAA", created_at: "now",
+        }],
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        operation: {
+          id: "op-create", type: "create", target_type: "instance", target_id: "box-9",
+          status: "pending", stage: "queued", progress: 0, attempts: 0, created_at: "now", updated_at: "now",
+        },
+        instance: {
+          id: "box-9", name: "fresh", kind: "vps", image_id: "ubuntu",
+          requested_isolation: "best_available", actual_isolation: "virtual_machine",
+          desired_state: "running", observed_state: "pending",
+          resources: { vcpus: 2, memory_bytes: 8589934592, disk_bytes: 21474836480 },
+          protected: false, created_at: "now", updated_at: "now",
+        },
+      }), { status: 202, headers: { "content-type": "application/json" } }));
+    const api = createHttpApi({ fetcher, csrfToken: "csrf" });
+
+    await expect(api.listImages()).resolves.toEqual([{
+      id: "img-1", alias: "ubuntu", architecture: "x86_64", compatibility: "general",
+    }]);
+    await expect(api.listSSHKeys()).resolves.toEqual([{
+      id: "key-1", label: "laptop", fingerprint: "SHA256:abc", publicKey: "ssh-ed25519 AAAA", createdAt: "now",
+    }]);
+    await expect(api.createInstance({
+      name: "fresh",
+      kind: "vps",
+      image: "ubuntu",
+      requestedIsolation: "best_available",
+      vcpus: 2,
+      memoryBytes: 8589934592,
+      diskBytes: 21474836480,
+      ownerPublicKey: "ssh-ed25519 AAAA",
+      packages: ["pi"],
+    })).resolves.toMatchObject({
+      operation: { id: "op-create", action: "create", target: "box-9", status: "pending" },
+      instance: { id: "box-9", name: "fresh", kind: "vps" },
+    });
+    expect(fetcher).toHaveBeenLastCalledWith("/v1/instances", expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({
+        "Idempotency-Key": expect.any(String),
+        "X-CSRF-Token": "csrf",
+      }),
+      body: JSON.stringify({
+        name: "fresh",
+        kind: "vps",
+        image: "ubuntu",
+        requested_isolation: "best_available",
+        resources: {
+          vcpus: 2,
+          memory_bytes: 8589934592,
+          disk_bytes: 21474836480,
+        },
+        owner_public_key: "ssh-ed25519 AAAA",
+        packages: ["pi"],
+      }),
+    }));
+  });
+
   it("loads instance detail and posts lifecycle actions with an idempotency key", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({
