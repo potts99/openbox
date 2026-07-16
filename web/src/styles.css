@@ -508,6 +508,9 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .operation-log-viewer {
   min-width: 0;
   padding: .65rem .75rem .85rem;
+  max-height: 400px;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 .operation-log-summary {
   display: flex;
