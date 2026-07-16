@@ -26,6 +26,8 @@ function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
     installSoftware: vi.fn(),
     mutateInstance: vi.fn(),
     listOperations: vi.fn().mockResolvedValue([]),
+    getOperation: vi.fn(),
+    subscribeOperationEvents: vi.fn().mockReturnValue({ close: vi.fn() }),
     listPiProfiles: vi.fn().mockResolvedValue([]),
     getPiProfileHistory: vi.fn().mockResolvedValue([]),
     rollbackPiProfile: vi.fn(),

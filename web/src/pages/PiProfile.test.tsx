@@ -20,7 +20,9 @@ function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
     listSoftwareCatalog: vi.fn().mockResolvedValue([]),
     installSoftware: vi.fn(),
     mutateInstance: vi.fn(),
-    listOperations: vi.fn(),
+    listOperations: vi.fn().mockResolvedValue([]),
+    getOperation: vi.fn(),
+    subscribeOperationEvents: vi.fn().mockReturnValue({ close: vi.fn() }),
     listPiProfiles: vi.fn().mockResolvedValue([
       {
         id: "prof-1",
