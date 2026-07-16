@@ -28,15 +28,15 @@ const usage = `usage: openbox COMMAND [OPTIONS]
 
 Commands:
   doctor                 Check server and runtime capabilities
-  new NAME               Create an instance
+  new NAME               Create an instance (sandbox: --lifetime, --egress-profile)
   ls                     List instances
-  inspect ID             Show an instance
+  inspect ID             Show an instance (TTL, isolation, cleanup errors)
   start ID               Start an instance
   stop ID                Stop an instance
   restart ID             Restart an instance
   rm ID                  Delete an instance
-  sandbox exec ID -- CMD Run argv inside an instance (streamed)
-  sandbox extend ID      Extend a Sandbox TTL
+  sandbox exec ID -- CMD Run argv inside a running sandbox (NDJSON frames)
+  sandbox extend ID      Extend a Sandbox TTL (--by DURATION)
   route                  Manage HTTPS routes
   network                Manage egress profiles and attach policy
   forward INSTANCE PORT  SSH-tunnel an instance port to localhost
@@ -198,6 +198,8 @@ func runNew(ctx context.Context, api *openbox.Client, args []string, jsonOutput 
 	vcpus := flags.Int("cpus", 2, "virtual CPUs")
 	memory := flags.String("memory", "8GiB", "memory size")
 	disk := flags.String("disk", "20GiB", "disk size")
+	lifetime := flags.Duration("lifetime", 0, "sandbox TTL from create (default 1h, max 24h)")
+	egressProfile := flags.String("egress-profile", "", "system egress profile id")
 	publicKey := flags.String("ssh-key", "", "owner SSH public key")
 	idempotencyKey := flags.String("idempotency-key", "", "retry-safe request key")
 	positionals, err := parseInterspersed(flags, args)
@@ -211,6 +213,12 @@ func runNew(ctx context.Context, api *openbox.Client, args []string, jsonOutput 
 	case "", "strong", "container":
 	default:
 		return usageError(stderr, "invalid --isolation: use strong, container, or omit")
+	}
+	if *lifetime != 0 && *kind != "sandbox" {
+		return usageError(stderr, "--lifetime is only valid with --kind sandbox")
+	}
+	if *lifetime < 0 || *lifetime > 24*time.Hour {
+		return usageError(stderr, "--lifetime must be between 1s and 24h")
 	}
 	if *kind == "sandbox" {
 		if *image == "ubuntu" {
@@ -239,11 +247,19 @@ func runNew(ctx context.Context, api *openbox.Client, args []string, jsonOutput 
 	if err != nil {
 		return usageError(stderr, err.Error())
 	}
-	result, err := api.CreateInstance(ctx, openbox.CreateInstanceRequest{
+	req := openbox.CreateInstanceRequest{
 		Name: positionals[0], Kind: *kind, Image: *image, RequestedIsolation: *isolation,
-		Resources:      openbox.Resources{VCPUs: *vcpus, MemoryBytes: memoryBytes, DiskBytes: diskBytes},
-		OwnerPublicKey: ownerPublicKey,
-	}, key)
+		Resources:       openbox.Resources{VCPUs: *vcpus, MemoryBytes: memoryBytes, DiskBytes: diskBytes},
+		OwnerPublicKey:  ownerPublicKey,
+		EgressProfileID: *egressProfile,
+	}
+	if *lifetime > 0 {
+		req.LifetimeSeconds = int(lifetime.Seconds())
+		if req.LifetimeSeconds < 1 {
+			req.LifetimeSeconds = 1
+		}
+	}
+	result, err := api.CreateInstance(ctx, req, key)
 	if err != nil {
 		return commandError(stderr, err)
 	}

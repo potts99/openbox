@@ -136,6 +136,8 @@ type CreateInstanceRequest struct {
 	RequestedIsolation string    `json:"requested_isolation,omitempty"`
 	Resources          Resources `json:"resources"`
 	OwnerPublicKey     string    `json:"owner_public_key,omitempty"`
+	LifetimeSeconds    int       `json:"lifetime_seconds,omitempty"`
+	EgressProfileID    string    `json:"egress_profile_id,omitempty"`
 }
 
 type ExecInstanceRequest struct {

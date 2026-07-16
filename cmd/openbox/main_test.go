@@ -109,6 +109,34 @@ func TestNewSendsRequestAndIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestNewSandboxSendsLifetimeAndEgressProfile(t *testing.T) {
+	server := commandServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["kind"] != "sandbox" {
+			t.Fatalf("kind=%v", body["kind"])
+		}
+		if body["lifetime_seconds"] != float64(7200) {
+			t.Fatalf("lifetime_seconds=%v", body["lifetime_seconds"])
+		}
+		if body["egress_profile_id"] != "egress-system-sandbox" {
+			t.Fatalf("egress_profile_id=%v", body["egress_profile_id"])
+		}
+		_, _ = fmt.Fprint(w, `{"operation":{"id":"op-1","status":"pending","stage":"queued"},"instance":{"id":"box-1","name":"agent","kind":"sandbox","requested_isolation":"container","desired_state":"running","observed_state":"pending","actual_isolation":"container"}}`)
+	})
+	defer server.Close()
+
+	stdout, stderr, code := runCLI(t, server.URL,
+		"new", "agent", "--kind", "sandbox", "--lifetime", "2h",
+		"--egress-profile", "egress-system-sandbox", "--ssh-key", "ssh-ed25519 test",
+	)
+	if code != 0 || !strings.Contains(stdout, "op-1") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
 func TestLifecycleCommands(t *testing.T) {
 	for _, command := range []string{"start", "stop", "restart", "rm"} {
 		t.Run(command, func(t *testing.T) {

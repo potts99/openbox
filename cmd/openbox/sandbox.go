@@ -136,6 +136,9 @@ func printInstanceStatus(stdout io.Writer, instance openbox.Instance, now time.T
 		sandbox.EgressLabel(domain.EgressMode(instance.NetworkPolicy.EgressMode)),
 		strings.Join(instance.NetworkPolicy.ACLs, ", "), instance.NetworkPolicy.Resolution.State, instance.NetworkPolicy.DeniedFlows,
 		instance.Resources.VCPUs, formatBytes(instance.Resources.MemoryBytes), formatBytes(instance.Resources.DiskBytes))
+	if instance.Kind == "sandbox" && instance.ActualIsolation == "container" {
+		fmt.Fprintln(stdout, "Isolation note: running as container (omitted request selects container when KVM is unavailable; explicit strong never downgrades)")
+	}
 	if instance.ExpiresAt != nil {
 		fmt.Fprintf(stdout, "Expires: %s (%s)\n", instance.ExpiresAt.UTC().Format(time.RFC3339), sandbox.FormatRemaining(instance.ExpiresAt, now))
 	}

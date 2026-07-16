@@ -429,9 +429,23 @@ paths:
     post:
       operationId: execInstance
       summary: Execute an argv command and stream framed output
-      description: >
-        Runs an argv command inside the instance and streams NDJSON frames
-        (stdout, stderr, exit, error). Output is never stored in SQLite.
+      description: |
+        Runs an argv command inside a running instance and returns
+        application/x-ndjson frames. Output is never stored in SQLite.
+
+        Frame types:
+        - `{"type":"stdout","data":"<base64>"}` — stdout chunk
+        - `{"type":"stderr","data":"<base64>"}` — stderr chunk
+        - `{"type":"exit","code":0}` — process finished
+        - `{"type":"error","code":"...","message":"..."}` — policy/transport failure
+
+        Common `error.code` values: `timeout`, `operation_canceled`, `unavailable`,
+        `busy` (max 2 concurrent execs per instance), `rate_limited` (1 MiB/s framed
+        output budget). Precondition failures may also return HTTP errors with
+        `invalid_transition`, `busy`, or `rate_limited` before a stream starts.
+
+        Current limitation: frames are emitted after the runtime command returns
+        (buffered), not as a live guest stream.
       requestBody:
         required: true
         content:
@@ -445,7 +459,7 @@ paths:
             application/x-ndjson:
               schema:
                 type: string
-                description: Newline-delimited JSON execstream frames.
+                description: Newline-delimited JSON execstream frames (stdout, stderr, exit, error).
         default: { $ref: "#/components/responses/Error" }
   /v1/instances/{instance_id}/extend:
     parameters:
@@ -455,6 +469,10 @@ paths:
     post:
       operationId: extendInstanceExpiry
       summary: Extend a Sandbox TTL
+      description: |
+        Lengthens `expires_at` by `duration_seconds`. Rejected once deletion has
+        begun, or if the result would exceed created_at + 24h. Non-sandbox
+        instances return `invalid_argument`.
       requestBody:
         required: true
         content:
@@ -1035,19 +1053,33 @@ components:
         id: { type: string }
         name: { type: string }
         kind: { type: string, enum: [sandbox, vps] }
-        image_id: { type: string }
-        requested_isolation: { type: string, enum: [strong, container] }
-        actual_isolation: { type: string, enum: [unknown, container, virtual_machine] }
+        image_id:
+          type: string
+          description: Immutable image fingerprint pinned at create time.
+        requested_isolation:
+          type: string
+          enum: [strong, container]
+          description: >
+            Resolved isolation request after create acceptance. An omitted create
+            request is filled with strong when KVM is usable, otherwise container.
+        actual_isolation:
+          type: string
+          enum: [unknown, container, virtual_machine]
+          description: Runtime type that was provisioned. Never silently differs from a successful strong request.
         desired_state: { type: string, enum: [running, stopped, deleted] }
         observed_state: { type: string, enum: [pending, creating, running, stopping, stopped, deleting, deleted, error] }
         resources: { $ref: "#/components/schemas/Resources" }
-        expires_at: { type: string, format: date-time, nullable: true }
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Required for sandboxes. Absolute UTC expiry; max created_at + 24h.
         protected: { type: boolean }
         software:
           type: array
           items: { $ref: "#/components/schemas/InstanceSoftware" }
-        error_code: { type: string }
-        error_stage: { type: string }
+        error_code: { type: string, description: Machine-readable failure code when observed_state is error. }
+        error_stage: { type: string, description: Stage or phase where cleanup/runtime failure was recorded. }
         error_retryable: { type: boolean }
         egress_profile_id: { type: string }
         network_policy: { $ref: "#/components/schemas/NetworkPolicyStatus" }
@@ -1131,9 +1163,16 @@ components:
         name: { type: string }
         kind: { type: string, enum: [sandbox, vps], default: vps }
         image: { type: string }
-        requested_isolation: { type: string, enum: [strong, container], description: "Omit to let the server choose strong when KVM is usable, otherwise container." }
+        requested_isolation: { type: string, enum: [strong, container], description: "Omit to let the server choose strong when KVM is usable, otherwise container. Explicit strong fails with capability_unavailable when VMs are not usable." }
         resources: { $ref: "#/components/schemas/Resources" }
         owner_public_key: { type: string }
+        lifetime_seconds:
+          type: integer
+          minimum: 1
+          maximum: 86400
+          description: >
+            Sandbox TTL from create time. Defaults to 3600 (1h) for sandboxes.
+            Ignored for non-sandbox kinds. Must not exceed 86400 (24h).
         egress_profile_id:
           type: string
           description: Optional system egress profile. Defaults by kind when omitted.
@@ -1150,18 +1189,20 @@ components:
           type: array
           minItems: 1
           items: { type: string, minLength: 1 }
-        working_dir: { type: string }
+          description: Argv tokens only; whitespace inside a token is rejected. No shell string.
+        working_dir: { type: string, description: Absolute guest working directory. }
         env:
           type: object
           additionalProperties: { type: string }
-        timeout_seconds: { type: integer, minimum: 1 }
+          description: Filtered to an allowlist (PATH, HOME, USER, LOGNAME, LANG, LC_*, TERM, TMP*).
+        timeout_seconds: { type: integer, minimum: 1, maximum: 1800, description: "Defaults to 300 (5m); maximum 1800 (30m)." }
         stdin_base64: { type: string, description: Optional base64-encoded stdin payload. }
     ExtendInstanceRequest:
       type: object
       required: [duration_seconds]
       additionalProperties: false
       properties:
-        duration_seconds: { type: integer, minimum: 1 }
+        duration_seconds: { type: integer, minimum: 1, description: Seconds to add to expires_at. }
     CreateInstanceResult:
       type: object
       required: [operation]

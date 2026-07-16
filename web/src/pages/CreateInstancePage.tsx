@@ -111,6 +111,7 @@ export function CreateInstancePage({ api, onBack, onCreated }: CreateInstancePag
   const [vcpus, setVcpus] = useState(2);
   const [memoryGib, setMemoryGib] = useState(8);
   const [diskGib, setDiskGib] = useState(20);
+  const [lifetimeHours, setLifetimeHours] = useState(1);
   const [packages, setPackages] = useState<string[]>([]);
   const [keyChoice, setKeyChoice] = useState("");
   const [pastedKey, setPastedKey] = useState("");
@@ -151,6 +152,9 @@ export function CreateInstancePage({ api, onBack, onCreated }: CreateInstancePag
     setVcpus(defaults.vcpus);
     setMemoryGib(defaults.memoryGib);
     setDiskGib(defaults.diskGib);
+    if (next === "sandbox") {
+      setLifetimeHours(1);
+    }
     if (data.status === "ready") {
       setImage(pickImage(data.images, defaults.preferredImage));
     } else {
@@ -186,6 +190,10 @@ export function CreateInstancePage({ api, onBack, onCreated }: CreateInstancePag
       setError("Resources must be at least 1");
       return;
     }
+    if (kind === "sandbox" && (lifetimeHours < 1 || lifetimeHours > 24)) {
+      setError("Sandbox lifetime must be between 1 and 24 hours");
+      return;
+    }
     setPending(true);
     try {
       const result = await api.createInstance({
@@ -198,6 +206,7 @@ export function CreateInstancePage({ api, onBack, onCreated }: CreateInstancePag
         diskBytes: Math.round(diskGib * GIB),
         ownerPublicKey,
         packages,
+        ...(kind === "sandbox" ? { lifetimeSeconds: Math.round(lifetimeHours * 3600) } : {}),
       });
       let connection: ConnectionInfo = { ssh: null };
       try {
@@ -382,7 +391,28 @@ export function CreateInstancePage({ api, onBack, onCreated }: CreateInstancePag
                     required
                   />
                 </label>
+                {kind === "sandbox" ? (
+                  <label>
+                    <span>Lifetime (hours)</span>
+                    <input
+                      name="lifetime-hours"
+                      type="number"
+                      min={1}
+                      max={24}
+                      step={1}
+                      value={lifetimeHours}
+                      onChange={(event) => setLifetimeHours(Number(event.target.value))}
+                      required
+                    />
+                  </label>
+                ) : null}
               </div>
+              {kind === "sandbox" ? (
+                <p className="data-message">
+                  Sandboxes expire automatically. Default lifetime is 1 hour (max 24).
+                  Use API/CLI exec for commands; browser terminal is disabled for sandboxes.
+                </p>
+              ) : null}
 
               {data.catalog.length > 0 ? (
                 <fieldset>

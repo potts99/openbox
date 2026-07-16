@@ -7,7 +7,11 @@ export interface SandboxStatusProps {
   errorCode?: string;
   errorStage?: string;
   egressPolicy?: string;
+  isolationNote?: string;
   now?: Date;
+  extendPending?: boolean;
+  extendError?: string;
+  onExtend?(durationSeconds: number): void;
 }
 
 function formatCountdown(expiresAt: string, now: Date): string {
@@ -30,8 +34,12 @@ export function SandboxStatus({
   expiresAt,
   errorCode,
   errorStage,
-  egressPolicy = "default",
+  egressPolicy = "restricted",
+  isolationNote,
   now,
+  extendPending = false,
+  extendError,
+  onExtend,
 }: SandboxStatusProps) {
   const [liveClock, setLiveClock] = useState(() => new Date());
   const clock = now ?? liveClock;
@@ -46,6 +54,16 @@ export function SandboxStatus({
     <section className="instance-detail sandbox-status" aria-labelledby="sandbox-status-heading">
       <div className="ledger-header">
         <h2 id="sandbox-status-heading">Sandbox</h2>
+        {onExtend ? (
+          <button
+            type="button"
+            className="btn"
+            disabled={extendPending}
+            onClick={() => onExtend(3600)}
+          >
+            {extendPending ? "Extending…" : "Extend 1h"}
+          </button>
+        ) : null}
       </div>
       <dl className="detail-grid">
         <div>
@@ -64,6 +82,12 @@ export function SandboxStatus({
             </div>
           </>
         ) : null}
+        {isolationNote ? (
+          <div className="detail-span">
+            <dt>Isolation</dt>
+            <dd>{isolationNote}</dd>
+          </div>
+        ) : null}
         {errorCode ? (
           <div className="detail-span">
             <dt>Cleanup failure</dt>
@@ -74,6 +98,10 @@ export function SandboxStatus({
           </div>
         ) : null}
       </dl>
+      {extendError ? <p className="data-message is-error" role="alert">{extendError}</p> : null}
+      <p className="data-message">
+        Browser terminal is disabled for sandboxes. Use <code>openbox sandbox exec</code> or the API.
+      </p>
     </section>
   );
 }

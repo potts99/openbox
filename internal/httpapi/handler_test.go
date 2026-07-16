@@ -148,6 +148,27 @@ func TestCreateRequiresIdempotencyAndReturnsOperation(t *testing.T) {
 	}
 }
 
+func TestCreateMapsSandboxLifetimeSeconds(t *testing.T) {
+	t.Parallel()
+
+	service := &fakeService{
+		created:   domain.Instance{ID: "instance-1", OwnerID: "owner-local", Name: "agent", Kind: domain.KindSandbox},
+		operation: domain.Operation{ID: "operation-1", OwnerID: "owner-local", Status: domain.OperationPending},
+	}
+	handler := newTestHandler(t, service)
+	body := []byte(`{"name":"agent","kind":"sandbox","image":"openbox:sandbox/ubuntu/24.04","owner_public_key":"ssh-ed25519 AAAA","lifetime_seconds":7200}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/instances", bytes.NewReader(body))
+	request.Header.Set(HeaderIdempotencyKey, "create-lifetime")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if service.createInput.Lifetime != 2*time.Hour {
+		t.Fatalf("lifetime=%v want 2h", service.createInput.Lifetime)
+	}
+}
+
 func TestMutationActionsAndErrorEnvelope(t *testing.T) {
 	t.Parallel()
 

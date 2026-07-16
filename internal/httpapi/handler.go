@@ -520,10 +520,15 @@ func (h *Handler) createInstance(response http.ResponseWriter, request *http.Req
 	if input.EgressProfileId != nil {
 		egressProfileID = domain.EgressProfileID(*input.EgressProfileId)
 	}
+	var lifetime time.Duration
+	if input.LifetimeSeconds != nil {
+		lifetime = time.Duration(*input.LifetimeSeconds) * time.Second
+	}
 	instance, operation, err := h.service.SubmitCreate(request.Context(), instances.CreateInput{
 		OwnerID: h.requestOwner(request), Name: input.Name, Kind: kind, Image: input.Image,
 		RequestedIsolation: isolation,
 		Resources:          resources,
+		Lifetime:           lifetime,
 		EgressProfileID:    egressProfileID,
 		OwnerPublicKey:     input.OwnerPublicKey, IdempotencyKey: key,
 		Packages: packages,
