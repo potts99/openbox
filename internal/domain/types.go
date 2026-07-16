@@ -117,6 +117,7 @@ type Instance struct {
 	RequestedIsolation    IsolationRequest
 	ActualIsolation       IsolationType
 	EgressMode            EgressMode
+	EgressProfileID       EgressProfileID
 	DesiredState          DesiredState
 	ObservedState         ObservedState
 	Resources             Resources
@@ -223,11 +224,11 @@ type AllowlistResolution struct {
 
 type EgressProfile struct {
 	ID                      EgressProfileID
-	OwnerID                 OwnerID
 	Name                    string
 	Mode                    EgressMode
 	AllowedDestinationsJSON []byte
 	DNSPolicy               string
+	System                  bool
 	CreatedAt, UpdatedAt    time.Time
 }
 

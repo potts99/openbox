@@ -523,6 +523,19 @@ func (f *fakeService) InstallSoftware(_ context.Context, owner domain.OwnerID, i
 		UpdatedAt: time.Now().UTC(),
 	}, nil
 }
+func (f *fakeService) AttachEgressProfile(_ context.Context, owner domain.OwnerID, id domain.InstanceID, profileID domain.EgressProfileID) (domain.Instance, error) {
+	f.lastOwner = owner
+	f.lastInstanceID = id
+	if f.err != nil {
+		return domain.Instance{}, f.err
+	}
+	instance, err := f.GetInstance(context.Background(), owner, id)
+	if err != nil {
+		return domain.Instance{}, err
+	}
+	instance.EgressProfileID = profileID
+	return instance, nil
+}
 
 var _ Service = (*fakeService)(nil)
 var _ = errors.New

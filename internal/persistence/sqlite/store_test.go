@@ -30,8 +30,8 @@ func TestOpenMigratesOnDiskAndReopens(t *testing.T) {
 	if err := store.db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 10 {
-		t.Fatalf("migration count=%d, want 10", count)
+	if count != 11 {
+		t.Fatalf("migration count=%d, want 11", count)
 	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
@@ -44,8 +44,8 @@ func TestOpenMigratesOnDiskAndReopens(t *testing.T) {
 	if err := store.db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 10 {
-		t.Fatalf("migration count after reopen=%d, want 10", count)
+	if count != 11 {
+		t.Fatalf("migration count after reopen=%d, want 11", count)
 	}
 }
 

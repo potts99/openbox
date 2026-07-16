@@ -68,9 +68,11 @@ type ContainerRuntime = InstanceRuntime
 
 type Repository interface {
 	EnsureImage(context.Context, domain.Image) error
+	GetEgressProfile(context.Context, domain.EgressProfileID) (domain.EgressProfile, error)
 	GetOperationByIdempotency(context.Context, domain.OwnerID, string) (domain.Operation, bool, error)
 	CreateInstance(context.Context, domain.Instance, domain.Operation) (domain.Operation, bool, error)
 	GetInstance(context.Context, domain.OwnerID, domain.InstanceID) (domain.Instance, error)
+	UpdateInstanceEgressProfile(context.Context, domain.OwnerID, domain.InstanceID, domain.EgressProfileID, domain.EgressMode, time.Time) error
 	UpdateInstanceState(context.Context, domain.OwnerID, domain.InstanceID, domain.DesiredState, domain.ObservedState, time.Time, domain.Operation) error
 	UpdateInstanceProtection(context.Context, domain.OwnerID, domain.InstanceID, bool, time.Time) error
 	UpdateInstanceExpiry(context.Context, domain.OwnerID, domain.InstanceID, time.Time, time.Time) error
@@ -172,6 +174,7 @@ type CreateInput struct {
 	Resources          domain.Resources
 	Lifetime           time.Duration // Sandbox only; 0 means kind default
 	EgressMode         domain.EgressMode
+	EgressProfileID    domain.EgressProfileID
 	OwnerPublicKey     string
 	IdempotencyKey     string
 	Packages           []string // catalog package IDs to install after ready
@@ -281,7 +284,19 @@ func (s *Service) SubmitCreate(ctx context.Context, input CreateInput) (domain.I
 	instance.ActualIsolation = actualIsolation
 	instance.Resources = input.Resources
 	instance.RuntimeRef = runtimeReference(instanceID)
-	instance.EgressMode = input.EgressMode
+	profileID := input.EgressProfileID
+	if profileID == "" {
+		profileID = domain.DefaultEgressProfileID(input.Kind)
+	}
+	profile, err := s.repo.GetEgressProfile(ctx, profileID)
+	if err != nil {
+		return domain.Instance{}, domain.Operation{}, err
+	}
+	instance.EgressProfileID = profile.ID
+	instance.EgressMode = profile.Mode
+	if input.EgressMode != "" && input.EgressMode != profile.Mode {
+		return domain.Instance{}, domain.Operation{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "egress_mode"}
+	}
 	applyLifetime(&instance, lifetime, now)
 	if err := domain.ValidateInstance(instance); err != nil {
 		return domain.Instance{}, domain.Operation{}, err
@@ -1322,6 +1337,29 @@ func selectIsolation(request domain.IsolationRequest, capabilities runtimeapi.Ca
 	default:
 		return "", &domain.Error{Code: domain.CodeInvalidArgument, Field: "requested_isolation"}
 	}
+}
+
+// AttachEgressProfile switches an instance onto another system profile and re-applies policy.
+func (s *Service) AttachEgressProfile(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID, profileID domain.EgressProfileID) (domain.Instance, error) {
+	profile, err := s.repo.GetEgressProfile(ctx, profileID)
+	if err != nil {
+		return domain.Instance{}, err
+	}
+	now := s.now().UTC()
+	if err := s.repo.UpdateInstanceEgressProfile(ctx, ownerID, id, profile.ID, profile.Mode, now); err != nil {
+		return domain.Instance{}, err
+	}
+	instance, err := s.repo.GetInstance(ctx, ownerID, id)
+	if err != nil {
+		return domain.Instance{}, err
+	}
+	if instance.RuntimeRef != "" {
+		if err := s.applyNetworkPolicy(ctx, instance); err != nil {
+			_ = s.markError(ctx, instance)
+			return domain.Instance{}, err
+		}
+	}
+	return s.withNetworkPolicyStatus(instance), nil
 }
 
 func (s *Service) applyNetworkPolicy(ctx context.Context, instance domain.Instance) error {

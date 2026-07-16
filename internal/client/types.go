@@ -78,6 +78,17 @@ type NetworkPolicyStatus struct {
 	DeniedFlows uint64              `json:"denied_flows"`
 }
 
+type EgressProfile struct {
+	ID                    string    `json:"id"`
+	Name                  string    `json:"name"`
+	Mode                  string    `json:"mode"`
+	AllowedDestinations   []string  `json:"allowed_destinations"`
+	System                bool      `json:"system"`
+	AttachedInstanceCount int       `json:"attached_instance_count,omitempty"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
+}
+
 type Instance struct {
 	ID                 string              `json:"id"`
 	Name               string              `json:"name"`
@@ -93,6 +104,7 @@ type Instance struct {
 	ErrorCode          string              `json:"error_code,omitempty"`
 	ErrorStage         string              `json:"error_stage,omitempty"`
 	ErrorRetryable     bool                `json:"error_retryable,omitempty"`
+	EgressProfileID    string              `json:"egress_profile_id,omitempty"`
 	NetworkPolicy      NetworkPolicyStatus `json:"network_policy"`
 	CreatedAt          time.Time           `json:"created_at"`
 	UpdatedAt          time.Time           `json:"updated_at"`
