@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/openbox-dev/openbox/internal/app/instances"
+	"github.com/openbox-dev/openbox/internal/app/reuse"
 	"github.com/openbox-dev/openbox/internal/domain"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 )
@@ -27,10 +28,14 @@ const (
 
 // SnapshotRuntime is the narrow runtime boundary used for snapshot lifecycle.
 type SnapshotRuntime interface {
+	StoragePoolDriver(context.Context) (string, error)
 	CreateSnapshot(context.Context, string, string) error
 	DeleteSnapshot(context.Context, string, string) error
 	CopyInstance(context.Context, runtimeapi.CopyRequest) (runtimeapi.Instance, error)
 	InspectInstance(context.Context, string) (runtimeapi.Instance, error)
+	WriteFile(context.Context, runtimeapi.WriteFileRequest) error
+	StartInstance(context.Context, string) error
+	StopInstance(context.Context, string) error
 }
 
 // Repository persists snapshots, instances, and durable operations.
@@ -47,20 +52,25 @@ type Repository interface {
 	CreateDeleteOperation(context.Context, domain.Operation) (domain.Operation, bool, error)
 	CompleteOperation(context.Context, domain.OwnerID, domain.OperationID, time.Time) error
 	UpdateOperationStage(context.Context, domain.OwnerID, domain.OperationID, string, int, time.Time) error
+	ListInstanceSoftware(context.Context, domain.OwnerID, domain.InstanceID) ([]domain.InstanceSoftware, error)
 }
 
 // Options configures clocks and ID generation for Service.
 type Options struct {
-	Now   func() time.Time
-	NewID func() string
+	Now              func() time.Time
+	NewID            func() string
+	GatewayPublicKey string
+	NetworkPolicy    instances.NetworkPolicy
 }
 
 // Service orchestrates snapshot create/list/inspect/delete/restore via durable ops.
 type Service struct {
-	runtime SnapshotRuntime
-	repo    Repository
-	now     func() time.Time
-	newID   func() string
+	runtime          SnapshotRuntime
+	repo             Repository
+	now              func() time.Time
+	newID            func() string
+	gatewayPublicKey string
+	networkPolicy    instances.NetworkPolicy
 }
 
 // CreateInput records a named snapshot against an owned instance.
@@ -76,7 +86,16 @@ type RestoreInput struct {
 	OwnerID        domain.OwnerID
 	SnapshotID     domain.SnapshotID
 	Name           string
+	OwnerPublicKey string
 	IdempotencyKey string
+}
+
+// RestoreResult is the durable restore submission plus pre-execution warnings.
+type RestoreResult struct {
+	Instance          domain.Instance
+	Operation         domain.Operation
+	Warnings          []string
+	StorageEfficiency reuse.StorageEfficiency
 }
 
 type restorePayload struct {
@@ -85,6 +104,8 @@ type restorePayload struct {
 	SnapshotRef    string            `json:"snapshot_ref"`
 	TargetRef      string            `json:"target_ref"`
 	SourceInstance domain.InstanceID `json:"source_instance_id"`
+	ImageID        domain.ImageID    `json:"source_image_id"`
+	OwnerPublicKey string            `json:"owner_public_key"`
 }
 
 // New constructs a snapshot Service.
@@ -98,7 +119,10 @@ func New(runtime SnapshotRuntime, repo Repository, options Options) (*Service, e
 	if options.NewID == nil {
 		options.NewID = randomID
 	}
-	return &Service{runtime: runtime, repo: repo, now: options.Now, newID: options.NewID}, nil
+	return &Service{
+		runtime: runtime, repo: repo, now: options.Now, newID: options.NewID,
+		gatewayPublicKey: strings.TrimSpace(options.GatewayPublicKey), networkPolicy: options.NetworkPolicy,
+	}, nil
 }
 
 // Create durably records a snapshot and returns a pending create operation.
@@ -132,7 +156,8 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Snapsho
 		OwnerID:    input.OwnerID,
 		InstanceID: input.InstanceID,
 		Name:       input.Name,
-		RuntimeRef: input.Name,
+		// Empty until recoverCreate has successfully created the runtime snapshot.
+		RuntimeRef: "",
 		CreatedAt:  now,
 	}
 	operation := s.operation(opCreate, "snapshot", string(snapshot.ID), input.OwnerID, input.IdempotencyKey, requestHash)
@@ -174,8 +199,12 @@ func (s *Service) Delete(ctx context.Context, ownerID domain.OwnerID, id domain.
 		}
 		return existing, nil
 	}
-	if _, err := s.repo.GetSnapshot(ctx, ownerID, id); err != nil {
+	snapshot, err := s.repo.GetSnapshot(ctx, ownerID, id)
+	if err != nil {
 		return domain.Operation{}, err
+	}
+	if snapshot.RuntimeRef == "" {
+		return domain.Operation{}, &domain.Error{Code: domain.CodeConflict, Field: "snapshot"}
 	}
 	operation := s.operation(opDelete, "snapshot", string(id), ownerID, key, requestHash)
 	recorded, _, err := s.repo.CreateDeleteOperation(ctx, operation)
@@ -183,32 +212,45 @@ func (s *Service) Delete(ctx context.Context, ownerID domain.OwnerID, id domain.
 }
 
 // RestoreAsNew records a new instance derived from a snapshot.
-func (s *Service) RestoreAsNew(ctx context.Context, input RestoreInput) (domain.Instance, domain.Operation, error) {
-	if input.OwnerID == "" || input.SnapshotID == "" || input.Name == "" || input.IdempotencyKey == "" {
-		return domain.Instance{}, domain.Operation{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "restore"}
+func (s *Service) RestoreAsNew(ctx context.Context, input RestoreInput) (RestoreResult, error) {
+	if input.OwnerID == "" || input.SnapshotID == "" || input.Name == "" || input.IdempotencyKey == "" || strings.TrimSpace(input.OwnerPublicKey) == "" {
+		return RestoreResult{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "restore"}
 	}
-	requestHash := hashString("restore:" + string(input.SnapshotID) + ":" + input.Name)
+	requestHash := hashString("restore:" + string(input.SnapshotID) + ":" + input.Name + ":" + strings.TrimSpace(input.OwnerPublicKey))
 	if existing, found, err := s.repo.GetOperationByIdempotency(ctx, input.OwnerID, input.IdempotencyKey); err != nil {
-		return domain.Instance{}, domain.Operation{}, err
+		return RestoreResult{}, err
 	} else if found {
 		if existing.Type != opRestore || existing.RequestHash != requestHash {
-			return domain.Instance{}, domain.Operation{}, &domain.Error{Code: domain.CodeIdempotencyConflict, Field: "idempotency_key"}
+			return RestoreResult{}, &domain.Error{Code: domain.CodeIdempotencyConflict, Field: "idempotency_key"}
 		}
 		instance, getErr := s.repo.GetInstance(ctx, input.OwnerID, domain.InstanceID(existing.TargetID))
-		return instance, existing, getErr
+		return s.replayResult(ctx, instance, existing, getErr)
 	}
 	snapshot, err := s.repo.GetSnapshot(ctx, input.OwnerID, input.SnapshotID)
 	if err != nil {
-		return domain.Instance{}, domain.Operation{}, err
+		return RestoreResult{}, err
+	}
+	if snapshot.RuntimeRef == "" {
+		return RestoreResult{}, &domain.Error{Code: domain.CodeConflict, Field: "snapshot"}
 	}
 	source, err := s.repo.GetInstance(ctx, input.OwnerID, snapshot.InstanceID)
 	if err != nil {
-		return domain.Instance{}, domain.Operation{}, err
+		return RestoreResult{}, err
+	}
+	software, err := s.repo.ListInstanceSoftware(ctx, source.OwnerID, source.ID)
+	if err != nil {
+		return RestoreResult{}, err
+	}
+	driver, driverErr := s.runtime.StoragePoolDriver(ctx)
+	efficiency, warnings := reuse.Preflight(runtimeapi.Capabilities{StorageDrivers: []string{driver}}, source, software)
+	if driverErr != nil {
+		efficiency = reuse.StorageUnknown
+		warnings = append(warnings, reuse.WarningFullCopy)
 	}
 	now := s.now().UTC()
 	clone, err := domain.NewInstance(domain.InstanceID(s.newID()), input.OwnerID, input.Name, source.Kind, now)
 	if err != nil {
-		return domain.Instance{}, domain.Operation{}, err
+		return RestoreResult{}, err
 	}
 	clone.ImageID = source.ImageID
 	clone.RequestedIsolation = source.RequestedIsolation
@@ -216,27 +258,32 @@ func (s *Service) RestoreAsNew(ctx context.Context, input RestoreInput) (domain.
 	clone.Resources = source.Resources
 	clone.RuntimeRef = runtimeReference(clone.ID)
 	clone.Protected = false
+	clone.ObservedState = domain.ObservedCreating
+	clone.CloneSourceInstanceID = source.ID
+	clone.CloneSourceSnapshotID = snapshot.ID
+	clone.CloneSourceImageID = source.ImageID
 	if err := domain.ValidateInstance(clone); err != nil {
-		return domain.Instance{}, domain.Operation{}, err
+		return RestoreResult{}, err
 	}
 	operation := s.operation(opRestore, "instance", string(clone.ID), input.OwnerID, input.IdempotencyKey, requestHash)
 	payload, err := json.Marshal(restorePayload{
 		SnapshotID: snapshot.ID, SourceRef: source.RuntimeRef, SnapshotRef: snapshot.RuntimeRef,
-		TargetRef: clone.RuntimeRef, SourceInstance: source.ID,
+		TargetRef: clone.RuntimeRef, SourceInstance: source.ID, ImageID: source.ImageID,
+		OwnerPublicKey: strings.TrimSpace(input.OwnerPublicKey),
 	})
 	if err != nil {
-		return domain.Instance{}, domain.Operation{}, fmt.Errorf("encode restore payload: %w", err)
+		return RestoreResult{}, fmt.Errorf("encode restore payload: %w", err)
 	}
 	operation.PayloadJSON = payload
 	recorded, replay, err := s.repo.CreateInstance(ctx, clone, operation)
 	if err != nil {
-		return domain.Instance{}, domain.Operation{}, err
+		return RestoreResult{}, err
 	}
 	if replay {
 		clone, err = s.repo.GetInstance(ctx, input.OwnerID, domain.InstanceID(recorded.TargetID))
-		return clone, recorded, err
+		return RestoreResult{Instance: clone, Operation: recorded, Warnings: warnings, StorageEfficiency: efficiency}, err
 	}
-	return clone, operation, nil
+	return RestoreResult{Instance: clone, Operation: operation, Warnings: warnings, StorageEfficiency: efficiency}, nil
 }
 
 // RecoverOperation executes or resumes a durable snapshot operation.
@@ -337,8 +384,21 @@ func (s *Service) recoverRestore(ctx context.Context, operation domain.Operation
 			}
 		}
 	}
+	if err := s.repo.UpdateOperationStage(ctx, operation.OwnerID, operation.ID, "verifying_copy", 70, s.now()); err != nil {
+		return err
+	}
 	if err := instances.VerifyRuntimeIdentity(copied, clone.ID, clone.ActualIsolation); err != nil {
 		return err
+	}
+	if payload.OwnerPublicKey != "" {
+		if err := reuse.WriteOwnerAuthorizedKeys(ctx, s.runtime, payload.TargetRef, payload.OwnerPublicKey, s.gatewayPublicKey); err != nil {
+			return err
+		}
+	}
+	if s.networkPolicy != nil {
+		if err := s.networkPolicy.ApplyNetworkPolicy(ctx, clone); err != nil {
+			return fmt.Errorf("apply derived network policy: %w", err)
+		}
 	}
 	observed := domain.ObservedStopped
 	if copied.State == runtimeapi.StateRunning {
@@ -351,6 +411,27 @@ func (s *Service) recoverRestore(ctx context.Context, operation domain.Operation
 		return err
 	}
 	return s.repo.CompleteOperation(ctx, operation.OwnerID, operation.ID, s.now())
+}
+
+func (s *Service) replayResult(ctx context.Context, instance domain.Instance, operation domain.Operation, getErr error) (RestoreResult, error) {
+	if getErr != nil {
+		return RestoreResult{}, getErr
+	}
+	source, err := s.repo.GetInstance(ctx, operation.OwnerID, instance.CloneSourceInstanceID)
+	if err != nil {
+		return RestoreResult{}, err
+	}
+	software, err := s.repo.ListInstanceSoftware(ctx, source.OwnerID, source.ID)
+	if err != nil {
+		return RestoreResult{}, err
+	}
+	driver, driverErr := s.runtime.StoragePoolDriver(ctx)
+	efficiency, warnings := reuse.Preflight(runtimeapi.Capabilities{StorageDrivers: []string{driver}}, source, software)
+	if driverErr != nil {
+		efficiency = reuse.StorageUnknown
+		warnings = append(warnings, reuse.WarningFullCopy)
+	}
+	return RestoreResult{Instance: instance, Operation: operation, Warnings: warnings, StorageEfficiency: efficiency}, nil
 }
 
 func (s *Service) operation(kind, targetType, targetID string, owner domain.OwnerID, key, hash string) domain.Operation {

@@ -37,6 +37,12 @@ Commands:
   rm ID                  Delete an instance
   sandbox exec ID -- CMD Run argv inside a running sandbox (NDJSON frames)
   sandbox extend ID      Extend a Sandbox TTL (--by DURATION)
+  snapshot create ID NAME  Create a disk-only checkpoint
+  snapshot list ID         List checkpoints for an instance
+  snapshot get ID          Inspect a checkpoint
+  snapshot delete ID       Delete a checkpoint
+  restore SNAPSHOT NAME    Restore a checkpoint as a new instance
+  clone INSTANCE NAME      Clone a live instance
   route                  Manage HTTPS routes
   network                Manage egress profiles and attach policy
   forward INSTANCE PORT  SSH-tunnel an instance port to localhost
@@ -115,6 +121,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runNetwork(ctx, api, rest, options.json, stdout, stderr)
 	case "sandbox":
 		return runSandbox(ctx, api, rest, options.json, stdout, stderr)
+	case "snapshot":
+		return runSnapshot(ctx, api, rest, options.json, stdout, stderr)
+	case "restore":
+		return runRestore(ctx, api, rest, options.json, stdout, stderr)
+	case "clone":
+		return runClone(ctx, api, rest, options.json, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", command, usage)
 		return 2

@@ -14,7 +14,7 @@ import (
 
 // CreateSnapshotRecord atomically inserts a snapshot and its durable operation.
 func (s *Store) CreateSnapshotRecord(ctx context.Context, snapshot domain.Snapshot, operation domain.Operation) (domain.Operation, bool, error) {
-	if snapshot.ID == "" || snapshot.OwnerID == "" || snapshot.InstanceID == "" || snapshot.Name == "" || snapshot.RuntimeRef == "" {
+	if snapshot.ID == "" || snapshot.OwnerID == "" || snapshot.InstanceID == "" || snapshot.Name == "" {
 		return domain.Operation{}, false, &domain.Error{Code: domain.CodeInvalidArgument, Field: "snapshot"}
 	}
 	if err := domain.ValidateOperation(operation); err != nil {

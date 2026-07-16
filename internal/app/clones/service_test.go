@@ -22,7 +22,8 @@ func TestSubmitCopyRecordsProvenanceAndVerifiesIdentity(t *testing.T) {
 	source := seedRunning(t, repo, runtime, "inst-source", "base", "sha256:ubuntu", true)
 
 	result, err := svc.SubmitCopy(context.Background(), clones.CopyInput{
-		OwnerID: source.OwnerID, Source: "base", Destination: "feature", IdempotencyKey: "cp-1",
+		OwnerID: source.OwnerID, Source: "base", Destination: "feature",
+		OwnerPublicKey: "ssh-ed25519 owner", IdempotencyKey: "cp-1",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -56,6 +57,10 @@ func TestSubmitCopyRecordsProvenanceAndVerifiesIdentity(t *testing.T) {
 	if reloaded.ObservedState != domain.ObservedRunning {
 		t.Fatalf("observed=%s", reloaded.ObservedState)
 	}
+	keys, ok := runtime.WrittenFile(reloaded.RuntimeRef, "/root/.ssh/authorized_keys")
+	if !ok || keys != "ssh-ed25519 owner\n" {
+		t.Fatalf("authorized_keys=%q ok=%v", keys, ok)
+	}
 }
 
 func TestSubmitCopyWarnsForFullCopyAndPersonalPiSecrets(t *testing.T) {
@@ -67,13 +72,79 @@ func TestSubmitCopyWarnsForFullCopyAndPersonalPiSecrets(t *testing.T) {
 	}}
 
 	result, err := svc.SubmitCopy(context.Background(), clones.CopyInput{
-		OwnerID: source.OwnerID, Source: "personal", Destination: "scratch", IdempotencyKey: "cp-warn",
+		OwnerID: source.OwnerID, Source: "personal", Destination: "scratch",
+		OwnerPublicKey: "ssh-ed25519 owner", IdempotencyKey: "cp-warn",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !containsWarning(result.Warnings, clones.WarningFullCopy) || !containsWarning(result.Warnings, clones.WarningSecrets) {
 		t.Fatalf("warnings=%v", result.Warnings)
+	}
+}
+
+func TestRecoverCopyAppliesDerivedDefaultNetworkPolicy(t *testing.T) {
+	t.Parallel()
+	runtime := fake.New(runtimeapi.Capabilities{Architecture: "x86_64", Containers: true, StorageDrivers: []string{"zfs"}})
+	repo := &memoryRepo{
+		instances: map[domain.InstanceID]domain.Instance{},
+		snapshots: map[domain.SnapshotID]domain.Snapshot{},
+		ops:       map[string]domain.Operation{},
+		software:  map[domain.InstanceID][]domain.InstanceSoftware{},
+	}
+	policy := &recordingPolicy{}
+	n := 0
+	svc, err := clones.New(runtime, repo, clones.Options{
+		Now:           func() time.Time { return time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC) },
+		NewID:         func() string { n++; return fmt.Sprintf("gen-%d", n) },
+		NetworkPolicy: policy,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := seedRunning(t, repo, runtime, "inst-source", "base", "sha256:ubuntu", true)
+	result, err := svc.SubmitCopy(context.Background(), clones.CopyInput{
+		OwnerID: source.OwnerID, Source: "base", Destination: "feature",
+		OwnerPublicKey: "ssh-ed25519 owner", IdempotencyKey: "cp-policy",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RecoverOperation(context.Background(), result.Operation); err != nil {
+		t.Fatal(err)
+	}
+	if len(policy.applied) != 1 || policy.applied[0].EgressProfileID != domain.DefaultEgressProfileID(source.Kind) {
+		t.Fatalf("applied=%+v", policy.applied)
+	}
+}
+
+func TestSubmitCopyFromSnapshotUsesRuntimeSnapshot(t *testing.T) {
+	t.Parallel()
+	svc, runtime, repo := newTestService(t, runtimeapi.Capabilities{Architecture: "x86_64", Containers: true, StorageDrivers: []string{"zfs"}})
+	source := seedRunning(t, repo, runtime, "inst-source", "base", "sha256:ubuntu", true)
+	if err := runtime.CreateSnapshot(context.Background(), source.RuntimeRef, "ready"); err != nil {
+		t.Fatal(err)
+	}
+	snapID := domain.SnapshotID("snap-1")
+	repo.snapshots[snapID] = domain.Snapshot{
+		ID: snapID, OwnerID: source.OwnerID, InstanceID: source.ID, Name: "ready", RuntimeRef: "ready",
+		CreatedAt: time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC),
+	}
+	result, err := svc.SubmitCopy(context.Background(), clones.CopyInput{
+		OwnerID: source.OwnerID, Source: "base", Destination: "from-snap",
+		SnapshotID: snapID, OwnerPublicKey: "ssh-ed25519 owner", IdempotencyKey: "cp-snap",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Instance.CloneSourceSnapshotID != snapID {
+		t.Fatalf("snapshot provenance=%q", result.Instance.CloneSourceSnapshotID)
+	}
+	if err := svc.RecoverOperation(context.Background(), result.Operation); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.InspectInstance(context.Background(), result.Instance.RuntimeRef); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -85,7 +156,8 @@ func TestDeletingSourceDoesNotInvalidateCompletedClone(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := svc.SubmitCopy(context.Background(), clones.CopyInput{
-		OwnerID: source.OwnerID, Source: "base", Destination: "feature", IdempotencyKey: "cp-indep",
+		OwnerID: source.OwnerID, Source: "base", Destination: "feature",
+		OwnerPublicKey: "ssh-ed25519 owner", IdempotencyKey: "cp-indep",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +196,8 @@ func TestRecoverCopyRejectsWrongRuntimeIdentity(t *testing.T) {
 	svc, runtime, repo := newTestService(t, runtimeapi.Capabilities{Architecture: "x86_64", Containers: true, StorageDrivers: []string{"zfs"}})
 	source := seedRunning(t, repo, runtime, "inst-source", "base", "sha256:ubuntu", true)
 	result, err := svc.SubmitCopy(context.Background(), clones.CopyInput{
-		OwnerID: source.OwnerID, Source: "base", Destination: "feature", IdempotencyKey: "cp-bad-id",
+		OwnerID: source.OwnerID, Source: "base", Destination: "feature",
+		OwnerPublicKey: "ssh-ed25519 owner", IdempotencyKey: "cp-bad-id",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -158,15 +231,26 @@ func TestStorageEfficientCopyDrivers(t *testing.T) {
 
 type memoryRepo struct {
 	instances map[domain.InstanceID]domain.Instance
+	snapshots map[domain.SnapshotID]domain.Snapshot
 	ops       map[string]domain.Operation
 	software  map[domain.InstanceID][]domain.InstanceSoftware
 }
+
+type recordingPolicy struct{ applied []domain.Instance }
+
+func (p *recordingPolicy) ApplyNetworkPolicy(_ context.Context, instance domain.Instance) error {
+	p.applied = append(p.applied, instance)
+	return nil
+}
+
+func (*recordingPolicy) RemoveNetworkPolicy(context.Context, domain.Instance) error { return nil }
 
 func newTestService(t *testing.T, capabilities runtimeapi.Capabilities) (*clones.Service, *fake.Runtime, *memoryRepo) {
 	t.Helper()
 	runtime := fake.New(capabilities)
 	repo := &memoryRepo{
 		instances: map[domain.InstanceID]domain.Instance{},
+		snapshots: map[domain.SnapshotID]domain.Snapshot{},
 		ops:       map[string]domain.Operation{},
 		software:  map[domain.InstanceID][]domain.InstanceSoftware{},
 	}
@@ -292,4 +376,11 @@ func (m *memoryRepo) ListInstanceSoftware(_ context.Context, owner domain.OwnerI
 		return nil, &domain.Error{Code: domain.CodeNotFound, Field: "instance"}
 	}
 	return append([]domain.InstanceSoftware(nil), m.software[id]...), nil
+}
+func (m *memoryRepo) GetSnapshot(_ context.Context, owner domain.OwnerID, id domain.SnapshotID) (domain.Snapshot, error) {
+	snapshot, ok := m.snapshots[id]
+	if !ok || snapshot.OwnerID != owner {
+		return domain.Snapshot{}, &domain.Error{Code: domain.CodeNotFound, Field: "snapshot"}
+	}
+	return snapshot, nil
 }

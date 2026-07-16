@@ -139,6 +139,15 @@ func printInstanceStatus(stdout io.Writer, instance openbox.Instance, now time.T
 	if instance.Kind == "sandbox" && instance.ActualIsolation == "container" {
 		fmt.Fprintln(stdout, "Isolation note: running as container (omitted request selects container when KVM is unavailable; explicit strong never downgrades)")
 	}
+	if instance.CloneSourceInstanceID != "" {
+		fmt.Fprintf(stdout, "Clone source instance: %s\n", instance.CloneSourceInstanceID)
+	}
+	if instance.CloneSourceSnapshotID != "" {
+		fmt.Fprintf(stdout, "Clone source checkpoint: %s\n", instance.CloneSourceSnapshotID)
+	}
+	if instance.CloneSourceImageID != "" {
+		fmt.Fprintf(stdout, "Clone source image: %s\n", instance.CloneSourceImageID)
+	}
 	if instance.ExpiresAt != nil {
 		fmt.Fprintf(stdout, "Expires: %s (%s)\n", instance.ExpiresAt.UTC().Format(time.RFC3339), sandbox.FormatRemaining(instance.ExpiresAt, now))
 	}

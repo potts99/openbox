@@ -159,8 +159,9 @@ func ValidateObservedTransition(from, to ObservedState) error {
 		return nil
 	}
 	allowed := map[ObservedState]map[ObservedState]bool{
-		ObservedPending:  {ObservedCreating: true, ObservedDeleting: true},
-		ObservedCreating: {ObservedRunning: true, ObservedDeleting: true},
+		ObservedPending: {ObservedCreating: true, ObservedDeleting: true},
+		// Creating may land stopped after snapshot/clone copy without an intervening start.
+		ObservedCreating: {ObservedRunning: true, ObservedStopped: true, ObservedDeleting: true},
 		ObservedRunning:  {ObservedStopping: true, ObservedDeleting: true},
 		ObservedStopping: {ObservedStopped: true, ObservedDeleting: true},
 		ObservedStopped:  {ObservedRunning: true, ObservedDeleting: true},

@@ -76,6 +76,7 @@ function OperationEventStream({
 interface InstanceOperationLogsProps {
   api: OpenBoxApi;
   instanceId: string;
+  relatedTargets?: string[];
   refreshKey?: number;
   EventSourceImpl?: typeof EventSource;
 }
@@ -148,6 +149,7 @@ function streamStatusLabel(status: OperationStreamStatus): string {
 export function InstanceOperationLogs({
   api,
   instanceId,
+  relatedTargets = [],
   refreshKey = 0,
   EventSourceImpl,
 }: InstanceOperationLogsProps) {
@@ -160,7 +162,8 @@ export function InstanceOperationLogs({
     void api.listOperations()
       .then((operations) => {
         if (!active) return;
-        const scoped = operations.filter((operation) => operation.target === instanceId);
+        const targets = new Set([instanceId, ...relatedTargets]);
+        const scoped = operations.filter((operation) => targets.has(operation.target));
         setData({ status: "ready", operations: scoped });
         setSelectedOperationId((current) => {
           if (current && scoped.some((operation) => operation.id === current)) return current;
@@ -175,7 +178,7 @@ export function InstanceOperationLogs({
         });
       });
     return () => { active = false; };
-  }, [api, instanceId, refreshKey]);
+  }, [api, instanceId, refreshKey, relatedTargets]);
 
   const operations = data.status === "ready" ? data.operations : [];
   const selectedOperation = operations.find((operation) => operation.id === selectedOperationId) ?? null;
@@ -186,13 +189,14 @@ export function InstanceOperationLogs({
     const timer = window.setInterval(() => {
       void api.listOperations()
         .then((items) => {
-          const scoped = items.filter((operation) => operation.target === instanceId);
+          const targets = new Set([instanceId, ...relatedTargets]);
+          const scoped = items.filter((operation) => targets.has(operation.target));
           setData({ status: "ready", operations: scoped });
         })
         .catch(() => undefined);
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [api, data.status, hasActiveOperations, instanceId]);
+  }, [api, data.status, hasActiveOperations, instanceId, relatedTargets]);
 
   return (
     <section className="instance-detail instance-operation-logs" aria-labelledby="instance-logs-heading">

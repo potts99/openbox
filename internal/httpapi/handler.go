@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openbox-dev/openbox/internal/app/clones"
 	"github.com/openbox-dev/openbox/internal/app/egress"
 	"github.com/openbox-dev/openbox/internal/app/instances"
 	"github.com/openbox-dev/openbox/internal/app/metrics"
@@ -30,6 +31,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/routes"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 	"github.com/openbox-dev/openbox/internal/sandbox"
+	"github.com/openbox-dev/openbox/internal/snapshots"
 	"github.com/openbox-dev/openbox/internal/software"
 	"github.com/openbox-dev/openbox/internal/terminal"
 	"github.com/openbox-dev/openbox/internal/version"
@@ -109,6 +111,11 @@ type Options struct {
 	// SSHPublicPort is the client-facing SSH port. When host is set and port
 	// is 0, the handler defaults to 2222.
 	SSHPublicPort int
+	// Snapshots serves checkpoint create/list/get/delete/restore. When nil,
+	// those routes return not_implemented.
+	Snapshots *snapshots.Service
+	// Clones serves live-instance clone. When nil, clone returns not_implemented.
+	Clones *clones.Service
 }
 
 type Handler struct {
@@ -132,6 +139,8 @@ type Handler struct {
 	trustedProxies     []*net.IPNet
 	sshPublicHost      string
 	sshPublicPort      int
+	snapshots          *snapshots.Service
+	clones             *clones.Service
 }
 
 func New(service Service, options Options) (*Handler, error) {
@@ -177,6 +186,8 @@ func New(service Service, options Options) (*Handler, error) {
 		trustedProxies:     trustedProxies,
 		sshPublicHost:      strings.TrimSpace(options.SSHPublicHost),
 		sshPublicPort:      options.SSHPublicPort,
+		snapshots:          options.Snapshots,
+		clones:             options.Clones,
 	}, nil
 }
 
@@ -299,6 +310,10 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		if h.routeOperations(response, request, requestID, segments[2:]) {
 			return
 		}
+	case "snapshots":
+		if h.routeSnapshots(response, request, requestID, segments[2:]) {
+			return
+		}
 	}
 	h.writeError(response, requestID, http.StatusNotFound, string(domain.CodeNotFound), "path")
 }
@@ -359,6 +374,24 @@ func (h *Handler) routeInstances(response http.ResponseWriter, request *http.Req
 			return true
 		}
 		h.extendInstance(response, request, requestID, rest[0])
+		return true
+	}
+	if len(rest) == 2 && rest[1] == "snapshots" {
+		switch request.Method {
+		case http.MethodGet:
+			h.listInstanceSnapshots(response, request, requestID, rest[0])
+		case http.MethodPost:
+			h.createInstanceSnapshot(response, request, requestID, rest[0])
+		default:
+			h.methodNotAllowed(response, requestID, http.MethodGet, http.MethodPost)
+		}
+		return true
+	}
+	if len(rest) == 2 && rest[1] == "clone" {
+		if !h.requireMethod(response, request, requestID, http.MethodPost) {
+			return true
+		}
+		h.cloneInstance(response, request, requestID, rest[0])
 		return true
 	}
 	if len(rest) == 3 && rest[1] == "actions" {
@@ -777,6 +810,15 @@ func mapInstance(value domain.Instance, softwareRows []domain.InstanceSoftware) 
 	}
 	if value.EgressProfileID != "" {
 		out.EgressProfileId = optionalString(string(value.EgressProfileID))
+	}
+	if value.CloneSourceInstanceID != "" {
+		out.CloneSourceInstanceId = optionalString(string(value.CloneSourceInstanceID))
+	}
+	if value.CloneSourceSnapshotID != "" {
+		out.CloneSourceSnapshotId = optionalString(string(value.CloneSourceSnapshotID))
+	}
+	if value.CloneSourceImageID != "" {
+		out.CloneSourceImageId = optionalString(string(value.CloneSourceImageID))
 	}
 	if len(softwareRows) > 0 {
 		items := make([]generated.InstanceSoftware, 0, len(softwareRows))

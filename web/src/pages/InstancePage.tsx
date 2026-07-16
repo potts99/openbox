@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useEffect, useState } from "react";
-import type { ConnectionInfo, InstanceAction, InstanceDetail, OpenBoxApi, SoftwarePackage } from "../api/client";
+import type { ConnectionInfo, InstanceAction, InstanceDetail, OpenBoxApi, SnapshotSummary, SoftwarePackage } from "../api/client";
 import { InstanceMetrics } from "../components/InstanceMetrics";
 import { InstanceOperationLogs } from "../components/InstanceOperationLogs";
 import { SSHConnect } from "../components/SSHConnect";
+import { Checkpoints } from "./Checkpoints";
 import { SandboxStatus } from "./Sandbox";
 
 interface InstancePageProps {
@@ -60,6 +61,11 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
   const [extendPending, setExtendPending] = useState(false);
   const [extendError, setExtendError] = useState("");
   const [operationsRefreshKey, setOperationsRefreshKey] = useState(0);
+  const [snapshots, setSnapshots] = useState<SnapshotSummary[]>([]);
+  const [checkpointPending, setCheckpointPending] = useState(false);
+  const [checkpointError, setCheckpointError] = useState("");
+  const [checkpointWarnings, setCheckpointWarnings] = useState<string[]>([]);
+  const [storageNote, setStorageNote] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -67,9 +73,13 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
       api.getInstance(instanceId),
       api.listSoftwareCatalog(),
       api.getConnection().catch(() => ({ ssh: null }) as ConnectionInfo),
+      api.listSnapshots(instanceId).catch(() => [] as SnapshotSummary[]),
     ])
-      .then(([instance, catalog, connection]) => {
-        if (active) setData({ status: "ready", instance, catalog, connection });
+      .then(([instance, catalog, connection, listed]) => {
+        if (active) {
+          setData({ status: "ready", instance, catalog, connection });
+          setSnapshots(listed);
+        }
       })
       .catch((error: unknown) => {
         if (active) {
@@ -83,12 +93,23 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
   }, [api, instanceId]);
 
   async function reloadReady() {
-    const [instance, catalog, connection] = await Promise.all([
+    const [instance, catalog, connection, listed] = await Promise.all([
       api.getInstance(instanceId),
       api.listSoftwareCatalog(),
       api.getConnection().catch(() => ({ ssh: null }) as ConnectionInfo),
+      api.listSnapshots(instanceId).catch(() => [] as SnapshotSummary[]),
     ]);
     setData({ status: "ready", instance, catalog, connection });
+    setSnapshots(listed);
+  }
+
+  async function ownerKey(): Promise<string> {
+    const keys = await api.listSSHKeys();
+    const key = keys[0]?.publicKey?.trim();
+    if (!key) {
+      throw new Error("Add an SSH public key before clone or restore");
+    }
+    return key;
   }
 
   async function extendTTL(durationSeconds: number) {
@@ -132,6 +153,82 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
       setInstallError(error instanceof Error ? error.message : "Install failed");
     } finally {
       setInstallPending(null);
+    }
+  }
+
+  async function createCheckpoint(name: string) {
+    setCheckpointError("");
+    setCheckpointWarnings([]);
+    setStorageNote("");
+    setCheckpointPending(true);
+    try {
+      await api.createSnapshot(instanceId, name);
+      await reloadReady();
+      setOperationsRefreshKey((value) => value + 1);
+    } catch (error: unknown) {
+      setCheckpointError(error instanceof Error ? error.message : "Checkpoint failed");
+    } finally {
+      setCheckpointPending(false);
+    }
+  }
+
+  async function restoreCheckpoint(snapshotId: string, name: string) {
+    setCheckpointError("");
+    setCheckpointWarnings([]);
+    setStorageNote("");
+    setCheckpointPending(true);
+    try {
+      const key = await ownerKey();
+      const result = await api.restoreSnapshot(snapshotId, name, key);
+      setCheckpointWarnings(result.warnings);
+      setStorageNote(
+        result.storageEfficiency === "confirmed"
+          ? "Storage efficiency: confirmed (copy-on-write)."
+          : `Storage efficiency: ${result.storageEfficiency}. OpenBox does not claim copy-on-write.`,
+      );
+      await reloadReady();
+      setOperationsRefreshKey((value) => value + 1);
+    } catch (error: unknown) {
+      setCheckpointError(error instanceof Error ? error.message : "Restore failed");
+    } finally {
+      setCheckpointPending(false);
+    }
+  }
+
+  async function deleteCheckpoint(snapshotId: string) {
+    setCheckpointError("");
+    setCheckpointPending(true);
+    try {
+      await api.deleteSnapshot(snapshotId);
+      await reloadReady();
+      setOperationsRefreshKey((value) => value + 1);
+    } catch (error: unknown) {
+      setCheckpointError(error instanceof Error ? error.message : "Delete failed");
+    } finally {
+      setCheckpointPending(false);
+    }
+  }
+
+  async function cloneLive(name: string) {
+    setCheckpointError("");
+    setCheckpointWarnings([]);
+    setStorageNote("");
+    setCheckpointPending(true);
+    try {
+      const key = await ownerKey();
+      const result = await api.cloneInstance(instanceId, name, key);
+      setCheckpointWarnings(result.warnings);
+      setStorageNote(
+        result.storageEfficiency === "confirmed"
+          ? "Storage efficiency: confirmed (copy-on-write)."
+          : `Storage efficiency: ${result.storageEfficiency}. OpenBox does not claim copy-on-write.`,
+      );
+      await reloadReady();
+      setOperationsRefreshKey((value) => value + 1);
+    } catch (error: unknown) {
+      setCheckpointError(error instanceof Error ? error.message : "Clone failed");
+    } finally {
+      setCheckpointPending(false);
     }
   }
 
@@ -212,6 +309,7 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
             <InstanceOperationLogs
               api={api}
               instanceId={instance.id}
+              relatedTargets={snapshots.map((snapshot) => snapshot.id)}
               refreshKey={operationsRefreshKey}
             />
           ) : null}
@@ -325,6 +423,18 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
                   <dt>Image</dt>
                   <dd><code title={instance.imageId}>{shortenId(instance.imageId)}</code></dd>
                 </div>
+                {instance.cloneSourceInstanceId ? (
+                  <div>
+                    <dt>Clone source</dt>
+                    <dd><code title={instance.cloneSourceInstanceId}>{shortenId(instance.cloneSourceInstanceId)}</code></dd>
+                  </div>
+                ) : null}
+                {instance.cloneSourceSnapshotId ? (
+                  <div>
+                    <dt>Source checkpoint</dt>
+                    <dd><code title={instance.cloneSourceSnapshotId}>{shortenId(instance.cloneSourceSnapshotId)}</code></dd>
+                  </div>
+                ) : null}
                 <div className="detail-span">
                   <dt>ID</dt>
                   <dd><code title={instance.id}>{instance.id}</code></dd>
@@ -356,6 +466,22 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
               extendPending={extendPending}
               extendError={extendError}
               onExtend={(seconds) => { void extendTTL(seconds); }}
+            />
+          ) : null}
+
+          {instance ? (
+            <Checkpoints
+              snapshots={snapshots}
+              pending={checkpointPending}
+              error={checkpointError}
+              warnings={checkpointWarnings}
+              storageNote={storageNote}
+              cloneSourceInstanceId={instance.cloneSourceInstanceId}
+              cloneSourceSnapshotId={instance.cloneSourceSnapshotId}
+              onCreate={(name) => { void createCheckpoint(name); }}
+              onRestore={(snapshotId, name) => { void restoreCheckpoint(snapshotId, name); }}
+              onDelete={(snapshotId) => { void deleteCheckpoint(snapshotId); }}
+              onClone={(name) => { void cloneLive(name); }}
             />
           ) : null}
         </main>

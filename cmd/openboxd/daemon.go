@@ -47,14 +47,14 @@ import (
 )
 
 type daemonConfig struct {
-	DatabasePath, IncusSocket, Project, ContainerProfile, VMProfile, StoragePool string
-	APIAddress, APITLSCertificate, APITLSKey                                     string
+	DatabasePath, IncusSocket, Project, ContainerProfile, VMProfile, StoragePool     string
+	APIAddress, APITLSCertificate, APITLSKey                                         string
 	SSHAddress, SSHPublicHost, SSHHostKeyPath, SSHInstanceKeyPath, SSHKnownHostsPath string
 	SSHPublicPort                                                                    int
 	OwnerID, OwnerName                                                               string
-	TrustedProxyCIDRs                                                            []string
-	WorkerConcurrency                                                            int
-	OperationInterval, ReconcileInterval, MetricsInterval, Lease                 time.Duration
+	TrustedProxyCIDRs                                                                []string
+	WorkerConcurrency                                                                int
+	OperationInterval, ReconcileInterval, MetricsInterval, Lease                     time.Duration
 }
 
 func (c daemonConfig) validate() error {
@@ -103,13 +103,13 @@ type sshRunner interface{ ListenAndServe(context.Context) error }
 type metricsRunner interface{ RunOnce(context.Context) error }
 
 type daemonComponents struct {
-	operations   operationRunner
-	reconciler   reconciliationRunner
-	metrics      metricsRunner
-	sandboxPool  *sandboxpool.Manager
-	closer       daemonCloser
-	api          apiRunner
-	ssh          sshRunner
+	operations  operationRunner
+	reconciler  reconciliationRunner
+	metrics     metricsRunner
+	sandboxPool *sandboxpool.Manager
+	closer      daemonCloser
+	api         apiRunner
+	ssh         sshRunner
 }
 
 type componentFactory interface {
@@ -202,11 +202,17 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
-	snapshotService, err := snapshots.New(runtime, store, snapshots.Options{})
+	snapshotService, err := snapshots.New(runtime, store, snapshots.Options{
+		GatewayPublicKey: instancePublicKey,
+		NetworkPolicy:    networkPolicy,
+	})
 	if err != nil {
 		return fail(err)
 	}
-	cloneService, err := clones.New(runtime, store, clones.Options{})
+	cloneService, err := clones.New(runtime, store, clones.Options{
+		GatewayPublicKey: instancePublicKey,
+		NetworkPolicy:    networkPolicy,
+	})
 	if err != nil {
 		return fail(err)
 	}
@@ -309,12 +315,14 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 		TrustedProxyCIDRs: config.TrustedProxyCIDRs,
 		SSHPublicHost:     config.SSHPublicHost,
 		SSHPublicPort:     publicPort,
+		Snapshots:         snapshotService,
+		Clones:            cloneService,
 	})
 	if err != nil {
 		return fail(err)
 	}
 	api := &daemonAPIServer{server: httpapi.NewServer(config.APIAddress, rootHandler(handler)), certificate: config.APITLSCertificate, key: config.APITLSKey}
-	dispatcher, err := sshcommands.New(service, instancePublicKey, sshCopyAdapter{clones: cloneService})
+	dispatcher, err := sshcommands.New(service, instancePublicKey, nil)
 	if err != nil {
 		return fail(err)
 	}
@@ -505,14 +513,6 @@ func (a durableSSHAuditor) Record(ctx context.Context, event sshgateway.AuditEve
 type durableTerminalAuditor struct {
 	store         sshAuditWriter
 	fallbackOwner domain.OwnerID
-}
-
-type sshCopyAdapter struct {
-	clones *clones.Service
-}
-
-func (a sshCopyAdapter) SubmitCopy(ctx context.Context, owner domain.OwnerID, source, destination, key string) (clones.SubmitResult, error) {
-	return a.clones.SubmitCopy(ctx, clones.CopyInput{OwnerID: owner, Source: source, Destination: destination, IdempotencyKey: key})
 }
 
 func (a durableTerminalAuditor) Record(ctx context.Context, event httpapi.TerminalAuditEvent) error {

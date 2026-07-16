@@ -109,6 +109,27 @@ func TestNewSendsRequestAndIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestSnapshotCreateSendsCheckpointRequest(t *testing.T) {
+	server := commandServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/instances/box-1/snapshots" || r.Header.Get("Idempotency-Key") == "" {
+			t.Fatalf("request = %s %s key=%q", r.Method, r.URL.Path, r.Header.Get("Idempotency-Key"))
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["name"] != "ready" {
+			t.Fatalf("body=%v", body)
+		}
+		_, _ = fmt.Fprint(w, `{"snapshot":{"id":"snap-1","instance_id":"box-1","name":"ready","ready":false,"created_at":"2026-07-16T12:00:00Z"},"operation":{"id":"op-1","status":"pending"}}`)
+	})
+	defer server.Close()
+	stdout, stderr, code := runCLI(t, server.URL, "snapshot", "create", "box-1", "ready")
+	if code != 0 || !strings.Contains(stdout, "snap-1") || !strings.Contains(stdout, "op-1") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
 func TestNewSandboxSendsLifetimeAndEgressProfile(t *testing.T) {
 	server := commandServer(t, func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
