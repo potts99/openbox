@@ -35,16 +35,32 @@ Both must be cloud-init images (`variant=cloud`). Resolving the base sandbox ali
 
 Container sandbox images should already include `openssh-server`. Create-path cloud-init only injects SSH keys (no apt) so cold container creates stay fast. Golden / image-bake boots may still install OpenSSH once from upstream images.
 
+VM catalog aliases should point at a **baked** image (openssh-server installed, generic DHCP, **no Incus agent templates**). Stock `images:ubuntu/*/cloud` VM images include `create`/`copy` templates that make the guest agent rewrite cloud-init seed files and reboot on every new instance — that alone adds ~20–30s to cold starts. Create-path cloud-init still applies owner keys via the `cloud-init:config` disk after templates are stripped.
+
 Example (local Incus):
 
 ```sh
 # Container (if not already aliased)
-incus image alias create local:openbox:sandbox/ubuntu/24.04 <container-fingerprint>
+# Alias names contain colons — use the Incus API or quote carefully so `openbox:` is not parsed as a remote.
+incus query -X POST /1.0/images/aliases -d '{"name":"openbox:sandbox/ubuntu/24.04","target":"<container-fingerprint>"}'
 
-# VM — use a distinct alias name
-incus image alias create local:openbox:sandbox/ubuntu/24.04/vm <vm-fingerprint>
-incus image alias create local:openbox:general/ubuntu/24.04/vm <vm-fingerprint>
+# VM — distinct alias names, baked fingerprint (see below)
+incus query -X POST /1.0/images/aliases -d '{"name":"openbox:sandbox/ubuntu/24.04/vm","target":"<vm-fingerprint>"}'
+incus query -X POST /1.0/images/aliases -d '{"name":"openbox:general/ubuntu/24.04/vm","target":"<vm-fingerprint>"}'
 ```
+
+### Baking a fast VM image
+
+From an already-booted OpenBox pool golden (or any VM with openssh-server):
+
+1. Copy/start the source VM, wait for the agent.
+2. Install a **MAC-agnostic** netplan (`enp5s0` + `dhcp4: true` with no `match.macaddress`).
+3. `cloud-init clean --logs --seed`, clear `/etc/machine-id`, remove baked `authorized_keys`.
+4. Stop and `incus publish` the instance.
+5. `incus image export` → remove the `templates/` directory and the `templates:` block from `metadata.yaml` → re-import.
+6. Point `openbox:*/ubuntu/24.04/vm` aliases at the new fingerprint.
+
+Steady-state cold VM creates on Kindling dropped from ~65s (agent seed reboot + late SSH) to ~18s with this image.
 
 ## VM image requirements
 
