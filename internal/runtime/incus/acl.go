@@ -137,14 +137,43 @@ func (a *Adapter) EnsureRestrictedACL(ctx context.Context, name string, destinat
 	return a.ensure(ctx, "network ACL", "/1.0/network-acls/"+url.PathEscape(acl.Name), "/1.0/network-acls", nil, acl)
 }
 
+// PolicyApply carries resolved destinations for one instance apply.
+type PolicyApply struct {
+	Instance     domain.Instance
+	Mode         domain.EgressMode
+	Destinations []string
+	Resolution   domain.AllowlistResolution
+}
+
 // ApplyNetworkPolicy reconciles the instance NIC ACL stack after the runtime
-// starts and before OpenBox reports the instance ready.
+// starts and before OpenBox reports the instance ready. Restricted instances
+// always get a named per-instance ACL (possibly with an empty destination list).
 func (a *Adapter) ApplyNetworkPolicy(ctx context.Context, instance domain.Instance) error {
+	return a.ProgramNetworkPolicy(ctx, PolicyApply{Instance: instance, Mode: instance.EgressMode})
+}
+
+// ProgramNetworkPolicy ensures restricted ACLs, attaches the NIC stack, and verifies it.
+func (a *Adapter) ProgramNetworkPolicy(ctx context.Context, apply PolicyApply) error {
+	instance := apply.Instance
+	if apply.Mode != "" {
+		instance.EgressMode = apply.Mode
+	}
 	if instance.RuntimeRef == "" {
 		a.recordPolicyDenied(instance.ID)
 		return fmt.Errorf("network policy runtime ref is required")
 	}
-	if err := a.setInstanceNICACLs(ctx, instance.RuntimeRef, NICACLs(instance.EgressMode)); err != nil {
+	if apply.Resolution.State != "" {
+		a.SetAllowlistResolution(instance.ID, apply.Resolution)
+	}
+	expected := expectedNICACLs(instance)
+	if instance.EgressMode == domain.EgressRestricted {
+		name := networkpolicy.RestrictedACLName(string(instance.ID))
+		if err := a.EnsureRestrictedACL(ctx, name, apply.Destinations); err != nil {
+			a.recordPolicyDenied(instance.ID)
+			return err
+		}
+	}
+	if err := a.setInstanceNICACLs(ctx, instance.RuntimeRef, expected); err != nil {
 		a.recordPolicyDenied(instance.ID)
 		return err
 	}
@@ -166,7 +195,7 @@ func (a *Adapter) VerifyNetworkPolicy(ctx context.Context, instance domain.Insta
 	if err != nil {
 		return err
 	}
-	expected := NICACLs(instance.EgressMode)
+	expected := expectedNICACLs(instance)
 	if !sameStrings(actual, expected) {
 		return fmt.Errorf("NIC ACL mismatch: got %q, want %q", actual, expected)
 	}
@@ -178,18 +207,33 @@ func (a *Adapter) VerifyNetworkPolicy(ctx context.Context, instance domain.Insta
 func (a *Adapter) NetworkPolicyStatus(instance domain.Instance) domain.NetworkPolicyStatus {
 	a.policyMu.RLock()
 	deniedFlows := a.policyDenied[instance.ID]
+	resolution, ok := a.policyResolution[instance.ID]
 	a.policyMu.RUnlock()
+	if !ok {
+		resolution = domain.AllowlistResolution{
+			State: "idle", Pending: []string{}, Resolved: []string{}, Failed: []string{},
+		}
+	}
 	return domain.NetworkPolicyStatus{
-		EgressMode: instance.EgressMode,
-		ACLs:       NICACLs(instance.EgressMode),
-		Resolution: domain.AllowlistResolution{
-			State:    "idle",
-			Pending:  []string{},
-			Resolved: []string{},
-			Failed:   []string{},
-		},
+		EgressMode:  instance.EgressMode,
+		ACLs:        expectedNICACLs(instance),
+		Resolution:  resolution,
 		DeniedFlows: deniedFlows,
 	}
+}
+
+// SetAllowlistResolution stores hostname resolution state without resolved IPs.
+func (a *Adapter) SetAllowlistResolution(instanceID domain.InstanceID, resolution domain.AllowlistResolution) {
+	a.policyMu.Lock()
+	a.policyResolution[instanceID] = resolution
+	a.policyMu.Unlock()
+}
+
+func expectedNICACLs(instance domain.Instance) []string {
+	if instance.EgressMode == domain.EgressRestricted {
+		return NICACLs(domain.EgressRestricted, networkpolicy.RestrictedACLName(string(instance.ID)))
+	}
+	return NICACLs(instance.EgressMode)
 }
 
 func (a *Adapter) recordPolicyDenied(instanceID domain.InstanceID) {
