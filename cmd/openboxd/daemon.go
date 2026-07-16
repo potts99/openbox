@@ -160,7 +160,6 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 		if stats, statsErr := sandboxPool.Stats(ctx); statsErr == nil {
 			log.Printf("openboxd: sandbox pool golden=%v stopped=%d running=%d cow=%v", stats.GoldenReady, stats.Stopped, stats.Running, stats.CoWStorage)
 		}
-		go sandboxPool.Replenish(ctx)
 	}
 	if config.StoragePool == "" {
 		log.Printf("openboxd: skipping Incus managed bootstrap because --storage-pool is unset")

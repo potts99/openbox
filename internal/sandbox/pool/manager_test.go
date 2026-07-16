@@ -67,13 +67,15 @@ func TestAssignRenamesAndStartsSlot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	const ownerKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHRlc3Q="
 	if err := manager.Assign(context.Background(), pool.AssignRequest{
 		SlotRef: claim.Ref, TargetRef: "obx-user-instance",
-		OwnerPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHRlc3Q=",
+		OwnerPublicKey: ownerKey,
 		Metadata: map[string]string{
 			"user.openbox.managed": "true", "user.openbox.resource": "instance",
 			"user.openbox.instance_id": "instance-1", "user.openbox.owner_id": "owner-1",
 		},
+		WasRunning: claim.Running,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -82,6 +84,61 @@ func TestAssignRenamesAndStartsSlot(t *testing.T) {
 	}
 	if _, err := r.InspectInstance(context.Background(), claim.Ref); err == nil {
 		t.Fatal("pool ref still present after rename")
+	}
+	got, ok := r.WrittenFile("obx-user-instance", "/root/.ssh/authorized_keys")
+	if !ok {
+		t.Fatal("owner authorized_keys were not written for stopped pool slot")
+	}
+	if got != ownerKey+"\n" {
+		t.Fatalf("authorized_keys = %q, want %q", got, ownerKey+"\n")
+	}
+}
+
+func TestAssignWritesOwnerKeysForRunningSlot(t *testing.T) {
+	t.Parallel()
+	r := fake.New(runtimeapi.Capabilities{Architecture: "x86_64", Containers: true, StorageDrivers: []string{"zfs"}})
+	r.AddImage(runtimeapi.Image{Fingerprint: "sha256:sandbox", Aliases: []string{"openbox:sandbox/ubuntu/24.04"}, Architecture: "x86_64", Type: "container", CloudInit: true})
+	cfg := pool.DefaultConfig()
+	cfg.StoppedTarget = 0
+	cfg.RunningTarget = 1
+	manager, err := pool.New(r, pool.Options{Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.SetImageForTest("sha256:sandbox")
+	seedGolden(t, r)
+	seedPool(t, r, "obx-pool-running", pool.StateRunning)
+	if err := r.StartInstance(context.Background(), "obx-pool-running"); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := manager.Claim(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !claim.Running {
+		t.Fatalf("claim.Running = false, want true")
+	}
+	const ownerKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHVubmluZw=="
+	if err := manager.Assign(context.Background(), pool.AssignRequest{
+		SlotRef: claim.Ref, TargetRef: "obx-user-running",
+		OwnerPublicKey: ownerKey,
+		Metadata: map[string]string{
+			"user.openbox.managed": "true", "user.openbox.resource": "instance",
+			"user.openbox.instance_id": "instance-2", "user.openbox.owner_id": "owner-1",
+		},
+		WasRunning: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := r.WrittenFile("obx-user-running", "/root/.ssh/authorized_keys")
+	if !ok {
+		t.Fatal("owner authorized_keys were not written for running pool slot")
+	}
+	if got != ownerKey+"\n" {
+		t.Fatalf("authorized_keys = %q, want %q", got, ownerKey+"\n")
 	}
 }
 
