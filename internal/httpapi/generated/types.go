@@ -22,6 +22,12 @@ const (
 	AllowlistResolutionStateResolved AllowlistResolutionState = "resolved"
 )
 
+// Defines values for CreateEgressProfileRequestMode.
+const (
+	CreateEgressProfileRequestModeRestricted CreateEgressProfileRequestMode = "restricted"
+	CreateEgressProfileRequestModeStandard   CreateEgressProfileRequestMode = "standard"
+)
+
 // Defines values for CreateInstanceRequestKind.
 const (
 	CreateInstanceRequestKindSandbox CreateInstanceRequestKind = "sandbox"
@@ -43,6 +49,12 @@ const (
 // Defines values for CreatedTokenScopes.
 const (
 	CreatedTokenScopesOwner CreatedTokenScopes = "owner"
+)
+
+// Defines values for EgressProfileMode.
+const (
+	EgressProfileModeRestricted EgressProfileMode = "restricted"
+	EgressProfileModeStandard   EgressProfileMode = "standard"
 )
 
 // Defines values for HealthApiVersion.
@@ -104,8 +116,8 @@ const (
 
 // Defines values for NetworkPolicyStatusEgressMode.
 const (
-	Restricted NetworkPolicyStatusEgressMode = "restricted"
-	Standard   NetworkPolicyStatusEgressMode = "standard"
+	NetworkPolicyStatusEgressModeRestricted NetworkPolicyStatusEgressMode = "restricted"
+	NetworkPolicyStatusEgressModeStandard   NetworkPolicyStatusEgressMode = "standard"
 )
 
 // Defines values for OperationStatus.
@@ -135,6 +147,12 @@ const (
 	Owner TokenMetadataScopes = "owner"
 )
 
+// Defines values for UpdateEgressProfileRequestMode.
+const (
+	UpdateEgressProfileRequestModeRestricted UpdateEgressProfileRequestMode = "restricted"
+	UpdateEgressProfileRequestModeStandard   UpdateEgressProfileRequestMode = "standard"
+)
+
 // Defines values for APIVersion.
 const (
 	APIVersionV1 APIVersion = "v1"
@@ -150,6 +168,11 @@ type AllowlistResolution struct {
 
 // AllowlistResolutionState defines model for AllowlistResolution.State.
 type AllowlistResolutionState string
+
+// AttachEgressProfileRequest defines model for AttachEgressProfileRequest.
+type AttachEgressProfileRequest struct {
+	EgressProfileId string `json:"egress_profile_id"`
+}
 
 // BootstrapRequest defines model for BootstrapRequest.
 type BootstrapRequest struct {
@@ -178,12 +201,24 @@ type Capabilities struct {
 	VmReason        *string         `json:"vm_reason,omitempty"`
 }
 
+// CreateEgressProfileRequest defines model for CreateEgressProfileRequest.
+type CreateEgressProfileRequest struct {
+	AllowedDestinations *[]string                      `json:"allowed_destinations,omitempty"`
+	Mode                CreateEgressProfileRequestMode `json:"mode"`
+	Name                string                         `json:"name"`
+}
+
+// CreateEgressProfileRequestMode defines model for CreateEgressProfileRequest.Mode.
+type CreateEgressProfileRequestMode string
+
 // CreateInstanceRequest defines model for CreateInstanceRequest.
 type CreateInstanceRequest struct {
-	Image          string                     `json:"image"`
-	Kind           *CreateInstanceRequestKind `json:"kind,omitempty"`
-	Name           string                     `json:"name"`
-	OwnerPublicKey string                     `json:"owner_public_key"`
+	// EgressProfileId Optional system egress profile. Defaults by kind when omitted.
+	EgressProfileId *string                    `json:"egress_profile_id,omitempty"`
+	Image           string                     `json:"image"`
+	Kind            *CreateInstanceRequestKind `json:"kind,omitempty"`
+	Name            string                     `json:"name"`
+	OwnerPublicKey  string                     `json:"owner_public_key"`
 
 	// Packages Catalog package IDs to install after the instance is ready.
 	Packages           *[]string                                `json:"packages,omitempty"`
@@ -240,6 +275,27 @@ type CreatedToken struct {
 
 // CreatedTokenScopes defines model for CreatedToken.Scopes.
 type CreatedTokenScopes string
+
+// EgressApplyError defines model for EgressApplyError.
+type EgressApplyError struct {
+	InstanceId string `json:"instance_id"`
+	Message    string `json:"message"`
+}
+
+// EgressProfile defines model for EgressProfile.
+type EgressProfile struct {
+	AllowedDestinations   []string          `json:"allowed_destinations"`
+	AttachedInstanceCount *int              `json:"attached_instance_count,omitempty"`
+	CreatedAt             time.Time         `json:"created_at"`
+	Id                    string            `json:"id"`
+	Mode                  EgressProfileMode `json:"mode"`
+	Name                  string            `json:"name"`
+	System                bool              `json:"system"`
+	UpdatedAt             time.Time         `json:"updated_at"`
+}
+
+// EgressProfileMode defines model for EgressProfile.Mode.
+type EgressProfileMode string
 
 // ErrorEnvelope defines model for ErrorEnvelope.
 type ErrorEnvelope struct {
@@ -298,6 +354,7 @@ type Instance struct {
 	ActualIsolation InstanceActualIsolation `json:"actual_isolation"`
 	CreatedAt       time.Time               `json:"created_at"`
 	DesiredState    InstanceDesiredState    `json:"desired_state"`
+	EgressProfileId *string                 `json:"egress_profile_id,omitempty"`
 	ErrorCode       *string                 `json:"error_code,omitempty"`
 	ErrorRetryable  *bool                   `json:"error_retryable,omitempty"`
 	ErrorStage      *string                 `json:"error_stage,omitempty"`
@@ -343,6 +400,11 @@ type InstanceSoftware struct {
 
 // InstanceSoftwareStatus defines model for InstanceSoftware.Status.
 type InstanceSoftwareStatus string
+
+// ListEgressProfilesResponse defines model for ListEgressProfilesResponse.
+type ListEgressProfilesResponse struct {
+	Items []EgressProfile `json:"items"`
+}
 
 // ListImagesResponse defines model for ListImagesResponse.
 type ListImagesResponse struct {
@@ -514,6 +576,22 @@ type TokenMetadata struct {
 // TokenMetadataScopes defines model for TokenMetadata.Scopes.
 type TokenMetadataScopes string
 
+// UpdateEgressProfileRequest defines model for UpdateEgressProfileRequest.
+type UpdateEgressProfileRequest struct {
+	AllowedDestinations *[]string                       `json:"allowed_destinations,omitempty"`
+	Mode                *UpdateEgressProfileRequestMode `json:"mode,omitempty"`
+	Name                *string                         `json:"name,omitempty"`
+}
+
+// UpdateEgressProfileRequestMode defines model for UpdateEgressProfileRequest.Mode.
+type UpdateEgressProfileRequestMode string
+
+// UpdateEgressProfileResponse defines model for UpdateEgressProfileResponse.
+type UpdateEgressProfileResponse struct {
+	ApplyErrors *[]EgressApplyError `json:"apply_errors,omitempty"`
+	Profile     EgressProfile       `json:"profile"`
+}
+
 // UpdateRouteRequest defines model for UpdateRouteRequest.
 type UpdateRouteRequest struct {
 	Hostname   *string `json:"hostname,omitempty"`
@@ -653,6 +731,15 @@ type ExtendInstanceExpiryParams struct {
 	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
 }
 
+// AttachInstanceEgressProfileParams defines parameters for AttachInstanceEgressProfile.
+type AttachInstanceEgressProfileParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+}
+
 // InstallInstanceSoftwareParams defines parameters for InstallInstanceSoftware.
 type InstallInstanceSoftwareParams struct {
 	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
@@ -664,6 +751,45 @@ type InstallInstanceSoftwareParams struct {
 
 // ListSuggestedPortsParams defines parameters for ListSuggestedPorts.
 type ListSuggestedPortsParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// ListEgressProfilesParams defines parameters for ListEgressProfiles.
+type ListEgressProfilesParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// CreateEgressProfileParams defines parameters for CreateEgressProfile.
+type CreateEgressProfileParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// DeleteEgressProfileParams defines parameters for DeleteEgressProfile.
+type DeleteEgressProfileParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// GetEgressProfileParams defines parameters for GetEgressProfile.
+type GetEgressProfileParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// UpdateEgressProfileParams defines parameters for UpdateEgressProfile.
+type UpdateEgressProfileParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
 	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
 	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
 }
@@ -890,6 +1016,15 @@ type ExecInstanceJSONRequestBody = ExecInstanceRequest
 
 // ExtendInstanceExpiryJSONRequestBody defines body for ExtendInstanceExpiry for application/json ContentType.
 type ExtendInstanceExpiryJSONRequestBody = ExtendInstanceRequest
+
+// AttachInstanceEgressProfileJSONRequestBody defines body for AttachInstanceEgressProfile for application/json ContentType.
+type AttachInstanceEgressProfileJSONRequestBody = AttachEgressProfileRequest
+
+// CreateEgressProfileJSONRequestBody defines body for CreateEgressProfile for application/json ContentType.
+type CreateEgressProfileJSONRequestBody = CreateEgressProfileRequest
+
+// UpdateEgressProfileJSONRequestBody defines body for UpdateEgressProfile for application/json ContentType.
+type UpdateEgressProfileJSONRequestBody = UpdateEgressProfileRequest
 
 // ApplyPiProfileJSONRequestBody defines body for ApplyPiProfile for application/json ContentType.
 type ApplyPiProfileJSONRequestBody ApplyPiProfileJSONBody

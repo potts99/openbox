@@ -196,7 +196,6 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
-	_ = egressService
 	routeService, err := routes.New(store, routes.Options{})
 	if err != nil {
 		return fail(err)
@@ -295,6 +294,7 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 		TerminalAudit:     durableTerminalAuditor{store: store, fallbackOwner: domain.OwnerID(config.OwnerID)},
 		PiProfiles:        piProfiles,
 		PiApplier:         piApplier,
+		EgressProfiles:    egressService,
 		Metrics:           metricsHub,
 		TrustedProxyCIDRs: config.TrustedProxyCIDRs,
 	})

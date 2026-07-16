@@ -454,6 +454,88 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Instance" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/network/egress-profiles:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+    get:
+      operationId: listEgressProfiles
+      responses:
+        "200":
+          description: Host-global egress profiles.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListEgressProfilesResponse" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createEgressProfile
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CreateEgressProfileRequest" } } }
+      responses:
+        "201":
+          description: Egress profile created.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EgressProfile" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/network/egress-profiles/{profile_id}:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - name: profile_id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getEgressProfile
+      responses:
+        "200":
+          description: Egress profile details.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EgressProfile" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateEgressProfile
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/UpdateEgressProfileRequest" } } }
+      responses:
+        "200":
+          description: Profile updated; apply_errors lists instances that failed re-apply.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UpdateEgressProfileResponse" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteEgressProfile
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Profile deleted. }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/instances/{instance_id}/network/egress-profile:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { $ref: "#/components/parameters/InstanceID" }
+      - { $ref: "#/components/parameters/CSRFToken" }
+    put:
+      operationId: attachInstanceEgressProfile
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/AttachEgressProfileRequest" } } }
+      responses:
+        "200":
+          description: Instance attached to the profile with policy re-applied when running.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Instance" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/routes:
     parameters:
       - { $ref: "#/components/parameters/APIVersion" }
@@ -858,6 +940,66 @@ components:
         acls: { type: array, items: { type: string } }
         resolution: { $ref: "#/components/schemas/AllowlistResolution" }
         denied_flows: { type: integer, format: int64, minimum: 0 }
+    EgressProfile:
+      type: object
+      required: [id, name, mode, allowed_destinations, system, created_at, updated_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        mode: { type: string, enum: [standard, restricted] }
+        allowed_destinations:
+          type: array
+          items: { type: string }
+        system: { type: boolean }
+        attached_instance_count: { type: integer, minimum: 0 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ListEgressProfilesResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/EgressProfile" }
+    CreateEgressProfileRequest:
+      type: object
+      required: [name, mode]
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        mode: { type: string, enum: [standard, restricted] }
+        allowed_destinations:
+          type: array
+          items: { type: string }
+    UpdateEgressProfileRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        mode: { type: string, enum: [standard, restricted] }
+        allowed_destinations:
+          type: array
+          items: { type: string }
+    EgressApplyError:
+      type: object
+      required: [instance_id, message]
+      properties:
+        instance_id: { type: string }
+        message: { type: string }
+    UpdateEgressProfileResponse:
+      type: object
+      required: [profile]
+      properties:
+        profile: { $ref: "#/components/schemas/EgressProfile" }
+        apply_errors:
+          type: array
+          items: { $ref: "#/components/schemas/EgressApplyError" }
+    AttachEgressProfileRequest:
+      type: object
+      required: [egress_profile_id]
+      additionalProperties: false
+      properties:
+        egress_profile_id: { type: string }
     Instance:
       type: object
       required: [id, name, kind, image_id, requested_isolation, actual_isolation, desired_state, observed_state, resources, protected, network_policy, created_at, updated_at]
@@ -879,6 +1021,7 @@ components:
         error_code: { type: string }
         error_stage: { type: string }
         error_retryable: { type: boolean }
+        egress_profile_id: { type: string }
         network_policy: { $ref: "#/components/schemas/NetworkPolicyStatus" }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
@@ -963,6 +1106,9 @@ components:
         requested_isolation: { type: string, enum: [best_available, standard, strong], default: best_available }
         resources: { $ref: "#/components/schemas/Resources" }
         owner_public_key: { type: string }
+        egress_profile_id:
+          type: string
+          description: Optional system egress profile. Defaults by kind when omitted.
         packages:
           type: array
           items: { type: string }
