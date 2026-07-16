@@ -120,6 +120,9 @@ func TestCookieCSRFSessionRefreshAndBearerRevocation(t *testing.T) {
 	if inspected.OwnerID != session.OwnerID || len(rw.Result().Cookies()) != 0 {
 		t.Fatal("session inspection unexpectedly changed credentials")
 	}
+	if inspected.CSRFToken == "" {
+		t.Fatal("session refresh must return csrf for websocket clients")
+	}
 	logout := func(csrf string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodDelete, "/v1/session", nil)
 		r.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: cookie})
@@ -128,7 +131,7 @@ func TestCookieCSRFSessionRefreshAndBearerRevocation(t *testing.T) {
 		h.ServeHTTP(w, r)
 		return w
 	}
-	if w := logout(session.CSRFToken); w.Code != http.StatusNoContent {
+	if w := logout(inspected.CSRFToken); w.Code != http.StatusNoContent {
 		t.Fatalf("logout=%d body=%s", w.Code, w.Body.String())
 	}
 	if err := m.RevokeToken(context.Background(), "owner-local", bearer.ID); err != nil {
