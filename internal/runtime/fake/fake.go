@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/openbox-dev/openbox/internal/domain"
@@ -18,6 +19,7 @@ import (
 type Runtime struct {
 	mu                 sync.Mutex
 	capabilities       runtimeapi.Capabilities
+	storagePoolDriver  string
 	images             map[string]runtimeapi.Image
 	instances          map[string]runtimeapi.Instance
 	usage              map[string]runtimeapi.UsageSnapshot
@@ -38,17 +40,41 @@ type consoleSize struct {
 }
 
 func New(capabilities runtimeapi.Capabilities) *Runtime {
-	return &Runtime{
-		capabilities:   capabilities,
-		images:         map[string]runtimeapi.Image{},
-		instances:      map[string]runtimeapi.Instance{},
-		usage:          map[string]runtimeapi.UsageSnapshot{},
-		execResults:    map[string]runtimeapi.ExecResult{},
-		failures:       map[string][]error{},
-		writtenFiles:   map[string]map[string]string{},
-		consoleSizes:   map[string]consoleSize{},
-		activeConsoles: map[string]*consoleSession{},
+	driver := "dir"
+	for _, name := range capabilities.StorageDrivers {
+		if strings.EqualFold(strings.TrimSpace(name), "zfs") {
+			driver = "zfs"
+			break
+		}
 	}
+	return &Runtime{
+		capabilities:      capabilities,
+		storagePoolDriver: driver,
+		images:            map[string]runtimeapi.Image{},
+		instances:         map[string]runtimeapi.Instance{},
+		usage:             map[string]runtimeapi.UsageSnapshot{},
+		execResults:       map[string]runtimeapi.ExecResult{},
+		failures:          map[string][]error{},
+		writtenFiles:      map[string]map[string]string{},
+		consoleSizes:      map[string]consoleSize{},
+		activeConsoles:    map[string]*consoleSession{},
+	}
+}
+
+// SetStoragePoolDriver overrides the fake configured storage-pool driver.
+func (r *Runtime) SetStoragePoolDriver(driver string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.storagePoolDriver = driver
+}
+
+func (r *Runtime) StoragePoolDriver(ctx context.Context) (string, error) {
+	if err := r.begin(ctx, "storage_pool_driver"); err != nil {
+		return "", err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.storagePoolDriver, nil
 }
 
 func (r *Runtime) SetUsage(ref string, usage runtimeapi.UsageSnapshot) {

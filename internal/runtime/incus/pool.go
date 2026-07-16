@@ -43,9 +43,9 @@ func (a *Adapter) CreatePoolContainer(ctx context.Context, request sandboxpool.P
 		return runtimeapi.Instance{}, errors.New("pool role metadata is required")
 	}
 	if request.OwnerPublicKey != "" {
-		userData, err := cloudinit.OwnerKey(request.OwnerPublicKey)
+		userData, err := poolCloudInit(request)
 		if err != nil {
-			return runtimeapi.Instance{}, fmt.Errorf("build pool cloud-init data: %w", err)
+			return runtimeapi.Instance{}, err
 		}
 		config["cloud-init.user-data"] = userData
 	}
@@ -96,9 +96,9 @@ func (a *Adapter) createPoolVM(ctx context.Context, request sandboxpool.PoolCrea
 		return runtimeapi.Instance{}, errors.New("pool role metadata is required")
 	}
 	if request.OwnerPublicKey != "" {
-		userData, err := cloudinit.OwnerKey(request.OwnerPublicKey)
+		userData, err := poolCloudInit(request)
 		if err != nil {
-			return runtimeapi.Instance{}, fmt.Errorf("build pool VM cloud-init data: %w", err)
+			return runtimeapi.Instance{}, err
 		}
 		config["cloud-init.user-data"] = userData
 	}
@@ -166,6 +166,25 @@ func (a *Adapter) RenameInstance(ctx context.Context, ref, newRef string) error 
 		return fmt.Errorf("rename Incus instance: %w", err)
 	}
 	return nil
+}
+
+func poolCloudInit(request sandboxpool.PoolCreateRequest) (string, error) {
+	// Golden first boot may start from an upstream image without sshd; bake it
+	// once. Slot clones inherit the baked rootfs and use keys-only userdata.
+	build := request.Metadata[sandboxpool.RoleLabel] == sandboxpool.RoleGolden
+	var (
+		userData string
+		err      error
+	)
+	if build {
+		userData, err = cloudinit.OwnerKeyBootstrap(request.OwnerPublicKey)
+	} else {
+		userData, err = cloudinit.OwnerKey(request.OwnerPublicKey)
+	}
+	if err != nil {
+		return "", fmt.Errorf("build pool cloud-init data: %w", err)
+	}
+	return userData, nil
 }
 
 // EnableBootstrapEgress allows outbound internet during golden-template first

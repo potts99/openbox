@@ -20,7 +20,31 @@ The selected runtime type is stored as `actual_isolation` (`virtual_machine` or 
 
 ## Fast path
 
-On KVM + ZFS hosts, sandbox creates prefer a **VM warm pool** (golden VM snapshot + CoW clones). On hosts without KVM, the existing **system-container warm pool** remains the fast path. See the VM-first isolation design for details.
+On KVM + ZFS hosts, sandbox creates prefer a **VM warm pool** (golden VM snapshot + CoW clones). The configured Incus **storage pool must use the `zfs` driver** (not merely have ZFS available as a supported driver). On hosts without KVM, the existing **system-container warm pool** remains the fast path. See the VM-first isolation design for details.
+
+## Image aliases
+
+Incus image alias names are unique. Publish distinct aliases for each runtime type:
+
+| Workflow | Container alias | VM alias |
+|----------|-----------------|----------|
+| Sandbox | `openbox:sandbox/ubuntu/24.04` | `openbox:sandbox/ubuntu/24.04/vm` |
+| General / VPS | `openbox:general/ubuntu/24.04` | `openbox:general/ubuntu/24.04/vm` |
+
+Both must be cloud-init images (`variant=cloud`). Resolving the base sandbox alias for `virtual-machine` also accepts the `/vm` suffix.
+
+Container sandbox images should already include `openssh-server`. Create-path cloud-init only injects SSH keys (no apt) so cold container creates stay fast. Golden / image-bake boots may still install OpenSSH once from upstream images.
+
+Example (local Incus):
+
+```sh
+# Container (if not already aliased)
+incus image alias create local:openbox:sandbox/ubuntu/24.04 <container-fingerprint>
+
+# VM — use a distinct alias name
+incus image alias create local:openbox:sandbox/ubuntu/24.04/vm <vm-fingerprint>
+incus image alias create local:openbox:general/ubuntu/24.04/vm <vm-fingerprint>
+```
 
 ## VM image requirements
 

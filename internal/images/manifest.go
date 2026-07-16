@@ -84,19 +84,22 @@ func workflowName(kind domain.InstanceKind) (string, error) {
 
 // curatedManifests pins v0.1 workflow aliases. Fingerprints are not listed here
 // because Incus aliases move; create-time Resolve persists the digest.
+// Curated aliases: Incus image alias names are unique, so container and VM
+// images cannot share one alias. VM entries use a "/vm" suffix; ResolveForType
+// also accepts the base alias when a matching "/vm" image exists.
 var curatedManifests = []Manifest{
 	{Name: "general", Alias: "openbox:general/ubuntu/24.04", Architecture: "x86_64", Runtime: "container", CloudInit: true},
-	{Name: "general", Alias: "openbox:general/ubuntu/24.04", Architecture: "x86_64", Runtime: "virtual-machine", CloudInit: true},
+	{Name: "general", Alias: "openbox:general/ubuntu/24.04/vm", Architecture: "x86_64", Runtime: "virtual-machine", CloudInit: true},
 	{Name: "general", Alias: "openbox:general/ubuntu/24.04", Architecture: "aarch64", Runtime: "container", CloudInit: true},
-	{Name: "general", Alias: "openbox:general/ubuntu/24.04", Architecture: "aarch64", Runtime: "virtual-machine", CloudInit: true},
+	{Name: "general", Alias: "openbox:general/ubuntu/24.04/vm", Architecture: "aarch64", Runtime: "virtual-machine", CloudInit: true},
 
 	{Name: "sandbox", Alias: "openbox:sandbox/ubuntu/24.04", Architecture: "x86_64", Runtime: "container", CloudInit: true},
-	{Name: "sandbox", Alias: "openbox:sandbox/ubuntu/24.04", Architecture: "x86_64", Runtime: "virtual-machine", CloudInit: true},
+	{Name: "sandbox", Alias: "openbox:sandbox/ubuntu/24.04/vm", Architecture: "x86_64", Runtime: "virtual-machine", CloudInit: true},
 	{Name: "sandbox", Alias: "openbox:sandbox/ubuntu/24.04", Architecture: "aarch64", Runtime: "container", CloudInit: true},
-	{Name: "sandbox", Alias: "openbox:sandbox/ubuntu/24.04", Architecture: "aarch64", Runtime: "virtual-machine", CloudInit: true},
+	{Name: "sandbox", Alias: "openbox:sandbox/ubuntu/24.04/vm", Architecture: "aarch64", Runtime: "virtual-machine", CloudInit: true},
 
 	{Name: "devbox", Alias: "openbox:devbox/ubuntu/24.04", Architecture: "x86_64", Runtime: "container", CloudInit: true, IncludesPi: true},
-	{Name: "devbox", Alias: "openbox:devbox/ubuntu/24.04", Architecture: "x86_64", Runtime: "virtual-machine", CloudInit: true, IncludesPi: true},
+	{Name: "devbox", Alias: "openbox:devbox/ubuntu/24.04/vm", Architecture: "x86_64", Runtime: "virtual-machine", CloudInit: true, IncludesPi: true},
 	{Name: "devbox", Alias: "openbox:devbox/ubuntu/24.04", Architecture: "aarch64", Runtime: "container", CloudInit: true, IncludesPi: true},
-	{Name: "devbox", Alias: "openbox:devbox/ubuntu/24.04", Architecture: "aarch64", Runtime: "virtual-machine", CloudInit: true, IncludesPi: true},
+	{Name: "devbox", Alias: "openbox:devbox/ubuntu/24.04/vm", Architecture: "aarch64", Runtime: "virtual-machine", CloudInit: true, IncludesPi: true},
 }

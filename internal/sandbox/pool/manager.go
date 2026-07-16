@@ -139,11 +139,11 @@ func (m *Manager) Stats(ctx context.Context) (Stats, error) {
 	if _, err := m.runtime.InspectInstance(ctx, GoldenRef); err == nil {
 		stats.GoldenReady = true
 	}
-	caps, capErr := m.runtime.DiscoverCapabilities(ctx)
-	if capErr == nil {
-		stats.CoWStorage = storageIsZFS(caps.StorageDrivers)
+	driver, driverErr := m.runtime.StoragePoolDriver(ctx)
+	if driverErr == nil {
+		stats.CoWStorage = strings.EqualFold(strings.TrimSpace(driver), "zfs")
 	}
-	return stats, capErr
+	return stats, driverErr
 }
 
 // Bootstrap selects the host substrate, then ensures the golden template and snapshot exist.
@@ -160,12 +160,23 @@ func (m *Manager) Bootstrap(ctx context.Context) error {
 	if err := m.resolveSandboxImage(ctx); err != nil {
 		return err
 	}
-	_, err := m.runtime.InspectInstance(ctx, GoldenRef)
+	golden, err := m.runtime.InspectInstance(ctx, GoldenRef)
 	if errors.Is(err, runtimeapi.ErrNotFound) {
 		return m.buildGolden(ctx)
 	}
 	if err != nil {
 		return fmt.Errorf("inspect golden template: %w", err)
+	}
+	wantVM := m.Substrate() == SubstrateVM
+	if golden.IsVM != wantVM {
+		log.Printf("openboxd: sandbox pool golden substrate mismatch (have_vm=%v want_vm=%v); rebuilding", golden.IsVM, wantVM)
+		if err := m.resetPoolInstances(ctx); err != nil {
+			return err
+		}
+		if err := m.resolveSandboxImage(ctx); err != nil {
+			return err
+		}
+		return m.buildGolden(ctx)
 	}
 	if err := m.runtime.CreateSnapshot(ctx, GoldenRef, GoldenSnapshot); err != nil && !errors.Is(err, runtimeapi.ErrAlreadyExists) {
 		if strings.Contains(strings.ToLower(err.Error()), "already exists") {
@@ -344,14 +355,16 @@ func (m *Manager) Assign(ctx context.Context, request AssignRequest) error {
 	if err := m.runtime.StartInstance(ctx, ref); err != nil {
 		return fmt.Errorf("start assigned sandbox: %w", err)
 	}
-	// Authoritative key install for both stopped and running slots.
-	if err := m.writeOwnerKeys(ctx, ref, request.OwnerPublicKey); err != nil {
-		return err
-	}
 	readyCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
+	// SSH readiness (TCP :22) must succeed before agent-backed file writes on VMs.
 	if err := m.waitSSH(readyCtx, ref); err != nil {
 		return fmt.Errorf("wait for sandbox SSH: %w", err)
+	}
+	// Authoritative key install for both stopped and running slots. The Incus
+	// guest agent can lag SSH briefly after start, so retry agent-not-ready.
+	if err := m.writeOwnerKeys(readyCtx, ref, request.OwnerPublicKey); err != nil {
+		return err
 	}
 	m.forgetSlot(request.SlotRef)
 	return nil
@@ -367,12 +380,33 @@ func (m *Manager) writeOwnerKeys(ctx context.Context, ref, ownerPublicKey string
 		body.WriteString(line)
 		body.WriteByte('\n')
 	}
-	return m.runtime.WriteFile(ctx, runtimeapi.WriteFileRequest{
-		Ref:  ref,
-		Path: "/root/.ssh/authorized_keys",
-		Body: strings.NewReader(body.String()),
-		Mode: 0o600,
-	})
+	payload := body.String()
+	var last error
+	for {
+		err := m.runtime.WriteFile(ctx, runtimeapi.WriteFileRequest{
+			Ref:  ref,
+			Path: "/root/.ssh/authorized_keys",
+			Body: strings.NewReader(payload),
+			Mode: 0o600,
+		})
+		if err == nil {
+			return nil
+		}
+		last = err
+		if !strings.Contains(strings.ToLower(err.Error()), "agent") {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("write owner keys: %w (%v)", err, last)
+		}
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return fmt.Errorf("write owner keys: %w (%v)", ctx.Err(), last)
+		case <-timer.C:
+		}
+	}
 }
 
 // Discard deletes a failed pool slot and triggers replenishment asynchronously.
@@ -389,8 +423,12 @@ func (m *Manager) selectSubstrate(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("discover capabilities for pool substrate: %w", err)
 	}
-	if !storageIsZFS(caps.StorageDrivers) {
-		log.Printf("openboxd: sandbox pool disabled: ZFS storage required")
+	driver, err := m.runtime.StoragePoolDriver(ctx)
+	if err != nil {
+		return fmt.Errorf("inspect storage pool for pool substrate: %w", err)
+	}
+	if !strings.EqualFold(strings.TrimSpace(driver), "zfs") {
+		log.Printf("openboxd: sandbox pool disabled: configured storage pool driver is %q (ZFS required)", driver)
 		m.config.Enabled = false
 		return nil
 	}
@@ -639,11 +677,24 @@ func randomID() string {
 	return strings.ToLower(fmt.Sprintf("%016x", time.Now().UnixNano()))
 }
 
-func storageIsZFS(drivers []string) bool {
-	for _, driver := range drivers {
-		if strings.EqualFold(strings.TrimSpace(driver), "zfs") {
-			return true
+func (m *Manager) resetPoolInstances(ctx context.Context) error {
+	instances, err := m.runtime.ListInstances(ctx)
+	if err != nil {
+		return fmt.Errorf("list instances for pool reset: %w", err)
+	}
+	for _, instance := range instances {
+		role := instance.Metadata[RoleLabel]
+		if role != RoleSlot && role != RoleGolden && instance.Ref != GoldenRef {
+			continue
+		}
+		if err := m.runtime.DeleteInstance(ctx, instance.Ref); err != nil && !errors.Is(err, runtimeapi.ErrNotFound) {
+			return fmt.Errorf("delete pool instance %s: %w", instance.Ref, err)
 		}
 	}
-	return false
+	m.mu.Lock()
+	m.stopped = nil
+	m.running = nil
+	m.claiming = map[string]time.Time{}
+	m.mu.Unlock()
+	return nil
 }

@@ -149,7 +149,7 @@ func TestBootstrapSelectsVMSubstrateOnKVMAndZFS(t *testing.T) {
 		VMAvailability: runtimeapi.VMAvailable, StorageDrivers: []string{"zfs"},
 	})
 	r.AddImage(runtimeapi.Image{
-		Fingerprint: "sha256:sandbox-vm", Aliases: []string{"openbox:sandbox/ubuntu/24.04"},
+		Fingerprint: "sha256:sandbox-vm", Aliases: []string{"openbox:sandbox/ubuntu/24.04/vm", "openbox:sandbox/ubuntu/24.04"},
 		Architecture: "x86_64", Type: "virtual-machine", CloudInit: true,
 	})
 	manager, err := pool.New(r, pool.Options{Config: pool.DefaultConfig()})
@@ -214,6 +214,70 @@ func TestBootstrapDisablesPoolWithoutZFS(t *testing.T) {
 	}
 	if manager.Enabled() {
 		t.Fatal("pool should be disabled without ZFS")
+	}
+}
+
+func TestBootstrapDisablesPoolWhenConfiguredPoolIsNotZFS(t *testing.T) {
+	t.Parallel()
+	// Incus may advertise the zfs driver while the configured pool is still dir.
+	r := fake.New(runtimeapi.Capabilities{
+		Architecture: "x86_64", Containers: true, KVM: true, VirtualMachines: true,
+		VMAvailability: runtimeapi.VMAvailable, StorageDrivers: []string{"dir", "zfs"},
+	})
+	r.SetStoragePoolDriver("dir")
+	manager, err := pool.New(r, pool.Options{Config: pool.DefaultConfig()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Bootstrap(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if manager.Enabled() {
+		t.Fatal("pool should be disabled when configured storage pool is not ZFS")
+	}
+}
+
+func TestBootstrapRebuildsGoldenOnSubstrateMismatch(t *testing.T) {
+	t.Parallel()
+	r := fake.New(runtimeapi.Capabilities{
+		Architecture: "x86_64", Containers: true, KVM: true, VirtualMachines: true,
+		VMAvailability: runtimeapi.VMAvailable, StorageDrivers: []string{"zfs"},
+	})
+	r.AddImage(runtimeapi.Image{
+		Fingerprint: "sha256:sandbox-vm", Aliases: []string{"openbox:sandbox/ubuntu/24.04/vm"},
+		Architecture: "x86_64", Type: "virtual-machine", CloudInit: true,
+	})
+	r.AddImage(runtimeapi.Image{
+		Fingerprint: "sha256:old-container", Aliases: []string{"openbox:sandbox/ubuntu/24.04"},
+		Architecture: "x86_64", Type: "container", CloudInit: true,
+	})
+	// Stale container golden/slots from a previous substrate.
+	if _, err := r.CreatePoolContainer(context.Background(), pool.PoolCreateRequest{
+		Ref: pool.GoldenRef, Image: "sha256:old-container",
+		Metadata: map[string]string{pool.RoleLabel: pool.RoleGolden},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CreateSnapshot(context.Background(), pool.GoldenRef, pool.GoldenSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	seedPool(t, r, "obx-pool-stale", pool.StateStopped)
+	manager, err := pool.New(r, pool.Options{Config: pool.DefaultConfig()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Bootstrap(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	golden, err := r.InspectInstance(context.Background(), pool.GoldenRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !golden.IsVM {
+		t.Fatal("golden was not rebuilt as a VM")
+	}
+	if _, err := r.InspectInstance(context.Background(), "obx-pool-stale"); err == nil {
+		t.Fatal("stale container pool slot was not deleted")
 	}
 }
 

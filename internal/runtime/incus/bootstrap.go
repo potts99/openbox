@@ -60,6 +60,7 @@ type resource struct {
 	Name        string                       `json:"name"`
 	Description string                       `json:"description,omitempty"`
 	Type        string                       `json:"type,omitempty"`
+	Driver      string                       `json:"driver,omitempty"`
 	Config      map[string]string            `json:"config,omitempty"`
 	Devices     map[string]map[string]string `json:"devices,omitempty"`
 	Ingress     []networkACLRule             `json:"ingress,omitempty"`
@@ -131,14 +132,34 @@ func (a *Adapter) Bootstrap(ctx context.Context, config BootstrapConfig) error {
 }
 
 func (a *Adapter) requireStoragePool(ctx context.Context, name string) error {
-	var value resource
-	if err := a.request(ctx, http.MethodGet, "/1.0/storage-pools/"+url.PathEscape(name), nil, nil, &value); err != nil {
+	_, err := a.storagePoolDriver(ctx, name)
+	if err != nil {
 		if isNotFound(err) {
 			return fmt.Errorf("Incus storage pool %q does not exist; create it before bootstrapping OpenBox", name)
 		}
 		return err
 	}
 	return nil
+}
+
+// StoragePoolDriver returns the driver of the configured Incus storage pool.
+func (a *Adapter) StoragePoolDriver(ctx context.Context) (string, error) {
+	if a.storagePool == "" {
+		return "", fmt.Errorf("Incus storage pool is not configured")
+	}
+	return a.storagePoolDriver(ctx, a.storagePool)
+}
+
+func (a *Adapter) storagePoolDriver(ctx context.Context, name string) (string, error) {
+	var value resource
+	if err := a.request(ctx, http.MethodGet, "/1.0/storage-pools/"+url.PathEscape(name), nil, nil, &value); err != nil {
+		return "", err
+	}
+	driver := strings.TrimSpace(value.Driver)
+	if driver == "" {
+		return "", fmt.Errorf("Incus storage pool %q has an empty driver", name)
+	}
+	return driver, nil
 }
 
 func (a *Adapter) ensure(ctx context.Context, kind, itemPath, collectionPath string, query url.Values, desired resource) error {

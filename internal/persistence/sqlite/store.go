@@ -90,6 +90,15 @@ func (s *Store) migrate(ctx context.Context) (err error) {
 		return fmt.Errorf("migration connection: %w", err)
 	}
 	defer conn.Close()
+	// SQLite ignores PRAGMA foreign_keys inside an open transaction, so disable
+	// FKs on this connection before BEGIN. Rebuild migrations (e.g. 012) need to
+	// DROP/CREATE parent tables while child rows still exist.
+	if _, err = conn.ExecContext(ctx, "PRAGMA foreign_keys=OFF"); err != nil {
+		return fmt.Errorf("disable foreign keys for migrations: %w", err)
+	}
+	defer func() {
+		_, _ = conn.ExecContext(context.Background(), "PRAGMA foreign_keys=ON")
+	}()
 	if _, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
 		return fmt.Errorf("acquire migration lock: %w", err)
 	}
