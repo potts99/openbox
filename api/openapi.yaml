@@ -157,6 +157,20 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Capabilities" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/connection:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+    get:
+      operationId: getConnection
+      summary: Client connection endpoints for the authenticated owner
+      responses:
+        "200":
+          description: Connection advertisement for console/CLI clients.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Connection" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/images:
     parameters:
       - { $ref: "#/components/parameters/APIVersion" }
@@ -806,6 +820,20 @@ components:
         status: { type: string, enum: [ok] }
         api_version: { type: string, enum: [v1] }
         server_version: { type: string }
+    SSHEndpoint:
+      type: object
+      required: [host, port]
+      properties:
+        host: { type: string, minLength: 1 }
+        port: { type: integer, minimum: 1, maximum: 65535 }
+    Connection:
+      type: object
+      required: [ssh]
+      properties:
+        ssh:
+          nullable: true
+          allOf:
+            - { $ref: "#/components/schemas/SSHEndpoint" }
     Capabilities:
       type: object
       required: [architecture, incus_version, namespaces, cgroups, storage_drivers, network_tools, kvm, containers, virtual_machines, vm_availability]

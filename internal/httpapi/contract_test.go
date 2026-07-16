@@ -36,6 +36,7 @@ func TestOpenAPIContainsEveryHTTPRoute(t *testing.T) {
 	for _, path := range []string{
 		"/v1/health:",
 		"/v1/capabilities:",
+		"/v1/connection:",
 		"/v1/images:",
 		"/v1/instances:",
 		"/v1/instances/{instance_id}:",
