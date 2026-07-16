@@ -11,6 +11,10 @@ import (
 // Runtime is the narrow Incus surface the warm pool needs.
 type Runtime interface {
 	DiscoverCapabilities(context.Context) (runtimeapi.Capabilities, error)
+	// StoragePoolDriver returns the driver of the configured Incus storage pool
+	// (for example "zfs" or "dir"). Warm-pool CoW requires the pool itself to
+	// be ZFS, not merely that the Incus daemon supports the zfs driver.
+	StoragePoolDriver(context.Context) (string, error)
 	ListInstances(context.Context) ([]runtimeapi.Instance, error)
 	ListImages(context.Context) ([]runtimeapi.Image, error)
 	InspectInstance(context.Context, string) (runtimeapi.Instance, error)

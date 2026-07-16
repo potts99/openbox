@@ -65,3 +65,31 @@ func TestResolveRejectsMissingAndAmbiguousAliases(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestResolveForTypeFallsBackToVMSuffix(t *testing.T) {
+	available := []runtimeapi.Image{
+		{Fingerprint: "sha256:container", Aliases: []string{"openbox:sandbox/ubuntu/24.04"}, Type: "container"},
+		{Fingerprint: "sha256:vm", Aliases: []string{"openbox:sandbox/ubuntu/24.04/vm"}, Type: "virtual-machine"},
+	}
+	resolved, err := images.ResolveForType("openbox:sandbox/ubuntu/24.04", "virtual-machine", available)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Fingerprint != "sha256:vm" {
+		t.Fatalf("fingerprint=%q", resolved.Fingerprint)
+	}
+}
+
+func TestResolveForTypeReportsTypeMismatch(t *testing.T) {
+	available := []runtimeapi.Image{
+		{Fingerprint: "sha256:container", Aliases: []string{"openbox:sandbox/ubuntu/24.04"}, Type: "container"},
+	}
+	var mismatch *images.TypeMismatchError
+	_, err := images.ResolveForType("openbox:sandbox/ubuntu/24.04", "virtual-machine", available)
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("got %v", err)
+	}
+	if mismatch.HaveType != "container" || mismatch.WantType != "virtual-machine" {
+		t.Fatalf("mismatch=%+v", mismatch)
+	}
+}

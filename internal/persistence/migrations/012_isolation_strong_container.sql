@@ -1,7 +1,7 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- Replace requested_isolation values best_available|standard|strong with strong|container.
-
-PRAGMA foreign_keys=OFF;
+-- Requires the migrator to disable foreign_keys on the connection before BEGIN
+-- so DROP TABLE instances can succeed while child rows (e.g. instance_software) exist.
 
 CREATE TABLE instances_new (
     id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES owners(id),
@@ -56,5 +56,3 @@ DROP TABLE instances;
 ALTER TABLE instances_new RENAME TO instances;
 
 CREATE INDEX idx_instances_owner ON instances(owner_id);
-
-PRAGMA foreign_keys=ON;

@@ -38,6 +38,10 @@ type InstanceRuntime interface {
 	StartInstance(context.Context, string) error
 	WaitInstanceReady(context.Context, runtimeapi.ReadinessRequest) error
 	WaitSSHReady(context.Context, string) error
+	// EnableBootstrapEgress temporarily allows standard outbound access so
+	// first-boot cloud-init can install packages (openssh-server) before the
+	// instance's durable network policy is applied.
+	EnableBootstrapEgress(context.Context, string) error
 	StopInstance(context.Context, string) error
 	Exec(context.Context, runtimeapi.ExecRequest) (runtimeapi.ExecResult, error)
 	WriteFile(context.Context, runtimeapi.WriteFileRequest) error
@@ -722,9 +726,12 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 	if err := s.repo.UpdateOperationStage(ctx, input.OwnerID, operation.ID, startedStage, 60, s.now()); err != nil {
 		return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, err)
 	}
-	if err := s.applyNetworkPolicy(ctx, instance); err != nil {
+	// Profile NICs start on default-deny. Open standard egress for first boot so
+	// cloud-init can apt-install openssh-server, then wait for readiness, then
+	// apply the durable (often restricted) policy.
+	if err := s.runtime.EnableBootstrapEgress(ctx, runtimeRef); err != nil {
 		err = errors.Join(err, s.markError(ctx, instance))
-		return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, fmt.Errorf("apply network policy: %w", err))
+		return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, fmt.Errorf("enable bootstrap egress: %w", err))
 	}
 	if actualIsolation == domain.IsolationVM {
 		err := s.waitForVMReady(ctx, instance, operation)
@@ -738,6 +745,10 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 			err = errors.Join(err, s.markError(ctx, instance))
 			return domain.Instance{}, fmt.Errorf("wait for sandbox SSH readiness: %w", err)
 		}
+	}
+	if err := s.applyNetworkPolicy(ctx, instance); err != nil {
+		err = errors.Join(err, s.markError(ctx, instance))
+		return domain.Instance{}, s.withPartialVMCleanup(instance, createdByOperation, fmt.Errorf("apply network policy: %w", err))
 	}
 	result, err := s.Refresh(ctx, input.OwnerID, instance.ID)
 	if err != nil {
@@ -856,9 +867,9 @@ func (s *Service) recoverCreate(ctx context.Context, operation domain.Operation)
 	if err := s.repo.UpdateOperationStage(ctx, instance.OwnerID, operation.ID, startedStage, 60, s.now()); err != nil {
 		return err
 	}
-	if err := s.applyNetworkPolicy(ctx, instance); err != nil {
+	if err := s.runtime.EnableBootstrapEgress(ctx, instance.RuntimeRef); err != nil {
 		err = errors.Join(err, s.markError(ctx, instance))
-		return fmt.Errorf("apply network policy: %w", err)
+		return fmt.Errorf("enable bootstrap egress: %w", err)
 	}
 	if instance.ActualIsolation == domain.IsolationVM {
 		if err := s.waitForVMReady(ctx, instance, operation); err != nil {
@@ -869,6 +880,10 @@ func (s *Service) recoverCreate(ctx context.Context, operation domain.Operation)
 		if err := s.waitForSandboxSSH(ctx, instance, operation); err != nil {
 			return fmt.Errorf("wait for sandbox SSH readiness: %w", err)
 		}
+	}
+	if err := s.applyNetworkPolicy(ctx, instance); err != nil {
+		err = errors.Join(err, s.markError(ctx, instance))
+		return fmt.Errorf("apply network policy: %w", err)
 	}
 	if _, err := s.Refresh(ctx, instance.OwnerID, instance.ID); err != nil {
 		return err

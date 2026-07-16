@@ -723,7 +723,7 @@ type bootstrapAPI struct {
 
 func newBootstrapAPI() *bootstrapAPI {
 	return &bootstrapAPI{resources: map[string]resource{
-		"storage/default":   {Name: "default", Type: "dir"},
+		"storage/default":   {Name: "default", Driver: "dir"},
 		"project/unrelated": {Name: "unrelated", Config: map[string]string{"user.owner": "someone-else"}},
 	}}
 }
