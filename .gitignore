@@ -1,5 +1,5 @@
 # The approved product specification is maintained outside Git by request.
-/docs/specs/
+/docs
 
 # Local build and dependency outputs.
 /openbox
