@@ -17,8 +17,8 @@ CREATE TABLE egress_profiles (
 INSERT INTO egress_profiles (
     id, name, mode, allowed_destinations_json, dns_policy, system, created_at, updated_at
 ) VALUES
-    ('egress-standard', 'standard', 'standard', '[]', 'host_resolve', 1, datetime('now'), datetime('now')),
-    ('egress-restricted', 'restricted', 'restricted', '[]', 'host_resolve', 1, datetime('now'), datetime('now'));
+    ('egress-standard', 'standard', 'standard', '[]', 'host_resolve', 1, '1970-01-01T00:00:00Z', '1970-01-01T00:00:00Z'),
+    ('egress-restricted', 'restricted', 'restricted', '[]', 'host_resolve', 1, '1970-01-01T00:00:00Z', '1970-01-01T00:00:00Z');
 
 ALTER TABLE instances ADD COLUMN egress_profile_id TEXT NOT NULL DEFAULT '';
 

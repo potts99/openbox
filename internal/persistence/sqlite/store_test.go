@@ -31,7 +31,7 @@ func TestOpenMigratesOnDiskAndReopens(t *testing.T) {
 		t.Fatal(err)
 	}
 	if count != 11 {
-		t.Fatalf("migration count=%d, want 10", count)
+		t.Fatalf("migration count=%d, want 11", count)
 	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
@@ -45,7 +45,7 @@ func TestOpenMigratesOnDiskAndReopens(t *testing.T) {
 		t.Fatal(err)
 	}
 	if count != 11 {
-		t.Fatalf("migration count after reopen=%d, want 10", count)
+		t.Fatalf("migration count after reopen=%d, want 11", count)
 	}
 }
 

@@ -93,6 +93,9 @@ func (s *Store) CreateInstance(ctx context.Context, instance domain.Instance, op
 			instance.EgressMode = domain.EgressStandard
 		}
 	}
+	if instance.EgressProfileID == "" {
+		instance.EgressProfileID = domain.DefaultEgressProfileID(instance.Kind)
+	}
 	release, err := s.acquireWrite(ctx)
 	if err != nil {
 		return domain.Operation{}, false, err
@@ -118,15 +121,15 @@ func (s *Store) CreateInstance(ctx context.Context, instance domain.Instance, op
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO instances(
 		id,owner_id,name,kind,image_id,requested_isolation,actual_isolation,desired_state,observed_state,
-		vcpus,memory_bytes,disk_bytes,expires_at,protected,runtime_ref,egress_mode,
+		vcpus,memory_bytes,disk_bytes,expires_at,protected,runtime_ref,egress_mode,egress_profile_id,
 		clone_source_instance_id,clone_source_snapshot_id,clone_source_image_id,
 		error_code,error_stage,error_retryable,created_at,updated_at,deleted_at
-	) VALUES(?,?,?,?,NULLIF(?,''),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	) VALUES(?,?,?,?,NULLIF(?,''),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		instance.ID, instance.OwnerID, instance.Name, instance.Kind, instance.ImageID,
 		instance.RequestedIsolation, instance.ActualIsolation, instance.DesiredState, instance.ObservedState,
 		instance.Resources.VCPUs, instance.Resources.MemoryBytes, instance.Resources.DiskBytes,
 		nullableTime(instance.ExpiresAt), instance.Protected, instance.RuntimeRef,
-		instance.EgressMode,
+		instance.EgressMode, instance.EgressProfileID,
 		instance.CloneSourceInstanceID, instance.CloneSourceSnapshotID, instance.CloneSourceImageID,
 		instance.ErrorCode, instance.ErrorStage, instance.ErrorRetryable, formatTime(instance.CreatedAt), formatTime(instance.UpdatedAt), nullableTime(instance.DeletedAt))
 	if err != nil {
@@ -140,7 +143,7 @@ func (s *Store) CreateInstance(ctx context.Context, instance domain.Instance, op
 
 const instanceColumns = `id,owner_id,name,kind,COALESCE(image_id,''),requested_isolation,actual_isolation,
 		desired_state,observed_state,vcpus,memory_bytes,disk_bytes,expires_at,protected,runtime_ref,
-		egress_mode,
+		egress_mode,COALESCE(egress_profile_id,''),
 		COALESCE(clone_source_instance_id,''),COALESCE(clone_source_snapshot_id,''),COALESCE(clone_source_image_id,''),
 		error_code,error_stage,error_retryable,created_at,updated_at,deleted_at`
 
@@ -599,7 +602,7 @@ func scanInstance(row rowScanner) (domain.Instance, error) {
 	var created, updated string
 	err := row.Scan(&i.ID, &i.OwnerID, &i.Name, &i.Kind, &i.ImageID, &i.RequestedIsolation, &i.ActualIsolation,
 		&i.DesiredState, &i.ObservedState, &i.Resources.VCPUs, &i.Resources.MemoryBytes, &i.Resources.DiskBytes, &expires,
-		&i.Protected, &i.RuntimeRef, &i.EgressMode, &i.CloneSourceInstanceID, &i.CloneSourceSnapshotID, &i.CloneSourceImageID,
+		&i.Protected, &i.RuntimeRef, &i.EgressMode, &i.EgressProfileID, &i.CloneSourceInstanceID, &i.CloneSourceSnapshotID, &i.CloneSourceImageID,
 		&i.ErrorCode, &i.ErrorStage, &i.ErrorRetryable, &created, &updated, &deleted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Instance{}, &domain.Error{Code: domain.CodeNotFound, Field: "instance"}
