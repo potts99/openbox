@@ -110,6 +110,23 @@ func Install(ctx context.Context, guest Guest, runtimeRef string, pkg Package, o
 		return run("verify", pkg.Verify)
 	}
 
+	if pkg.ID == "pi" {
+		if opts.Architecture == "" {
+			return fmt.Errorf("software install %q: architecture is required", pkg.ID)
+		}
+		debArch, err := debArchitecture(opts.Architecture)
+		if err != nil {
+			return fmt.Errorf("software install %q: %w", pkg.ID, err)
+		}
+		nodeVer, err := nodeJSVersion(pkg)
+		if err != nil {
+			return err
+		}
+		if err := installNodeJS(ctx, guest, runtimeRef, debArch, nodeVer); err != nil {
+			return err
+		}
+	}
+
 	if err := run("install", pkg.Install); err != nil {
 		return err
 	}

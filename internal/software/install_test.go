@@ -70,17 +70,27 @@ func TestInstallRunsPinsThenVerify(t *testing.T) {
 		t.Fatal("missing pi")
 	}
 	execer := &recordingGuest{}
-	if err := software.Install(context.Background(), execer, "ref-1", pkg, software.InstallOptions{}); err != nil {
+	if err := software.Install(context.Background(), execer, "ref-1", pkg, software.InstallOptions{Architecture: "x86_64"}); err != nil {
 		t.Fatal(err)
 	}
-	if len(execer.commands) != len(pkg.Install)+len(pkg.Verify) {
-		t.Fatalf("commands=%d want %d", len(execer.commands), len(pkg.Install)+len(pkg.Verify))
+	wantNode := "apt-get install -y nodejs=22.23.1-1nodesource1"
+	foundNode := false
+	for _, cmd := range execer.commands {
+		if strings.Join(cmd, " ") == wantNode {
+			foundNode = true
+			break
+		}
 	}
-	last := execer.commands[len(execer.commands)-1]
-	if strings.Join(last, " ") != "tmux -V" {
-		t.Fatalf("last command=%v", last)
+	if !foundNode {
+		t.Fatalf("missing node install command; commands=%v", execer.commands)
 	}
-	firstVerify := execer.commands[len(pkg.Install)]
+	if len(execer.writes) < 2 {
+		t.Fatalf("expected nodesource repo writes; writes=%v", execer.writes)
+	}
+	if strings.Join(execer.commands[len(execer.commands)-1], " ") != "tmux -V" {
+		t.Fatalf("last command=%v", execer.commands[len(execer.commands)-1])
+	}
+	firstVerify := execer.commands[len(execer.commands)-2]
 	if strings.Join(firstVerify, " ") != "pi --version" {
 		t.Fatalf("first verify=%v", firstVerify)
 	}
@@ -89,8 +99,8 @@ func TestInstallRunsPinsThenVerify(t *testing.T) {
 func TestInstallFailsOnVerify(t *testing.T) {
 	t.Parallel()
 	pkg := software.Package{
-		ID:      "pi",
-		Name:    "Pi",
+		ID:      "test-pkg",
+		Name:    "Test",
 		Install: [][]string{{"true"}},
 		Verify:  [][]string{{"pi", "--version"}},
 	}
@@ -111,8 +121,8 @@ func TestInstallFailsOnVerify(t *testing.T) {
 func TestInstallFailsOnInstallStep(t *testing.T) {
 	t.Parallel()
 	pkg := software.Package{
-		ID:      "pi",
-		Name:    "Pi",
+		ID:      "test-pkg",
+		Name:    "Test",
 		Install: [][]string{{"apt-get", "update"}},
 		Verify:  [][]string{{"true"}},
 	}

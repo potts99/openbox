@@ -175,6 +175,16 @@ func (s *Store) RotateSession(ctx context.Context, oldID, newID []byte, owner do
 	}
 	return tx.Commit()
 }
+func (s *Store) UpdateSessionCSRF(ctx context.Context, id, csrf []byte, now time.Time) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE auth_sessions SET csrf_hash=? WHERE id_hash=? AND revoked_at IS NULL AND expires_at>?`, csrf, id, formatTime(now))
+	if err != nil {
+		return mapWriteError(err)
+	}
+	if n, _ := result.RowsAffected(); n != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
 func (s *Store) Session(ctx context.Context, id []byte, now time.Time) (domain.OwnerID, []byte, time.Time, error) {
 	var o domain.OwnerID
 	var csrf []byte

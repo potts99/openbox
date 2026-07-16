@@ -5,7 +5,8 @@ Curated guest packages live in `internal/software/`.
 | Path | Role |
 |---|---|
 | `catalog.go` | Package/pin types, `DefaultCatalog`, validation |
-| `pi.go` | Pi + tmux pins from the Devbox definition |
+| `pi.go` | Pi + tmux + Node 22 pins from the Devbox definition |
+| `node22.go` | NodeSource Node 22 apt repo setup via WriteFile |
 | `herdr.go` | Herdr github-release pins (version + per-arch sha256) |
 | `release.go` | Release URL, fetch, digest verify |
 | `install.go` | Guest Exec recipes; host-fetch + WriteFile for github-release |
@@ -18,6 +19,16 @@ Curated guest packages live in `internal/software/`.
    hex, no `sha256:` prefix).
 3. Keep `Verify` as `herdr --version`.
 4. Never add `curl`/`wget`/raw `https` argv steps; release install is host-side.
+
+## Node.js (Pi package)
+
+The `pi` catalog package pins **Node 22** (`22.23.1-1nodesource1` from
+NodeSource). OpenBox writes the apt keyring and `sources.list.d` entry via
+`WriteFile`, then installs the pinned `nodejs` package before `npm install -g`
+for Pi. Guest recipes never run `curl|sh`.
+
+Bump Node by updating `images/devbox/devbox.json` (`nodejs` apt pin) and
+re-testing `pi --version` on both `x86_64` and `aarch64`.
 
 ## Guest writes (default)
 

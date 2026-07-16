@@ -4,6 +4,11 @@
   "packages": [
     {
       "manager": "apt",
+      "name": "nodejs",
+      "version": "22.23.1-1nodesource1"
+    },
+    {
+      "manager": "apt",
       "name": "tmux",
       "version": "3.4-1ubuntu0.1"
     },

@@ -11,7 +11,7 @@ catalog packages.
 
 | ID | What it installs | How to run |
 |---|---|---|
-| `pi` | Pi coding agent + tmux (exact apt/npm pins) | `pi` / `tmux` |
+| `pi` | Pi coding agent + tmux (Node 22 + exact apt/npm pins) | `pi` / `tmux` |
 | `herdr` | Herdr agent multiplexer (GitHub release binary) | `herdr` |
 
 Both may be installed on the same instance. With Pi present, you can optionally
