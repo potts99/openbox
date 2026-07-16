@@ -939,7 +939,7 @@ func TestSandboxCreateAppliesKindDefaults(t *testing.T) {
 	if created.ImageID != "sha256:sandbox" {
 		t.Fatalf("image_id=%q", created.ImageID)
 	}
-	if created.RequestedIsolation != domain.IsolationBestAvailable {
+	if created.RequestedIsolation != domain.IsolationStandard {
 		t.Fatalf("requested_isolation=%q", created.RequestedIsolation)
 	}
 	want := domain.Resources{VCPUs: 2, MemoryBytes: 2 << 30, DiskBytes: 10 << 30}

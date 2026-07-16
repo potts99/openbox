@@ -65,7 +65,11 @@ func ApplyDefaults(in CreateDefaults) (AppliedDefaults, error) {
 		out.Image = manifest.Alias
 	}
 	if out.RequestedIsolation == "" {
-		out.RequestedIsolation = domain.IsolationBestAvailable
+		if in.Kind == domain.KindSandbox {
+			out.RequestedIsolation = domain.IsolationStandard
+		} else {
+			out.RequestedIsolation = domain.IsolationBestAvailable
+		}
 	}
 	if out.Resources == (domain.Resources{}) {
 		out.Resources = DefaultResources()

@@ -36,6 +36,7 @@ import (
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 	"github.com/openbox-dev/openbox/internal/runtime/incus"
 	"github.com/openbox-dev/openbox/internal/sandbox"
+	sandboxpool "github.com/openbox-dev/openbox/internal/sandbox/pool"
 	"github.com/openbox-dev/openbox/internal/snapshots"
 	"github.com/openbox-dev/openbox/internal/sshgateway"
 	sshproxy "github.com/openbox-dev/openbox/internal/sshgateway/proxy"
@@ -98,12 +99,13 @@ type sshRunner interface{ ListenAndServe(context.Context) error }
 type metricsRunner interface{ RunOnce(context.Context) error }
 
 type daemonComponents struct {
-	operations operationRunner
-	reconciler reconciliationRunner
-	metrics    metricsRunner
-	closer     daemonCloser
-	api        apiRunner
-	ssh        sshRunner
+	operations   operationRunner
+	reconciler   reconciliationRunner
+	metrics      metricsRunner
+	sandboxPool  *sandboxpool.Manager
+	closer       daemonCloser
+	api          apiRunner
+	ssh          sshRunner
 }
 
 type componentFactory interface {
@@ -140,6 +142,26 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
+	poolConfig := sandboxpool.DefaultConfig()
+	if config.StoragePool == "" {
+		poolConfig.Enabled = false
+	}
+	sandboxPool, err := sandboxpool.New(runtime, sandboxpool.Options{Config: poolConfig})
+	if err != nil {
+		return fail(fmt.Errorf("create sandbox pool: %w", err))
+	}
+	if poolConfig.Enabled {
+		if err := sandboxPool.Bootstrap(ctx); err != nil {
+			log.Printf("openboxd: sandbox pool bootstrap: %v", err)
+		}
+		if err := sandboxPool.Reconcile(ctx); err != nil {
+			log.Printf("openboxd: sandbox pool reconcile: %v", err)
+		}
+		if stats, statsErr := sandboxPool.Stats(ctx); statsErr == nil {
+			log.Printf("openboxd: sandbox pool golden=%v stopped=%d running=%d cow=%v", stats.GoldenReady, stats.Stopped, stats.Running, stats.CoWStorage)
+		}
+		go sandboxPool.Replenish(ctx)
+	}
 	if config.StoragePool == "" {
 		log.Printf("openboxd: skipping Incus managed bootstrap because --storage-pool is unset")
 	} else if err := runtime.Bootstrap(ctx, incus.BootstrapConfig{
@@ -154,7 +176,7 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	}
 	instancePublicKey := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(instanceSigner.PublicKey())))
 	mode := &operations.Mode{}
-	service, err := instances.New(runtime, store, instances.Options{Mode: mode, InstanceGatewayPublicKey: instancePublicKey, NetworkPolicy: runtime})
+	service, err := instances.New(runtime, store, instances.Options{Mode: mode, InstanceGatewayPublicKey: instancePublicKey, NetworkPolicy: runtime, SandboxPool: sandboxPool})
 	if err != nil {
 		return fail(err)
 	}
@@ -280,12 +302,13 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 		return fail(err)
 	}
 	return daemonComponents{
-		operations: worker,
-		reconciler: expiryThenReconcile{expiry: expiry, inner: reconciler},
-		metrics:    metricsSampler,
-		closer:     store,
-		api:        api,
-		ssh:        sshServer,
+		operations:  worker,
+		reconciler:  expiryThenReconcile{expiry: expiry, inner: reconciler},
+		metrics:     metricsSampler,
+		sandboxPool: sandboxPool,
+		closer:      store,
+		api:         api,
+		ssh:         sshServer,
 	}, nil
 }
 
@@ -367,6 +390,9 @@ func runDaemon(ctx context.Context, config daemonConfig, factory componentFactor
 	if components.metrics != nil {
 		periodicCount++
 	}
+	if components.sandboxPool != nil && components.sandboxPool.Enabled() {
+		periodicCount++
+	}
 	wg.Add(periodicCount)
 	go periodic(runCtx, &wg, config.OperationInterval, false, "operation recovery", func(ctx context.Context) error {
 		return components.operations.RunOnce(ctx)
@@ -378,6 +404,12 @@ func runDaemon(ctx context.Context, config daemonConfig, factory componentFactor
 	if components.metrics != nil {
 		go periodic(runCtx, &wg, config.MetricsInterval, true, "instance metrics", func(ctx context.Context) error {
 			return components.metrics.RunOnce(ctx)
+		})
+	}
+	if components.sandboxPool != nil && components.sandboxPool.Enabled() {
+		go periodic(runCtx, &wg, sandboxpool.DefaultConfig().ReplenishInterval, true, "sandbox pool", func(ctx context.Context) error {
+			components.sandboxPool.Replenish(ctx)
+			return nil
 		})
 	}
 	var runErr error
