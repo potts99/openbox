@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useEffect, useState } from "react";
-import type { InstanceAction, InstanceDetail, OpenBoxApi, SoftwarePackage } from "../api/client";
+import type { ConnectionInfo, InstanceAction, InstanceDetail, OpenBoxApi, SoftwarePackage } from "../api/client";
 import { InstanceMetrics } from "../components/InstanceMetrics";
 import { InstanceOperationLogs } from "../components/InstanceOperationLogs";
+import { SSHConnect } from "../components/SSHConnect";
 import { SandboxStatus } from "./Sandbox";
 
 interface InstancePageProps {
@@ -11,13 +12,13 @@ interface InstancePageProps {
   instanceId: string;
   csrfToken?: string;
   onBack(): void;
-  onOpenTerminal(instance: { id: string; name: string }): void;
+  onOpenTerminal(instance: { id: string; name: string; kind: string }): void;
 }
 
 type PageData =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; instance: InstanceDetail; catalog: SoftwarePackage[] };
+  | { status: "ready"; instance: InstanceDetail; catalog: SoftwarePackage[]; connection: ConnectionInfo };
 
 function formatBytes(bytes: number): string {
   if (bytes <= 0) return "—";
@@ -60,9 +61,13 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
 
   useEffect(() => {
     let active = true;
-    void Promise.all([api.getInstance(instanceId), api.listSoftwareCatalog()])
-      .then(([instance, catalog]) => {
-        if (active) setData({ status: "ready", instance, catalog });
+    void Promise.all([
+      api.getInstance(instanceId),
+      api.listSoftwareCatalog(),
+      api.getConnection().catch(() => ({ ssh: null }) as ConnectionInfo),
+    ])
+      .then(([instance, catalog, connection]) => {
+        if (active) setData({ status: "ready", instance, catalog, connection });
       })
       .catch((error: unknown) => {
         if (active) {
@@ -75,13 +80,21 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
     return () => { active = false; };
   }, [api, instanceId]);
 
+  async function reloadReady() {
+    const [instance, catalog, connection] = await Promise.all([
+      api.getInstance(instanceId),
+      api.listSoftwareCatalog(),
+      api.getConnection().catch(() => ({ ssh: null }) as ConnectionInfo),
+    ]);
+    setData({ status: "ready", instance, catalog, connection });
+  }
+
   async function runAction(action: InstanceAction) {
     setActionError("");
     setActionPending(action);
     try {
       await api.mutateInstance(instanceId, action);
-      const [instance, catalog] = await Promise.all([api.getInstance(instanceId), api.listSoftwareCatalog()]);
-      setData({ status: "ready", instance, catalog });
+      await reloadReady();
       setOperationsRefreshKey((value) => value + 1);
     } catch (error: unknown) {
       setActionError(error instanceof Error ? error.message : "Action failed");
@@ -95,8 +108,7 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
     setInstallPending(packageId);
     try {
       await api.installSoftware(instanceId, packageId);
-      const [instance, catalog] = await Promise.all([api.getInstance(instanceId), api.listSoftwareCatalog()]);
-      setData({ status: "ready", instance, catalog });
+      await reloadReady();
       setOperationsRefreshKey((value) => value + 1);
     } catch (error: unknown) {
       setInstallError(error instanceof Error ? error.message : "Install failed");
@@ -107,11 +119,12 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
 
   const instance = data.status === "ready" ? data.instance : null;
   const catalog = data.status === "ready" ? data.catalog : [];
+  const connection = data.status === "ready" ? data.connection : null;
   const observed = instance?.observedState ?? "";
   const canStart = observed === "stopped" || observed === "error";
   const canStop = observed === "running";
   const canRestart = observed === "running";
-  const canOpenTerminal = observed === "running";
+  const canOpenTerminal = observed === "running" && instance?.kind !== "sandbox";
   const canInstall = observed === "running" && instance?.kind === "vps";
 
   return (
@@ -134,16 +147,18 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
               <h1>{instance?.name ?? "Instance"}</h1>
             </div>
             <div className="instance-actions">
-              <button
-                className="primary-action"
-                type="button"
-                disabled={!canOpenTerminal || !instance}
-                onClick={() => {
-                  if (instance) onOpenTerminal({ id: instance.id, name: instance.name });
-                }}
-              >
-                Terminal
-              </button>
+              {instance?.kind !== "sandbox" ? (
+                <button
+                  className="primary-action"
+                  type="button"
+                  disabled={!canOpenTerminal || !instance}
+                  onClick={() => {
+                    if (instance) onOpenTerminal({ id: instance.id, name: instance.name, kind: instance.kind });
+                  }}
+                >
+                  Terminal
+                </button>
+              ) : null}
               <button type="button" className="btn" disabled={!canStart || actionPending !== null} onClick={() => { void runAction("start"); }}>
                 {actionPending === "start" ? "Starting…" : "Start"}
               </button>
@@ -160,6 +175,10 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
           {installError ? <p className="data-message is-error" role="alert">{installError}</p> : null}
           {data.status === "loading" ? <p className="data-message" role="status">Loading…</p> : null}
           {data.status === "error" ? <p className="data-message is-error" role="alert">{data.message}</p> : null}
+
+          {instance && connection ? (
+            <SSHConnect instanceName={instance.name} connection={connection} />
+          ) : null}
 
           {instance ? (
             <InstanceMetrics
@@ -285,7 +304,7 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
           ) : null}
         </main>
       </div>
-      <footer><span>openbox</span><span>v1</span></footer>
+      <footer><span>openbox</span><span>v0.01</span></footer>
     </div>
   );
 }
