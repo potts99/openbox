@@ -133,11 +133,17 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
         instanceId={view.instanceId}
         csrfToken={session.csrfToken || api.getCsrfToken()}
         onBack={() => setView({ kind: "list" })}
-        onOpenTerminal={(instance) => setView({
-          kind: "terminal",
-          instanceId: instance.id,
-          instanceName: instance.name,
-        })}
+        onOpenTerminal={(instance) => {
+          if (instance.kind === "sandbox") {
+            setView({ kind: "detail", instanceId: instance.id });
+            return;
+          }
+          setView({
+            kind: "terminal",
+            instanceId: instance.id,
+            instanceName: instance.name,
+          });
+        }}
       />
     );
   }
@@ -241,7 +247,7 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
         </main>
       </div>
       <OperationDrawer open={drawerOpen} operations={operations} onClose={closeDrawer} />
-      <footer><span>openbox</span><span>v1</span></footer>
+      <footer><span>openbox</span><span>v0.01</span></footer>
     </div>
   );
 }

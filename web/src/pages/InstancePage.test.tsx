@@ -110,8 +110,21 @@ describe("InstancePage", () => {
     expect(detailSection?.querySelector(".detail-grid")?.textContent).not.toContain("Created");
     expect(detailSection?.querySelector(".detail-grid")?.textContent).not.toContain("Updated");
 
+    expect(screen.getByText("ssh demo@app.example.com -p 2222")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Terminal" }));
-    expect(onOpenTerminal).toHaveBeenCalledWith({ id: "box-1", name: "demo" });
+    expect(onOpenTerminal).toHaveBeenCalledWith({ id: "box-1", name: "demo", kind: "vps" });
+  });
+
+  it("hides terminal for sandboxes and still shows SSH connect", async () => {
+    const onOpenTerminal = vi.fn();
+    const api = createApi({
+      getInstance: vi.fn().mockResolvedValue({ ...detail, kind: "sandbox", name: "lab" }),
+    });
+    render(<InstancePage api={api} instanceId="box-1" onBack={() => undefined} onOpenTerminal={onOpenTerminal} />);
+
+    expect(await screen.findByRole("heading", { level: 1, name: "lab" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Terminal" })).toBeNull();
+    expect(screen.getByText("ssh lab@app.example.com -p 2222")).toBeInTheDocument();
   });
 
   it("submits stop and refreshes detail", async () => {
