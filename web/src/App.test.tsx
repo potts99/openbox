@@ -234,6 +234,10 @@ describe("App", () => {
     await user.type(screen.getByLabelText("Name"), "fresh");
     await user.click(screen.getByRole("button", { name: "Create instance" }));
 
+    expect(await screen.findByRole("heading", { name: "Instance created" })).toBeInTheDocument();
+    expect(screen.getByText("ssh fresh@app.example.com -p 2222")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open instance" }));
+
     expect(await screen.findByRole("heading", { level: 1, name: "fresh" })).toBeInTheDocument();
     expect(createInstance).toHaveBeenCalled();
   });

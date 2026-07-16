@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import type {
+  ConnectionInfo,
   CreateInstanceResult,
   ImageSummary,
   InstanceKind,
@@ -11,6 +12,7 @@ import type {
   SoftwarePackage,
   SSHKeySummary,
 } from "../api/client";
+import { SSHConnect } from "../components/SSHConnect";
 
 interface CreateInstancePageProps {
   api: OpenBoxApi;
@@ -21,7 +23,8 @@ interface CreateInstancePageProps {
 type PageData =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; images: ImageSummary[]; keys: SSHKeySummary[]; catalog: SoftwarePackage[] };
+  | { status: "ready"; images: ImageSummary[]; keys: SSHKeySummary[]; catalog: SoftwarePackage[] }
+  | { status: "created"; result: CreateInstanceResult; connection: ConnectionInfo };
 
 interface KindDefaults {
   isolation: IsolationRequest;
@@ -189,12 +192,50 @@ export function CreateInstancePage({ api, onBack, onCreated }: CreateInstancePag
         ownerPublicKey,
         packages,
       });
-      onCreated(result);
+      let connection: ConnectionInfo = { ssh: null };
+      try {
+        connection = await api.getConnection();
+      } catch {
+        connection = { ssh: null };
+      }
+      setData({ status: "created", result, connection });
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : "Could not create instance");
     } finally {
       setPending(false);
     }
+  }
+
+  if (data.status === "created") {
+    const instanceName = data.result.instance?.name || name.trim();
+    return (
+      <div className="console-layout">
+        <a className="skip-link" href="#create-instance-main">Skip to create success</a>
+        <header className="console-header">
+          <a className="wordmark" href="/" aria-label="OpenBox home"><span>OB</span> OpenBox</a>
+          <nav aria-label="Primary navigation">
+            <button className="nav-button" type="button" onClick={onBack}>Instances</button>
+          </nav>
+        </header>
+        <div className="console-workspace">
+          <main id="create-instance-main" tabIndex={-1}>
+            <div className="page-heading">
+              <div>
+                <h1>Instance created</h1>
+                <p className="data-message" role="status">{instanceName} is ready to connect.</p>
+              </div>
+            </div>
+            <SSHConnect instanceName={instanceName} connection={data.connection} />
+            <div className="create-actions">
+              <button className="primary-action" type="button" onClick={() => onCreated(data.result)}>
+                Open instance
+              </button>
+            </div>
+          </main>
+        </div>
+        <footer><span>openbox</span><span>v0.01</span></footer>
+      </div>
+    );
   }
 
   return (
@@ -408,7 +449,7 @@ export function CreateInstancePage({ api, onBack, onCreated }: CreateInstancePag
           ) : null}
         </main>
       </div>
-      <footer><span>openbox</span><span>v1</span></footer>
+      <footer><span>openbox</span><span>v0.01</span></footer>
     </div>
   );
 }
