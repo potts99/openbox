@@ -46,6 +46,10 @@ without terminating that named session. Reopen the terminal and reconnect by
 Ephemeral shells (no `session_name`) end when the tab closes or the client
 detaches.
 
+The console hides the browser Terminal control for `kind=sandbox` instances
+until sandbox images ship `tmux`. Use the SSH gateway (and the console Connect
+panel) for sandboxes instead.
+
 ## Audit and logging
 
 Terminal audit records contain owner, instance id, optional session id/name,

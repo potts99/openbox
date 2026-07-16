@@ -10,10 +10,17 @@ The daemon flags are:
 
 ```text
 --ssh-address :2222
+--ssh-public-host app.example.com
+--ssh-public-port 2222
 --ssh-host-key /var/lib/openbox/ssh/gateway_host
 --ssh-instance-key /var/lib/openbox/ssh/instance_client
 --ssh-known-hosts /var/lib/openbox/ssh/known_instances
 ```
+
+`--ssh-public-host` is the hostname the console advertises in copyable
+`ssh` commands via authenticated `GET /v1/connection`. Leave it empty to
+omit the endpoint (`ssh: null`). `--ssh-public-port` defaults to the port
+from `--ssh-address` when unset.
 
 The gateway host key and internal instance client key are generated once as
 Ed25519 keys and must remain owner-only files. OpenBox refuses permissive,
