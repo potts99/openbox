@@ -280,7 +280,135 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .empty-inventory { padding: 2.25rem 1.25rem; text-align: center; }
 .empty-glyph { display: none; }
 .empty-inventory h3 { margin: 0 0 .35rem; font-size: .9375rem; font-weight: 500; }
-.empty-inventory p { margin: 0 auto; max-width: 22rem; color: var(--muted); font-size: .875rem; }
+.empty-inventory p { margin: 0 auto .9rem; max-width: 22rem; color: var(--muted); font-size: .875rem; }
+.empty-inventory .primary-action { margin: 0 auto; }
+
+.create-instance-form {
+  display: grid;
+  gap: .15rem;
+  max-width: 34rem;
+  margin: 0 0 2rem;
+}
+.create-instance-form label,
+.create-instance-form fieldset {
+  display: grid;
+  gap: .35rem;
+  margin: 0 0 .9rem;
+  border: 0;
+  padding: 0;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: .68rem;
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.create-instance-form legend {
+  margin: 0 0 .35rem;
+  padding: 0;
+}
+.create-instance-form input,
+.create-instance-form select,
+.create-instance-form textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: .7rem .75rem;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: .9375rem;
+  text-transform: none;
+  letter-spacing: normal;
+  font-family: inherit;
+  font-weight: 400;
+}
+.create-instance-form textarea {
+  resize: vertical;
+  min-height: 5.5rem;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: .8125rem;
+}
+.create-instance-form input:focus,
+.create-instance-form select:focus,
+.create-instance-form textarea:focus {
+  border-color: var(--ink);
+  outline: none;
+}
+.create-choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+.choice-pill {
+  display: inline-flex !important;
+  align-items: center;
+  gap: .45rem;
+  margin: 0 !important;
+  padding: .55rem .75rem;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: .875rem;
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.choice-pill input {
+  width: auto;
+  margin: 0;
+  padding: 0;
+}
+.create-resource-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .75rem;
+}
+.create-resource-grid label { margin-bottom: .9rem; }
+.create-package-list {
+  display: grid;
+  gap: .5rem;
+}
+.create-package-item {
+  display: grid !important;
+  grid-template-columns: auto 1fr;
+  gap: .65rem;
+  align-items: start;
+  margin: 0 !important;
+  padding: .65rem .75rem;
+  border: 1px solid var(--line);
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: .875rem;
+  font-family: inherit;
+  font-weight: 400;
+  color: var(--ink);
+}
+.create-package-item input {
+  width: auto;
+  margin: .15rem 0 0;
+  padding: 0;
+}
+.create-package-item span {
+  display: grid;
+  gap: .15rem;
+}
+.create-package-item strong {
+  font-weight: 600;
+}
+.create-package-item small {
+  color: var(--muted);
+  font-size: .8125rem;
+}
+.create-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .6rem;
+  margin-top: .25rem;
+}
+@media (max-width: 640px) {
+  .create-resource-grid { grid-template-columns: 1fr; }
+}
 
 .instance-ledger table { width: 100%; border-collapse: collapse; }
 .instance-ledger th, .instance-ledger td {
