@@ -20,9 +20,10 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; min-height: 100vh; background: var(--bg); }
+html, body { margin: 0; min-height: 100vh; height: 100%; background: var(--bg); }
 html { overflow-x: clip; }
 body.operation-drawer-open { overflow: hidden; }
+#root { height: 100%; min-height: 100%; }
 button, input { font: inherit; }
 button { color: inherit; }
 a { color: inherit; }
@@ -165,15 +166,24 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .security-note span { display: none; }
 
 /* Console — quiet, content centered in a narrow column */
-.console-layout { min-height: 100vh; display: flex; flex-direction: column; }
+.console-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
 .console-header {
   display: flex;
   align-items: center;
   gap: 1.25rem;
+  flex-shrink: 0;
   min-height: 3rem;
   padding: 0 1.25rem;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
+  z-index: 2;
 }
 .console-header .wordmark { font-size: .8125rem; }
 .console-header nav { display: flex; align-items: center; gap: .15rem; margin-left: auto; }
@@ -209,6 +219,7 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .owner-control span { display: none; }
 .owner-control button { border-color: var(--line); background: transparent; }
 .logout-error {
+  flex-shrink: 0;
   margin: 0;
   padding: .6rem 1.25rem;
   background: #fef3f2;
@@ -218,11 +229,16 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   text-align: center;
 }
 
-.console-workspace { display: block; flex: 1; }
+.console-workspace {
+  display: block;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
 .console-workspace main {
   width: min(40rem, 100%);
   margin: 0 auto;
-  padding: 2.5rem 1.25rem 3.5rem;
+  padding: 2.5rem 1.25rem 2.5rem;
 }
 .page-heading {
   display: flex;
@@ -473,6 +489,29 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 }
 .instance-detail .ledger-header {
   padding: .4rem .65rem;
+}
+.ssh-connect-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+  padding: .55rem .65rem 0;
+}
+.ssh-connect-command {
+  flex: 1 1 12rem;
+  display: block;
+  padding: .4rem .55rem;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .78rem;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.ssh-connect-note {
+  margin: .4rem .65rem .65rem;
+  color: var(--muted);
+  font-size: .78rem;
 }
 .detail-header-meta {
   display: flex;
@@ -957,12 +996,15 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .console-layout footer {
   display: flex;
   justify-content: space-between;
-  margin-top: auto;
+  flex-shrink: 0;
+  margin-top: 0;
   padding: .55rem 1.25rem;
   border-top: 1px solid var(--line);
+  background: var(--bg);
   color: var(--muted);
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: .65rem;
+  z-index: 2;
 }
 
 /* Terminal */
