@@ -61,6 +61,7 @@ func TestDevboxDefinitionValidation(t *testing.T) {
 			Name: "devbox",
 			Base: "ubuntu/24.04",
 			Packages: []images.PackagePin{
+				{Manager: "apt", Name: "nodejs", Version: "22.23.1-1nodesource1"},
 				{Manager: "apt", Name: "tmux", Version: "3.4-1ubuntu0.1"},
 				{Manager: "npm", Name: images.PiPackageName, Version: "0.80.7"},
 			},
@@ -82,7 +83,7 @@ func TestDevboxDefinitionValidation(t *testing.T) {
 		{
 			name: "missing tmux pin",
 			mutate: func(d *images.DevboxDefinition) {
-				d.Packages = d.Packages[1:]
+				d.Packages = append(d.Packages[:1], d.Packages[2:]...)
 			},
 			wantErr: "tmux",
 		},

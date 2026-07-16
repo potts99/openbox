@@ -36,8 +36,6 @@ func piPackage() Package {
 		Description: "Installs the Pi CLI and tmux so you can run an agent session from the instance terminal.",
 		Pins:        pins,
 		Install: [][]string{
-			{"apt-get", "update"},
-			{"apt-get", "install", "-y", "nodejs", "npm"},
 			{"apt-get", "install", "-y", "tmux=" + tmuxVer},
 			{"npm", "install", "-g", images.PiPackageName + "@" + piVer},
 		},
