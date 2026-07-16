@@ -157,7 +157,9 @@ func (p *Proxy) Open(ctx context.Context, target sshgateway.InstanceTarget) (ssh
 	}
 	config := &ssh.ClientConfig{User: "root", Auth: []ssh.AuthMethod{ssh.PublicKeys(p.signer)}, HostKeyCallback: p.hostKey, Timeout: p.dial}
 	// Verify/pin against the stable runtime identity, not a reusable private IP.
-	clientConnection, channels, requests, err := ssh.NewClientConn(connection, target.Ref, config)
+	// knownhosts.New requires host:port (SplitHostPort); a bare ref fails every
+	// lookup after the first TOFU pin.
+	clientConnection, channels, requests, err := ssh.NewClientConn(connection, net.JoinHostPort(target.Ref, "22"), config)
 	if err != nil {
 		_ = connection.Close()
 		return nil, fmt.Errorf("authenticate instance SSH: %w", err)

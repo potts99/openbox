@@ -200,7 +200,8 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   color: var(--ink);
   border-color: transparent;
 }
-.console-header nav a[aria-current="page"] {
+.console-header nav a[aria-current="page"],
+.console-header nav .nav-button[aria-current="page"] {
   text-decoration: underline;
   text-underline-offset: 4px;
 }
@@ -450,6 +451,77 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 }
 .instance-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .instance-ledger tbody tr:hover { background: #fafaf7; }
+.instance-ledger tbody tr.is-selected { background: #f4f4f0; }
+.instance-ledger tbody tr.is-selected th .instance-link {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.state-pill.state-mode-restricted { color: var(--ink); }
+.state-pill.state-mode-standard { color: var(--muted); }
+
+.policy-lede {
+  margin: -0.5rem 0 1.25rem;
+  color: var(--muted);
+  font-size: .875rem;
+  max-width: 36rem;
+}
+.policy-create-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  align-items: center;
+  padding: .65rem .85rem;
+  border-top: 1px solid var(--line);
+  background: #fafaf7;
+}
+.policy-create-row label {
+  flex: 1 1 12rem;
+  margin: 0;
+}
+.policy-create-row input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: .55rem .65rem;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: .875rem;
+}
+.policy-create-row input:focus {
+  border-color: var(--ink);
+  outline: none;
+}
+.policy-create-row .btn {
+  padding: .45rem .7rem;
+  font-size: .7rem;
+  border-color: var(--line);
+  background: var(--surface);
+}
+.policy-create-row .btn:hover:not(:disabled) {
+  background: var(--bg);
+  color: var(--ink);
+  border-color: var(--ink);
+}
+.policy-editor {
+  margin-top: .75rem;
+}
+.policy-form {
+  margin: 0;
+  padding: .85rem .65rem 1rem;
+  max-width: none;
+}
+.policy-form fieldset { margin-bottom: .65rem; }
+.policy-hint {
+  margin: .15rem 0 .85rem;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: .78rem;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  line-height: 1.4;
+}
 
 .instance-heading {
   align-items: flex-start;
