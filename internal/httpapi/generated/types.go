@@ -178,6 +178,11 @@ type Capabilities struct {
 	VmReason        *string         `json:"vm_reason,omitempty"`
 }
 
+// Connection defines model for Connection.
+type Connection struct {
+	Ssh *SSHEndpoint `json:"ssh"`
+}
+
 // CreateInstanceRequest defines model for CreateInstanceRequest.
 type CreateInstanceRequest struct {
 	Image          string                     `json:"image"`
@@ -472,6 +477,12 @@ type Route struct {
 // RouteVisibility defines model for Route.Visibility.
 type RouteVisibility string
 
+// SSHEndpoint defines model for SSHEndpoint.
+type SSHEndpoint struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
+}
+
 // SSHKey defines model for SSHKey.
 type SSHKey struct {
 	CreatedAt   time.Time `json:"created_at"`
@@ -569,6 +580,12 @@ type AllowCertificateParams struct {
 	// Domain Hostname requested for on-demand TLS certificate issuance.
 	Domain string `form:"domain" json:"domain"`
 
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// GetConnectionParams defines parameters for GetConnection.
+type GetConnectionParams struct {
 	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
 	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
 }

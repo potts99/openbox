@@ -32,6 +32,8 @@ func main() {
 	flag.StringVar(&config.APITLSCertificate, "api-tls-cert", "", "optional API TLS certificate")
 	flag.StringVar(&config.APITLSKey, "api-tls-key", "", "optional API TLS private key")
 	flag.StringVar(&config.SSHAddress, "ssh-address", ":2222", "OpenBox SSH gateway listen address")
+	flag.StringVar(&config.SSHPublicHost, "ssh-public-host", "", "hostname clients use for SSH (empty disables /v1/connection ssh)")
+	flag.IntVar(&config.SSHPublicPort, "ssh-public-port", 0, "public SSH port (default: port from --ssh-address)")
 	flag.StringVar(&config.SSHHostKeyPath, "ssh-host-key", "/var/lib/openbox/ssh/gateway_host", "stable SSH gateway host key path")
 	flag.StringVar(&config.SSHInstanceKeyPath, "ssh-instance-key", "/var/lib/openbox/ssh/instance_client", "internal instance SSH client key path")
 	flag.StringVar(&config.SSHKnownHostsPath, "ssh-known-hosts", "/var/lib/openbox/ssh/known_instances", "pinned instance SSH host keys")

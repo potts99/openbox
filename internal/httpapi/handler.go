@@ -99,6 +99,12 @@ type Options struct {
 	// TrustedProxyCIDRs identifies direct peers allowed to supply forwarded
 	// client/protocol headers. Empty means proxy headers are ignored.
 	TrustedProxyCIDRs []string
+	// SSHPublicHost is the hostname clients should use in ssh commands.
+	// Empty means GET /v1/connection returns ssh: null.
+	SSHPublicHost string
+	// SSHPublicPort is the client-facing SSH port. When host is set and port
+	// is 0, the handler defaults to 2222.
+	SSHPublicPort int
 }
 
 type Handler struct {
@@ -119,6 +125,8 @@ type Handler struct {
 	piApplier          *pi.Applier
 	metrics            *metrics.Hub
 	trustedProxies     []*net.IPNet
+	sshPublicHost      string
+	sshPublicPort      int
 }
 
 func New(service Service, options Options) (*Handler, error) {
@@ -161,6 +169,8 @@ func New(service Service, options Options) (*Handler, error) {
 		piApplier:          options.PiApplier,
 		metrics:            options.Metrics,
 		trustedProxies:     trustedProxies,
+		sshPublicHost:      strings.TrimSpace(options.SSHPublicHost),
+		sshPublicPort:      options.SSHPublicPort,
 	}, nil
 }
 
@@ -236,6 +246,11 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 	case "capabilities":
 		if len(segments) == 2 && h.requireMethod(response, request, requestID, http.MethodGet) {
 			h.capabilities(response, request, requestID)
+			return
+		}
+	case "connection":
+		if len(segments) == 2 && h.requireMethod(response, request, requestID, http.MethodGet) {
+			h.connection(response, request, requestID)
 			return
 		}
 	case "images":
@@ -401,6 +416,20 @@ func (h *Handler) capabilities(response http.ResponseWriter, request *http.Reque
 		return
 	}
 	h.writeJSON(response, http.StatusOK, mapCapabilities(value))
+}
+
+func (h *Handler) connection(response http.ResponseWriter, _ *http.Request, _ string) {
+	if h.sshPublicHost == "" {
+		h.writeJSON(response, http.StatusOK, map[string]any{"ssh": nil})
+		return
+	}
+	port := h.sshPublicPort
+	if port <= 0 {
+		port = 2222
+	}
+	h.writeJSON(response, http.StatusOK, map[string]any{
+		"ssh": map[string]any{"host": h.sshPublicHost, "port": port},
+	})
 }
 
 func (h *Handler) listImages(response http.ResponseWriter, request *http.Request, requestID string) {

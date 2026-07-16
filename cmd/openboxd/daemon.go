@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -46,8 +47,9 @@ import (
 type daemonConfig struct {
 	DatabasePath, IncusSocket, Project, ContainerProfile, VMProfile, StoragePool string
 	APIAddress, APITLSCertificate, APITLSKey                                     string
-	SSHAddress, SSHHostKeyPath, SSHInstanceKeyPath, SSHKnownHostsPath            string
-	OwnerID, OwnerName                                                           string
+	SSHAddress, SSHPublicHost, SSHHostKeyPath, SSHInstanceKeyPath, SSHKnownHostsPath string
+	SSHPublicPort                                                                    int
+	OwnerID, OwnerName                                                               string
 	TrustedProxyCIDRs                                                            []string
 	WorkerConcurrency                                                            int
 	OperationInterval, ReconcileInterval, MetricsInterval, Lease                 time.Duration
@@ -270,6 +272,14 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 		}
 		return targets, nil
 	}, runtime.InstanceUsage)
+	publicPort := config.SSHPublicPort
+	if publicPort == 0 {
+		if _, portStr, err := net.SplitHostPort(config.SSHAddress); err == nil {
+			if p, err := strconv.Atoi(portStr); err == nil {
+				publicPort = p
+			}
+		}
+	}
 	handler, err := httpapi.New(service, httpapi.Options{
 		Auth:              authManager,
 		Routes:            routeService,
@@ -279,6 +289,8 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 		PiApplier:         piApplier,
 		Metrics:           metricsHub,
 		TrustedProxyCIDRs: config.TrustedProxyCIDRs,
+		SSHPublicHost:     config.SSHPublicHost,
+		SSHPublicPort:     publicPort,
 	})
 	if err != nil {
 		return fail(err)
