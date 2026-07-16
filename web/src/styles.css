@@ -838,6 +838,9 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   color: #e8e6df;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
+.terminal-page--chrome-visible {
+  grid-template-rows: auto 1fr;
+}
 .terminal-toolbar {
   position: absolute;
   z-index: 5;
@@ -885,6 +888,12 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   color: #6b6b66;
   font-size: .7rem;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+.terminal-page--chrome-visible .terminal-toolbar {
+  position: relative;
+  top: auto;
+  left: auto;
+  right: auto;
 }
 .terminal-toolbar--hidden {
   transform: translateY(-100%);

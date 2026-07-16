@@ -88,9 +88,13 @@ export function InstanceTerminal({
   }, []);
 
   useEffect(() => {
+    surfaceRef.current?.fit();
+  }, [chromeVisible]);
+
+  useEffect(() => {
     if (connection.status !== "connected") {
-		const timer = window.setTimeout(() => setChromeRevealed(true), 0);
-		return () => window.clearTimeout(timer);
+      const timer = window.setTimeout(() => setChromeRevealed(true), 0);
+      return () => window.clearTimeout(timer);
     }
     if (chromeFocusRef.current) return;
     const timer = window.setTimeout(() => {
@@ -169,7 +173,7 @@ export function InstanceTerminal({
   }, [attachSession]);
 
   return (
-    <div className="terminal-page">
+    <div className={`terminal-page${chromeVisible ? " terminal-page--chrome-visible" : ""}`}>
       <a className="skip-link" href="#terminal-main">Skip to terminal</a>
       <button
         type="button"
