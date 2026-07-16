@@ -339,25 +339,26 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   flex-wrap: wrap;
   gap: .5rem;
 }
-.choice-pill {
-  display: inline-flex !important;
-  align-items: center;
-  gap: .45rem;
-  margin: 0 !important;
-  padding: .55rem .75rem;
+.choice-button {
+  margin: 0;
+  padding: .55rem .9rem;
   border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--surface);
   color: var(--ink);
-  text-transform: none;
-  letter-spacing: normal;
   font-size: .875rem;
   font-family: inherit;
   font-weight: 500;
   cursor: pointer;
 }
-.choice-pill input {
-  width: auto;
-  margin: 0;
-  padding: 0;
+.choice-button:hover {
+  border-color: var(--ink);
+}
+.choice-button.is-selected,
+.choice-button[aria-pressed="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--surface);
 }
 .create-resource-grid {
   display: grid;

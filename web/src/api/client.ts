@@ -105,6 +105,7 @@ export type IsolationRequest = "best_available" | "standard" | "strong";
 export interface ImageSummary {
   id: string;
   alias: string;
+  source: string;
   architecture: string;
   compatibility: string;
 }
@@ -348,6 +349,7 @@ export function createHttpApi(options: HttpApiOptions = {}): OpenBoxApi {
         return {
           id: text(row.id),
           alias: text(row.alias),
+          source: text(row.source),
           architecture: text(row.architecture),
           compatibility: text(row.compatibility),
         };

@@ -13,8 +13,20 @@ function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
     getCsrfToken: vi.fn().mockReturnValue("csrf"),
     getCapabilities: vi.fn(),
     listImages: vi.fn().mockResolvedValue([
-      { id: "img-1", alias: "ubuntu", architecture: "x86_64", compatibility: "general" },
-      { id: "img-2", alias: "openbox:sandbox/ubuntu/24.04", architecture: "x86_64", compatibility: "sandbox" },
+      {
+        id: "22626b4b3561824d7ed0c109f818161bd5e479b839197ecf0f2602a12b8f8a05",
+        alias: "22626b4b3561824d7ed0c109f818161bd5e479b839197ecf0f2602a12b8f8a05",
+        source: "incus:ubuntu",
+        architecture: "x86_64",
+        compatibility: "virtual-machine",
+      },
+      {
+        id: "acd70a7759ea45c60f7e740b39c818883070c0b0de1f7ffdac6521ffc8f74f1c",
+        alias: "acd70a7759ea45c60f7e740b39c818883070c0b0de1f7ffdac6521ffc8f74f1c",
+        source: "incus:openbox:sandbox/ubuntu/24.04",
+        architecture: "x86_64",
+        compatibility: "container",
+      },
     ]),
     listSSHKeys: vi.fn().mockResolvedValue([{
       id: "key-1",
@@ -108,11 +120,14 @@ describe("CreateInstancePage", () => {
     render(<CreateInstancePage api={api} onBack={vi.fn()} onCreated={vi.fn()} />);
 
     await screen.findByRole("heading", { name: "New instance" });
-    await user.click(screen.getByRole("radio", { name: "Sandbox" }));
+    await user.click(screen.getByRole("button", { name: "Sandbox" }));
 
+    expect(screen.getByRole("button", { name: "Sandbox" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByLabelText("Isolation")).toHaveValue("standard");
     expect(screen.getByLabelText("Memory (GiB)")).toHaveValue(2);
     expect(screen.getByLabelText("Disk (GiB)")).toHaveValue(10);
     expect(screen.getByLabelText("Image")).toHaveValue("openbox:sandbox/ubuntu/24.04");
+    expect(screen.getByRole("option", { name: "Sandbox · Ubuntu 24.04 (container)" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Ubuntu (VM)" })).toBeInTheDocument();
   });
 });
