@@ -79,7 +79,61 @@ describe("createHttpApi", () => {
     const api = createHttpApi({ fetcher });
 
     await expect(api.listInstances()).resolves.toEqual([{ id: "box-1", name: "dev", kind: "vps", status: "running" }]);
-    await expect(api.listOperations()).resolves.toEqual([{ id: "op-1", action: "create", target: "box-1", status: "running", updatedAt: "now" }]);
+    await expect(api.listOperations()).resolves.toEqual([{
+      id: "op-1",
+      action: "create",
+      targetType: "instance",
+      target: "box-1",
+      status: "running",
+      stage: "runtime_create",
+      progress: 40,
+      attempts: 1,
+      createdAt: "now",
+      updatedAt: "now",
+    }]);
+  });
+
+  it("loads operation detail and subscribes to retained events", async () => {
+    MockEventSource.instances = [];
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: "op-2",
+      type: "instance.start",
+      target_type: "instance",
+      target_id: "box-1",
+      status: "running",
+      stage: "runtime",
+      progress: 10,
+      attempts: 1,
+      created_at: "now",
+      updated_at: "now",
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const api = createHttpApi({ fetcher });
+
+    await expect(api.getOperation("op-2")).resolves.toMatchObject({
+      id: "op-2",
+      action: "instance.start",
+      target: "box-1",
+      stage: "runtime",
+      progress: 10,
+    });
+
+    const events: number[] = [];
+    const subscription = api.subscribeOperationEvents("op-2", {
+      onEvent: (event) => events.push(event.sequence),
+    }, { EventSourceImpl: MockEventSource as unknown as typeof EventSource });
+
+    expect(MockEventSource.instances[0]?.url).toBe("/v1/operations/op-2/events");
+    MockEventSource.instances[0]?.emit("operation", {
+      sequence: 1,
+      operation_id: "op-2",
+      stage: "runtime",
+      status: "running",
+      progress: 10,
+      created_at: "now",
+    });
+    subscription.close();
+    expect(events).toEqual([1]);
+    expect(MockEventSource.instances[0]?.closed).toBe(true);
   });
 
   it("loads instance detail and posts lifecycle actions with an idempotency key", async () => {
@@ -111,3 +165,33 @@ describe("createHttpApi", () => {
     }));
   });
 });
+
+type Listener = (event: MessageEvent<string>) => void;
+
+class MockEventSource {
+  static instances: MockEventSource[] = [];
+  url: string;
+  closed = false;
+  onerror: (() => void) | null = null;
+  private listeners = new Map<string, Listener[]>();
+
+  constructor(url: string) {
+    this.url = url;
+    MockEventSource.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: Listener): void {
+    const current = this.listeners.get(type) ?? [];
+    current.push(listener);
+    this.listeners.set(type, current);
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  emit(type: string, data: unknown): void {
+    const event = { data: JSON.stringify(data) } as MessageEvent<string>;
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+}

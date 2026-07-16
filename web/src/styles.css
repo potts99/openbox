@@ -442,6 +442,114 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   color: var(--muted);
   border-top: 1px solid var(--line);
 }
+.instance-operation-logs {
+  margin-bottom: .75rem;
+}
+.operation-logs-status {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: .7rem;
+  text-transform: lowercase;
+  color: var(--muted);
+}
+.operation-logs-status-live,
+.operation-logs-status-complete { color: var(--ok); }
+.operation-logs-status-error { color: var(--danger); }
+.operation-logs-layout {
+  display: grid;
+  grid-template-columns: minmax(9rem, 11rem) minmax(0, 1fr);
+}
+.operation-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-right: 1px solid var(--line);
+}
+.operation-history-item {
+  display: grid;
+  gap: .2rem;
+  width: 100%;
+  padding: .65rem .75rem;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.operation-history-item:hover,
+.operation-history-item.is-selected {
+  background: #fafaf7;
+}
+.operation-history-item.is-selected {
+  box-shadow: inset 2px 0 0 var(--ink);
+}
+.operation-history-title {
+  font-size: .8125rem;
+  font-weight: 500;
+}
+.operation-history-meta {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: .65rem;
+  color: var(--muted);
+}
+.operation-log-viewer {
+  min-width: 0;
+  padding: .65rem .75rem .85rem;
+}
+.operation-log-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .45rem .65rem;
+  margin-bottom: .65rem;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: .7rem;
+  color: var(--muted);
+}
+.operation-event-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: .55rem;
+}
+.operation-event {
+  padding: .55rem .65rem;
+  border: 1px solid var(--line);
+  background: #fafaf7;
+}
+.operation-event-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .35rem .65rem;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: .68rem;
+}
+.operation-event-time,
+.operation-event-progress {
+  color: var(--muted);
+}
+.operation-event-stage {
+  font-weight: 500;
+  color: var(--ink);
+}
+.operation-event-message,
+.operation-event-error {
+  margin: .35rem 0 0;
+  font-size: .8125rem;
+}
+.operation-event-error {
+  color: var(--danger);
+}
+@media (max-width: 720px) {
+  .operation-logs-layout {
+    grid-template-columns: 1fr;
+  }
+  .operation-history {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}
 @media (max-width: 720px) {
   .metrics-readouts,
   .metrics-charts {

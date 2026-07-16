@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { InstanceDetail, OpenBoxApi } from "../api/client";
@@ -45,9 +45,37 @@ function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
       packageId: "pi", status: "installed", version: "0.80.7", updatedAt: "now",
     }),
     mutateInstance: vi.fn().mockResolvedValue({
-      id: "op-1", action: "instance.stop", status: "pending", target: "box-1", updatedAt: "now",
+      id: "op-1", action: "instance.stop", status: "pending", targetType: "instance",
+      target: "box-1", stage: "queued", progress: 0, attempts: 0, createdAt: "now", updatedAt: "now",
     }),
-    listOperations: vi.fn(),
+    listOperations: vi.fn().mockResolvedValue([
+      {
+        id: "op-create",
+        action: "instance.create",
+        status: "succeeded",
+        targetType: "instance",
+        target: "box-1",
+        stage: "complete",
+        progress: 100,
+        attempts: 1,
+        createdAt: "2026-07-15T18:37:23.344793254Z",
+        updatedAt: "2026-07-15T18:38:00.000000000Z",
+      },
+      {
+        id: "op-other",
+        action: "instance.start",
+        status: "succeeded",
+        targetType: "instance",
+        target: "box-2",
+        stage: "complete",
+        progress: 100,
+        attempts: 1,
+        createdAt: "2026-07-15T18:39:00.000000000Z",
+        updatedAt: "2026-07-15T18:39:30.000000000Z",
+      },
+    ]),
+    getOperation: vi.fn(),
+    subscribeOperationEvents: vi.fn().mockReturnValue({ close: vi.fn() }),
     listPiProfiles: vi.fn().mockResolvedValue([]),
     getPiProfileHistory: vi.fn().mockResolvedValue([]),
     rollbackPiProfile: vi.fn(),
@@ -80,7 +108,8 @@ describe("InstancePage", () => {
   it("submits stop and refreshes detail", async () => {
     const user = userEvent.setup();
     const mutateInstance = vi.fn().mockResolvedValue({
-      id: "op-1", action: "instance.stop", status: "pending", target: "box-1", updatedAt: "now",
+      id: "op-1", action: "instance.stop", status: "pending", targetType: "instance",
+      target: "box-1", stage: "queued", progress: 0, attempts: 0, createdAt: "now", updatedAt: "now",
     });
     const getInstance = vi.fn()
       .mockResolvedValueOnce(detail)
@@ -102,6 +131,23 @@ describe("InstancePage", () => {
     await screen.findByRole("heading", { level: 1, name: "demo" });
     await user.click(screen.getByRole("button", { name: "← Instances" }));
     expect(onBack).toHaveBeenCalled();
+  });
+
+  it("shows build and deploy logs for instance-scoped operations", async () => {
+    const subscribeOperationEvents = vi.fn().mockReturnValue({ close: vi.fn() });
+    const api = createApi({ subscribeOperationEvents });
+    render(<InstancePage api={api} instanceId="box-1" onBack={() => undefined} onOpenTerminal={() => undefined} />);
+
+    expect(await screen.findByRole("heading", { name: "Build & deploy logs" })).toBeInTheDocument();
+    const logsSection = screen.getByRole("heading", { name: "Build & deploy logs" }).closest("section");
+    expect(logsSection).not.toBeNull();
+    expect(await within(logsSection!).findByRole("button", { name: /Create instance/i })).toHaveAttribute("aria-current", "true");
+    expect(within(logsSection!).queryByRole("button", { name: /Start/i })).toBeNull();
+    expect(subscribeOperationEvents).toHaveBeenCalledWith(
+      "op-create",
+      expect.objectContaining({ onEvent: expect.any(Function) }),
+      expect.any(Object),
+    );
   });
 
   it("does not show Launch Pi and shows Software Install for VPS", async () => {
