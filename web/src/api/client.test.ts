@@ -140,8 +140,8 @@ describe("createHttpApi", () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({
         items: [{
-          id: "img-1", alias: "ubuntu", source: "local", digest: "sha256:abc",
-          architecture: "x86_64", compatibility: "general", created_at: "now", updated_at: "now",
+          id: "img-1", alias: "ubuntu", source: "incus:ubuntu", digest: "sha256:abc",
+          architecture: "x86_64", compatibility: "virtual-machine", created_at: "now", updated_at: "now",
         }],
       }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
@@ -166,7 +166,7 @@ describe("createHttpApi", () => {
     const api = createHttpApi({ fetcher, csrfToken: "csrf" });
 
     await expect(api.listImages()).resolves.toEqual([{
-      id: "img-1", alias: "ubuntu", architecture: "x86_64", compatibility: "general",
+      id: "img-1", alias: "ubuntu", source: "incus:ubuntu", architecture: "x86_64", compatibility: "virtual-machine",
     }]);
     await expect(api.listSSHKeys()).resolves.toEqual([{
       id: "key-1", label: "laptop", fingerprint: "SHA256:abc", publicKey: "ssh-ed25519 AAAA", createdAt: "now",

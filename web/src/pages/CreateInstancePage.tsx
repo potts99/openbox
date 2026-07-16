@@ -53,9 +53,44 @@ function defaultsForKind(kind: InstanceKind): KindDefaults {
   };
 }
 
+function isFingerprint(value: string): boolean {
+  return /^[a-f0-9]{40,}$/i.test(value);
+}
+
+function titleCase(value: string): string {
+  return value
+    .split(/[\s/_-]+/)
+    .filter(Boolean)
+    .map((part) => (part.toLowerCase() === "ubuntu" ? "Ubuntu" : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join(" ");
+}
+
+/** Mutable create reference (alias), preferring human source over digest aliases. */
+export function imageReference(image: ImageSummary): string {
+  const fromSource = image.source.replace(/^incus:/u, "").trim();
+  if (fromSource && !isFingerprint(fromSource)) return fromSource;
+  if (image.alias && !isFingerprint(image.alias)) return image.alias;
+  return image.id || image.alias;
+}
+
+export function imageLabel(image: ImageSummary): string {
+  const reference = imageReference(image);
+  const openbox = /^openbox:([^/]+)\/(.+)$/u.exec(reference);
+  const base = openbox
+    ? `${titleCase(openbox[1])} · ${titleCase(openbox[2])}`
+    : titleCase(reference);
+  if (image.compatibility === "virtual-machine") return `${base} (VM)`;
+  if (image.compatibility === "container") return `${base} (container)`;
+  return base;
+}
+
 function pickImage(images: ImageSummary[], preferred: string): string {
-  if (images.some((image) => image.alias === preferred)) return preferred;
-  return images[0]?.alias ?? preferred;
+  const match = images.find((image) => {
+    const reference = imageReference(image);
+    return reference === preferred || image.alias === preferred || image.source.includes(preferred);
+  });
+  if (match) return imageReference(match);
+  return images[0] ? imageReference(images[0]) : preferred;
 }
 
 export function CreateInstancePage({ api, onBack, onCreated }: CreateInstancePageProps) {
@@ -202,25 +237,23 @@ export function CreateInstancePage({ api, onBack, onCreated }: CreateInstancePag
 
               <fieldset>
                 <legend>Kind</legend>
-                <div className="create-choice-row">
-                  <label className="choice-pill">
-                    <input
-                      type="radio"
-                      name="kind"
-                      checked={kind === "vps"}
-                      onChange={() => applyKind("vps")}
-                    />
-                    <span>VPS</span>
-                  </label>
-                  <label className="choice-pill">
-                    <input
-                      type="radio"
-                      name="kind"
-                      checked={kind === "sandbox"}
-                      onChange={() => applyKind("sandbox")}
-                    />
-                    <span>Sandbox</span>
-                  </label>
+                <div className="create-choice-row" role="group" aria-label="Kind">
+                  <button
+                    type="button"
+                    className={kind === "vps" ? "choice-button is-selected" : "choice-button"}
+                    aria-pressed={kind === "vps"}
+                    onClick={() => applyKind("vps")}
+                  >
+                    VPS
+                  </button>
+                  <button
+                    type="button"
+                    className={kind === "sandbox" ? "choice-button is-selected" : "choice-button"}
+                    aria-pressed={kind === "sandbox"}
+                    onClick={() => applyKind("sandbox")}
+                  >
+                    Sandbox
+                  </button>
                 </div>
               </fieldset>
 
@@ -233,11 +266,14 @@ export function CreateInstancePage({ api, onBack, onCreated }: CreateInstancePag
                     onChange={(event) => setImage(event.target.value)}
                     required
                   >
-                    {data.images.map((item) => (
-                      <option key={item.id || item.alias} value={item.alias}>
-                        {item.alias}{item.architecture ? ` (${item.architecture})` : ""}
-                      </option>
-                    ))}
+                    {data.images.map((item) => {
+                      const reference = imageReference(item);
+                      return (
+                        <option key={item.id || reference} value={reference}>
+                          {imageLabel(item)}
+                        </option>
+                      );
+                    })}
                   </select>
                 ) : (
                   <input
