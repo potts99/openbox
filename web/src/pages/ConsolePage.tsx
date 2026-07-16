@@ -196,10 +196,8 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
             </>
           ) : null}
         </main>
-        <div id="operations-drawer">
-          <OperationDrawer open={drawerOpen} operations={operations} onClose={closeDrawer} />
-        </div>
       </div>
+      <OperationDrawer open={drawerOpen} operations={operations} onClose={closeDrawer} />
       <footer><span>openbox</span><span>v1</span></footer>
     </div>
   );

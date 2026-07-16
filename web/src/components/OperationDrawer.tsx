@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import type { OperationSummary } from "../api/client";
 
 interface OperationDrawerProps {
@@ -69,11 +70,22 @@ export function OperationDrawer({ open, operations, onClose }: OperationDrawerPr
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onClose]);
 
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.classList.add("operation-drawer-open");
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.classList.remove("operation-drawer-open");
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open]);
+
   if (!open) return null;
 
   const summary = summarize(operations);
 
-  return (
+  return createPortal(
     <>
       <button
         type="button"
@@ -139,6 +151,7 @@ export function OperationDrawer({ open, operations, onClose }: OperationDrawerPr
           )}
         </div>
       </aside>
-    </>
+    </>,
+    document.body,
   );
 }
