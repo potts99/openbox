@@ -11,7 +11,14 @@ function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
     getBootstrapStatus: vi.fn(),
     getSession: vi.fn(),
     getCsrfToken: vi.fn().mockReturnValue("csrf"),
-    getCapabilities: vi.fn(),
+    getCapabilities: vi.fn().mockResolvedValue({
+      architecture: "x86_64",
+      containers: true,
+      kvm: true,
+      virtualMachines: true,
+      vmAvailability: "supported",
+      storageDrivers: ["zfs"],
+    }),
     getConnection: vi.fn().mockResolvedValue({ ssh: { host: "app.example.com", port: 2222 } }),
     listImages: vi.fn().mockResolvedValue([
       {
@@ -56,7 +63,7 @@ function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
         name: "fresh",
         kind: "vps",
         imageId: "ubuntu",
-        requestedIsolation: "best_available",
+        requestedIsolation: "strong",
         actualIsolation: "virtual_machine",
         desiredState: "running",
         observedState: "pending",
@@ -109,7 +116,7 @@ describe("CreateInstancePage", () => {
         name: "fresh",
         kind: "vps",
         image: "ubuntu",
-        requestedIsolation: "best_available",
+        requestedIsolation: "strong",
         vcpus: 2,
         memoryBytes: 8 * 1024 ** 3,
         diskBytes: 20 * 1024 ** 3,
@@ -133,7 +140,7 @@ describe("CreateInstancePage", () => {
     await user.click(screen.getByRole("button", { name: "Sandbox" }));
 
     expect(screen.getByRole("button", { name: "Sandbox" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByLabelText("Isolation")).toHaveValue("standard");
+    expect(screen.getByLabelText("Isolation")).toHaveValue("strong");
     expect(screen.getByLabelText("Memory (GiB)")).toHaveValue(2);
     expect(screen.getByLabelText("Disk (GiB)")).toHaveValue(10);
     expect(screen.getByLabelText("Image")).toHaveValue("openbox:sandbox/ubuntu/24.04");

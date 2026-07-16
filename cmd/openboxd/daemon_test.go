@@ -182,7 +182,7 @@ func TestDaemonRestartRecoversWithoutDuplicateCreateOrStatusLoss(t *testing.T) {
 	ids := []string{"instance-1", "operation-1"}
 	service, _ := instances.New(runtime, store, instances.Options{Now: func() time.Time { return now }, NewID: func() string { id := ids[0]; ids = ids[1:]; return id }, NetworkPolicy: runtime})
 	runtime.FailNext("instance.start", errors.New("simulated daemon crash"))
-	_, err = service.Create(ctx, instances.CreateInput{OwnerID: "owner-1", Name: "box", Kind: domain.KindVPS, Image: "ubuntu", RequestedIsolation: domain.IsolationStandard, OwnerPublicKey: "ssh-ed25519 owner", IdempotencyKey: "create-key"})
+	_, err = service.Create(ctx, instances.CreateInput{OwnerID: "owner-1", Name: "box", Kind: domain.KindVPS, Image: "ubuntu", RequestedIsolation: domain.IsolationContainerReq, OwnerPublicKey: "ssh-ed25519 owner", IdempotencyKey: "create-key"})
 	if err == nil {
 		t.Fatal("seed create unexpectedly completed")
 	}

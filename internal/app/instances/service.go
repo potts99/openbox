@@ -244,6 +244,7 @@ func (s *Service) SubmitCreate(ctx context.Context, input CreateInput) (domain.I
 	if err != nil {
 		return domain.Instance{}, domain.Operation{}, fmt.Errorf("discover runtime capabilities: %w", err)
 	}
+	input.RequestedIsolation = resolveIsolationRequest(input.RequestedIsolation, capabilities)
 	actualIsolation, err := selectIsolation(input.RequestedIsolation, capabilities)
 	if err != nil {
 		return domain.Instance{}, domain.Operation{}, err
@@ -580,6 +581,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.Instanc
 	if err != nil {
 		return domain.Instance{}, fmt.Errorf("discover runtime capabilities: %w", err)
 	}
+	input.RequestedIsolation = resolveIsolationRequest(input.RequestedIsolation, capabilities)
 	actualIsolation, err := selectIsolation(input.RequestedIsolation, capabilities)
 	if err != nil {
 		return domain.Instance{}, err
@@ -1309,10 +1311,21 @@ func (s *Service) markError(ctx context.Context, instance domain.Instance) error
 	return nil
 }
 
+func resolveIsolationRequest(request domain.IsolationRequest, capabilities runtimeapi.Capabilities) domain.IsolationRequest {
+	if request != "" {
+		return request
+	}
+	vmUsable := capabilities.VirtualMachines && capabilities.VMAvailability == runtimeapi.VMAvailable
+	if vmUsable {
+		return domain.IsolationStrong
+	}
+	return domain.IsolationContainerReq
+}
+
 func selectIsolation(request domain.IsolationRequest, capabilities runtimeapi.Capabilities) (domain.IsolationType, error) {
 	vmUsable := capabilities.VirtualMachines && capabilities.VMAvailability == runtimeapi.VMAvailable
 	switch request {
-	case domain.IsolationStandard:
+	case domain.IsolationContainerReq:
 		if !capabilities.Containers {
 			return "", &CapabilityError{Capability: "containers"}
 		}
@@ -1326,14 +1339,6 @@ func selectIsolation(request domain.IsolationRequest, capabilities runtimeapi.Ca
 			return "", &CapabilityError{Capability: "strong_isolation", Reason: reason}
 		}
 		return domain.IsolationVM, nil
-	case domain.IsolationBestAvailable:
-		if vmUsable {
-			return domain.IsolationVM, nil
-		}
-		if !capabilities.Containers {
-			return "", &CapabilityError{Capability: "containers", Reason: "VM capability is also unavailable"}
-		}
-		return domain.IsolationContainer, nil
 	default:
 		return "", &domain.Error{Code: domain.CodeInvalidArgument, Field: "requested_isolation"}
 	}

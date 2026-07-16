@@ -36,9 +36,8 @@ const (
 
 // Defines values for CreateInstanceRequestRequestedIsolation.
 const (
-	CreateInstanceRequestRequestedIsolationBestAvailable CreateInstanceRequestRequestedIsolation = "best_available"
-	CreateInstanceRequestRequestedIsolationStandard      CreateInstanceRequestRequestedIsolation = "standard"
-	CreateInstanceRequestRequestedIsolationStrong        CreateInstanceRequestRequestedIsolation = "strong"
+	CreateInstanceRequestRequestedIsolationContainer CreateInstanceRequestRequestedIsolation = "container"
+	CreateInstanceRequestRequestedIsolationStrong    CreateInstanceRequestRequestedIsolation = "strong"
 )
 
 // Defines values for CreateTokenRequestScopes.
@@ -69,9 +68,9 @@ const (
 
 // Defines values for InstanceActualIsolation.
 const (
-	Container      InstanceActualIsolation = "container"
-	Unknown        InstanceActualIsolation = "unknown"
-	VirtualMachine InstanceActualIsolation = "virtual_machine"
+	InstanceActualIsolationContainer      InstanceActualIsolation = "container"
+	InstanceActualIsolationUnknown        InstanceActualIsolation = "unknown"
+	InstanceActualIsolationVirtualMachine InstanceActualIsolation = "virtual_machine"
 )
 
 // Defines values for InstanceDesiredState.
@@ -101,9 +100,8 @@ const (
 
 // Defines values for InstanceRequestedIsolation.
 const (
-	InstanceRequestedIsolationBestAvailable InstanceRequestedIsolation = "best_available"
-	InstanceRequestedIsolationStandard      InstanceRequestedIsolation = "standard"
-	InstanceRequestedIsolationStrong        InstanceRequestedIsolation = "strong"
+	Container InstanceRequestedIsolation = "container"
+	Strong    InstanceRequestedIsolation = "strong"
 )
 
 // Defines values for InstanceSoftwareStatus.
@@ -226,7 +224,9 @@ type CreateInstanceRequest struct {
 	OwnerPublicKey  string                     `json:"owner_public_key"`
 
 	// Packages Catalog package IDs to install after the instance is ready.
-	Packages           *[]string                                `json:"packages,omitempty"`
+	Packages *[]string `json:"packages,omitempty"`
+
+	// RequestedIsolation Omit to let the server choose strong when KVM is usable, otherwise container.
 	RequestedIsolation *CreateInstanceRequestRequestedIsolation `json:"requested_isolation,omitempty"`
 	Resources          *Resources                               `json:"resources,omitempty"`
 }
@@ -234,7 +234,7 @@ type CreateInstanceRequest struct {
 // CreateInstanceRequestKind defines model for CreateInstanceRequest.Kind.
 type CreateInstanceRequestKind string
 
-// CreateInstanceRequestRequestedIsolation defines model for CreateInstanceRequest.RequestedIsolation.
+// CreateInstanceRequestRequestedIsolation Omit to let the server choose strong when KVM is usable, otherwise container.
 type CreateInstanceRequestRequestedIsolation string
 
 // CreateInstanceResult defines model for CreateInstanceResult.

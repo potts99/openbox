@@ -110,7 +110,7 @@ export interface OperationEventSubscription {
 export type InstanceAction = "start" | "stop" | "restart";
 
 export type InstanceKind = "vps" | "sandbox";
-export type IsolationRequest = "best_available" | "standard" | "strong";
+export type IsolationRequest = "strong" | "container";
 
 export interface ImageSummary {
   id: string;

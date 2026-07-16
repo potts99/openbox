@@ -194,7 +194,7 @@ func runNew(ctx context.Context, api *openbox.Client, args []string, jsonOutput 
 	flags.SetOutput(stderr)
 	kind := flags.String("kind", "vps", "instance kind")
 	image := flags.String("image", "ubuntu", "image alias")
-	isolation := flags.String("isolation", "best_available", "isolation request")
+	isolation := flags.String("isolation", "", "isolation request: strong|container (omit for server default)")
 	vcpus := flags.Int("cpus", 2, "virtual CPUs")
 	memory := flags.String("memory", "8GiB", "memory size")
 	disk := flags.String("disk", "20GiB", "disk size")
@@ -207,10 +207,12 @@ func runNew(ctx context.Context, api *openbox.Client, args []string, jsonOutput 
 	if len(positionals) != 1 {
 		return usageError(stderr, "usage: openbox new NAME [OPTIONS]")
 	}
+	switch *isolation {
+	case "", "strong", "container":
+	default:
+		return usageError(stderr, "invalid --isolation: use strong, container, or omit")
+	}
 	if *kind == "sandbox" {
-		if *isolation == "best_available" {
-			*isolation = "standard"
-		}
 		if *image == "ubuntu" {
 			*image = "openbox:sandbox/ubuntu/24.04"
 		}

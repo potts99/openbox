@@ -43,7 +43,7 @@ func TestRealServiceSubmissionLostResponseAndWorkerCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := []byte(`{"name":"dev","kind":"vps","image":"ubuntu","owner_public_key":"ssh-ed25519 owner","requested_isolation":"standard","resources":{"vcpus":2,"memory_bytes":1024,"disk_bytes":2048}}`)
+	body := []byte(`{"name":"dev","kind":"vps","image":"ubuntu","owner_public_key":"ssh-ed25519 owner","requested_isolation":"container","resources":{"vcpus":2,"memory_bytes":1024,"disk_bytes":2048}}`)
 
 	first := submitCreate(t, handler, body, "lost-response")
 	second := submitCreate(t, handler, body, "lost-response")

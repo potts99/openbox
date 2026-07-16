@@ -68,9 +68,11 @@ type InstanceSoftware struct {
 type IsolationRequest string
 
 const (
-	IsolationBestAvailable IsolationRequest = "best_available"
-	IsolationStandard      IsolationRequest = "standard"
-	IsolationStrong        IsolationRequest = "strong"
+	// IsolationStrong requests a KVM virtual machine.
+	IsolationStrong IsolationRequest = "strong"
+	// IsolationContainerReq requests an Incus system container.
+	// Named *Req to avoid clashing with IsolationType IsolationContainer.
+	IsolationContainerReq IsolationRequest = "container"
 )
 
 type IsolationType string

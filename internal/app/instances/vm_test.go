@@ -21,12 +21,12 @@ func TestIsolationSelectionAndActualPersistence(t *testing.T) {
 		want      domain.IsolationType
 		wantError bool
 	}{
-		{name: "standard always container", request: domain.IsolationStandard, caps: usableVMCapabilities(), want: domain.IsolationContainer},
+		{name: "container always container", request: domain.IsolationContainerReq, caps: usableVMCapabilities(), want: domain.IsolationContainer},
 		{name: "strong supported", request: domain.IsolationStrong, caps: usableVMCapabilities(), want: domain.IsolationVM},
-		{name: "best supported", request: domain.IsolationBestAvailable, caps: usableVMCapabilities(), want: domain.IsolationVM},
-		{name: "best KVM absent", request: domain.IsolationBestAvailable, caps: unavailableVMCapabilities(runtimeapi.VMUnavailableKVMAbsent), want: domain.IsolationContainer},
-		{name: "best permission denied", request: domain.IsolationBestAvailable, caps: unavailableVMCapabilities(runtimeapi.VMUnavailableKVMPermission), want: domain.IsolationContainer},
-		{name: "best nested unavailable", request: domain.IsolationBestAvailable, caps: unavailableVMCapabilities(runtimeapi.VMUnavailableNestedVirtualization), want: domain.IsolationContainer},
+		{name: "omitted with KVM", request: "", caps: usableVMCapabilities(), want: domain.IsolationVM},
+		{name: "omitted KVM absent", request: "", caps: unavailableVMCapabilities(runtimeapi.VMUnavailableKVMAbsent), want: domain.IsolationContainer},
+		{name: "omitted permission denied", request: "", caps: unavailableVMCapabilities(runtimeapi.VMUnavailableKVMPermission), want: domain.IsolationContainer},
+		{name: "omitted nested unavailable", request: "", caps: unavailableVMCapabilities(runtimeapi.VMUnavailableNestedVirtualization), want: domain.IsolationContainer},
 		{name: "strong KVM absent", request: domain.IsolationStrong, caps: unavailableVMCapabilities(runtimeapi.VMUnavailableKVMAbsent), wantError: true},
 		{name: "strong permission denied", request: domain.IsolationStrong, caps: unavailableVMCapabilities(runtimeapi.VMUnavailableKVMPermission), wantError: true},
 		{name: "strong nested unavailable", request: domain.IsolationStrong, caps: unavailableVMCapabilities(runtimeapi.VMUnavailableNestedVirtualization), wantError: true},

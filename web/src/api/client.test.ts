@@ -64,7 +64,7 @@ describe("createHttpApi", () => {
   it("accepts the v1 items envelopes", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{
-        id: "box-1", name: "dev", kind: "vps", image_id: "ubuntu", requested_isolation: "best_available",
+        id: "box-1", name: "dev", kind: "vps", image_id: "ubuntu", requested_isolation: "strong",
         actual_isolation: "container", desired_state: "running", observed_state: "running", resources: {}, protected: false,
         created_at: "now", updated_at: "now",
       }] }), {
@@ -174,7 +174,7 @@ describe("createHttpApi", () => {
         },
         instance: {
           id: "box-9", name: "fresh", kind: "vps", image_id: "ubuntu",
-          requested_isolation: "best_available", actual_isolation: "virtual_machine",
+          requested_isolation: "strong", actual_isolation: "virtual_machine",
           desired_state: "running", observed_state: "pending",
           resources: { vcpus: 2, memory_bytes: 8589934592, disk_bytes: 21474836480 },
           protected: false, created_at: "now", updated_at: "now",
@@ -192,7 +192,7 @@ describe("createHttpApi", () => {
       name: "fresh",
       kind: "vps",
       image: "ubuntu",
-      requestedIsolation: "best_available",
+      requestedIsolation: "strong",
       vcpus: 2,
       memoryBytes: 8589934592,
       diskBytes: 21474836480,
@@ -212,7 +212,7 @@ describe("createHttpApi", () => {
         name: "fresh",
         kind: "vps",
         image: "ubuntu",
-        requested_isolation: "best_available",
+        requested_isolation: "strong",
         resources: {
           vcpus: 2,
           memory_bytes: 8589934592,
@@ -227,7 +227,7 @@ describe("createHttpApi", () => {
   it("loads instance detail and posts lifecycle actions with an idempotency key", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        id: "box-1", name: "demo", kind: "vps", image_id: "img", requested_isolation: "best_available",
+        id: "box-1", name: "demo", kind: "vps", image_id: "img", requested_isolation: "strong",
         actual_isolation: "virtual_machine", desired_state: "running", observed_state: "running",
         resources: { vcpus: 2, memory_bytes: 4294967296, disk_bytes: 21474836480 },
         protected: false, created_at: "now", updated_at: "now",

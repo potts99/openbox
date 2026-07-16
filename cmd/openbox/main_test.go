@@ -42,7 +42,7 @@ func TestListHumanAndJSON(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = fmt.Fprint(w, `{"items":[{"id":"box-1","name":"my-box","kind":"vps","requested_isolation":"best_available","desired_state":"running","observed_state":"running","actual_isolation":"container"}]}`)
+		_, _ = fmt.Fprint(w, `{"items":[{"id":"box-1","name":"my-box","kind":"vps","requested_isolation":"strong","desired_state":"running","observed_state":"running","actual_isolation":"container"}]}`)
 	})
 	defer server.Close()
 
@@ -99,7 +99,7 @@ func TestNewSendsRequestAndIdempotencyKey(t *testing.T) {
 		if body["name"] != "my-box" || body["kind"] != "vps" || body["image"] != "ubuntu" || body["owner_public_key"] != "ssh-ed25519 test" {
 			t.Fatalf("body = %#v", body)
 		}
-		_, _ = fmt.Fprint(w, `{"operation":{"id":"op-1","status":"pending","stage":"queued"},"instance":{"id":"box-1","name":"my-box","kind":"vps","requested_isolation":"best_available","desired_state":"running","observed_state":"pending","actual_isolation":"unknown"}}`)
+		_, _ = fmt.Fprint(w, `{"operation":{"id":"op-1","status":"pending","stage":"queued"},"instance":{"id":"box-1","name":"my-box","kind":"vps","requested_isolation":"strong","desired_state":"running","observed_state":"pending","actual_isolation":"unknown"}}`)
 	})
 	defer server.Close()
 

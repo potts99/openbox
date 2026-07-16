@@ -21,7 +21,7 @@ func TestParseSupportedCommands(t *testing.T) {
 	}{
 		{name: "new defaults", input: "new my-vm", want: New{
 			InstanceName: "my-vm", Kind: domain.KindVPS, Image: "ubuntu",
-			Isolation: domain.IsolationBestAvailable,
+			Isolation: "",
 			Resources: domain.Resources{VCPUs: 2, MemoryBytes: 8 << 30, DiskBytes: 20 << 30},
 		}},
 		{name: "new options", input: `new box --kind sandbox --image "ubuntu:24.04" --isolation strong --cpus 4 --memory 16GiB --disk=40GB --idempotency-key ssh-123`, want: New{

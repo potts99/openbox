@@ -1036,7 +1036,7 @@ components:
         name: { type: string }
         kind: { type: string, enum: [sandbox, vps] }
         image_id: { type: string }
-        requested_isolation: { type: string, enum: [best_available, standard, strong] }
+        requested_isolation: { type: string, enum: [strong, container] }
         actual_isolation: { type: string, enum: [unknown, container, virtual_machine] }
         desired_state: { type: string, enum: [running, stopped, deleted] }
         observed_state: { type: string, enum: [pending, creating, running, stopping, stopped, deleting, deleted, error] }
@@ -1131,7 +1131,7 @@ components:
         name: { type: string }
         kind: { type: string, enum: [sandbox, vps], default: vps }
         image: { type: string }
-        requested_isolation: { type: string, enum: [best_available, standard, strong], default: best_available }
+        requested_isolation: { type: string, enum: [strong, container], description: "Omit to let the server choose strong when KVM is usable, otherwise container." }
         resources: { $ref: "#/components/schemas/Resources" }
         owner_public_key: { type: string }
         egress_profile_id:

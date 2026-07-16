@@ -763,7 +763,7 @@ func (p *recordingNetworkPolicy) NetworkPolicyStatus(domain.Instance) domain.Net
 }
 
 func createInput() CreateInput {
-	return CreateInput{OwnerID: "owner-1", Name: "project", Kind: domain.KindVPS, Image: "ubuntu", RequestedIsolation: domain.IsolationStandard,
+	return CreateInput{OwnerID: "owner-1", Name: "project", Kind: domain.KindVPS, Image: "ubuntu", RequestedIsolation: domain.IsolationContainerReq,
 		Resources: domain.Resources{VCPUs: 2, MemoryBytes: 1024, DiskBytes: 2048}, OwnerPublicKey: "ssh-ed25519 owner", IdempotencyKey: "create-key"}
 }
 
@@ -939,7 +939,7 @@ func TestSandboxCreateAppliesKindDefaults(t *testing.T) {
 	if created.ImageID != "sha256:sandbox" {
 		t.Fatalf("image_id=%q", created.ImageID)
 	}
-	if created.RequestedIsolation != domain.IsolationStandard {
+	if created.RequestedIsolation != domain.IsolationContainerReq {
 		t.Fatalf("requested_isolation=%q", created.RequestedIsolation)
 	}
 	want := domain.Resources{VCPUs: 2, MemoryBytes: 2 << 30, DiskBytes: 10 << 30}
@@ -1069,7 +1069,7 @@ func TestPolicyVerificationFailurePreventsReadyAndMarksDriftOnInspect(t *testing
 	policy.verifyErr = nil
 	created, err := service.Create(context.Background(), CreateInput{
 		OwnerID: "owner-1", Name: "second", Kind: domain.KindVPS, Image: "ubuntu",
-		RequestedIsolation: domain.IsolationStandard,
+		RequestedIsolation: domain.IsolationContainerReq,
 		Resources:          domain.Resources{VCPUs: 2, MemoryBytes: 1024, DiskBytes: 2048},
 		OwnerPublicKey:     "ssh-ed25519 owner", IdempotencyKey: "second-create",
 	})
