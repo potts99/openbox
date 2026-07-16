@@ -1172,7 +1172,7 @@ components:
           maximum: 86400
           description: >
             Sandbox TTL from create time. Defaults to 3600 (1h) for sandboxes.
-            Ignored for non-sandbox kinds. Must not exceed 86400 (24h).
+            Valid only for sandbox kinds. Must not exceed 86400 (24h).
         egress_profile_id:
           type: string
           description: Optional system egress profile. Defaults by kind when omitted.
