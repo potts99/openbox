@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import {
+  OperationEventsSession,
+  type OperationEvent,
+  type OperationStreamStatus,
+} from "../operations/session";
+
 export interface BootstrapStatus { required: boolean }
 export interface Owner { displayName: string }
 export type Session =
@@ -68,8 +74,27 @@ export interface OperationSummary {
   id: string;
   action: string;
   status: string;
+  targetType: string;
   target: string;
+  stage: string;
+  progress: number;
+  errorCode?: string;
+  attempts: number;
+  createdAt: string;
   updatedAt: string;
+}
+
+export type { OperationEvent, OperationStreamStatus };
+export { OperationEventsSession, operationEventsUrl } from "../operations/session";
+
+export interface OperationEventHandlers {
+  onStatus?(status: OperationStreamStatus, detail?: string): void;
+  onEvent(event: OperationEvent): void;
+  onError?(detail?: string): void;
+}
+
+export interface OperationEventSubscription {
+  close(): void;
 }
 
 export type InstanceAction = "start" | "stop" | "restart";
@@ -99,6 +124,12 @@ export interface OpenBoxApi {
   installSoftware(instanceId: string, packageId: string): Promise<InstanceSoftware>;
   mutateInstance(id: string, action: InstanceAction): Promise<OperationSummary>;
   listOperations(): Promise<OperationSummary[]>;
+  getOperation(id: string): Promise<OperationSummary>;
+  subscribeOperationEvents(
+    operationId: string,
+    handlers: OperationEventHandlers,
+    options?: { EventSourceImpl?: typeof EventSource },
+  ): OperationEventSubscription;
   listPiProfiles(): Promise<PiProfileSummary[]>;
   getPiProfileHistory(id: string): Promise<PiProfileVersion[]>;
   rollbackPiProfile(id: string, version: number): Promise<PiProfileSummary>;
@@ -191,7 +222,13 @@ function normalizeOperation(value: unknown): OperationSummary {
     id: text(row.id),
     action: text(row.type),
     status: text(row.status),
+    targetType: text(row.target_type),
     target: text(row.target_id, "system"),
+    stage: text(row.stage),
+    progress: number(row.progress),
+    errorCode: text(row.error_code) || undefined,
+    attempts: number(row.attempts),
+    createdAt: text(row.created_at),
     updatedAt: text(row.updated_at),
   };
 }
@@ -306,6 +343,20 @@ export function createHttpApi(options: HttpApiOptions = {}): OpenBoxApi {
       const body = asRecord(await request("/v1/operations"));
       const items = Array.isArray(body.items) ? body.items : Array.isArray(body.operations) ? body.operations : [];
       return items.map((item) => normalizeOperation(item));
+    },
+    async getOperation(id) {
+      return normalizeOperation(await request(`/v1/operations/${encodeURIComponent(id)}`));
+    },
+    subscribeOperationEvents(operationId, handlers, options = {}) {
+      const session = new OperationEventsSession({
+        operationId,
+        EventSourceImpl: options.EventSourceImpl,
+        onStatus: handlers.onStatus,
+        onEvent: handlers.onEvent,
+        onError: handlers.onError,
+      });
+      session.connect();
+      return { close: () => session.close() };
     },
     async listPiProfiles() {
       const body = asRecord(await request("/v1/pi-profiles"));
