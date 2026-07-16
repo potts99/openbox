@@ -93,6 +93,32 @@ describe("createHttpApi", () => {
     }]);
   });
 
+  it("uses checkpoint routes, maps readiness, and sends idempotency keys", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{
+        id: "snap-1", instance_id: "box-1", name: "ready", ready: false, created_at: "now",
+      }] }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        instance: { id: "box-2", name: "worker", kind: "vps", requested_isolation: "container", actual_isolation: "container",
+          desired_state: "running", observed_state: "creating", resources: {}, protected: false, created_at: "now", updated_at: "now" },
+        operation: { id: "op-1", status: "pending" }, warnings: [], storage_efficiency: "confirmed",
+      }), { status: 202, headers: { "content-type": "application/json" } }));
+    const api = createHttpApi({ fetcher, csrfToken: "csrf-token" });
+
+    await expect(api.listSnapshots("box-1")).resolves.toEqual([{
+      id: "snap-1", instanceId: "box-1", name: "ready", ready: false, createdAt: "now",
+    }]);
+    await api.restoreSnapshot("snap-1", "worker", "ssh-ed25519 owner");
+
+    expect(fetcher).toHaveBeenNthCalledWith(1, "/v1/instances/box-1/snapshots", expect.objectContaining({
+      headers: expect.objectContaining({ "X-OpenBox-API-Version": "v1" }),
+    }));
+    expect(fetcher).toHaveBeenNthCalledWith(2, "/v1/snapshots/snap-1/restore", expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({ "Idempotency-Key": expect.any(String) }),
+    }));
+  });
+
   it("loads operation detail and subscribes to retained events", async () => {
     MockEventSource.instances = [];
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({

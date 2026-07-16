@@ -50,6 +50,13 @@ const (
 	CreatedTokenScopesOwner CreatedTokenScopes = "owner"
 )
 
+// Defines values for DeriveInstanceResultStorageEfficiency.
+const (
+	Confirmed    DeriveInstanceResultStorageEfficiency = "confirmed"
+	NotSupported DeriveInstanceResultStorageEfficiency = "not_supported"
+	Unknown      DeriveInstanceResultStorageEfficiency = "unknown"
+)
+
 // Defines values for EgressProfileMode.
 const (
 	EgressProfileModeRestricted EgressProfileMode = "restricted"
@@ -199,6 +206,14 @@ type Capabilities struct {
 	VmReason        *string         `json:"vm_reason,omitempty"`
 }
 
+// CloneInstanceRequest defines model for CloneInstanceRequest.
+type CloneInstanceRequest struct {
+	Name string `json:"name"`
+
+	// OwnerPublicKey OpenBox-managed SSH access rewritten onto the derived instance.
+	OwnerPublicKey string `json:"owner_public_key"`
+}
+
 // Connection defines model for Connection.
 type Connection struct {
 	Ssh *SSHEndpoint `json:"ssh"`
@@ -259,6 +274,18 @@ type CreateSSHKeyRequest struct {
 	PublicKey string `json:"public_key"`
 }
 
+// CreateSnapshotRequest defines model for CreateSnapshotRequest.
+type CreateSnapshotRequest struct {
+	// Name Checkpoint name; same validation as instance names.
+	Name string `json:"name"`
+}
+
+// CreateSnapshotResult defines model for CreateSnapshotResult.
+type CreateSnapshotResult struct {
+	Operation Operation `json:"operation"`
+	Snapshot  *Snapshot `json:"snapshot"`
+}
+
 // CreateTokenRequest defines model for CreateTokenRequest.
 type CreateTokenRequest struct {
 	ExpiresAt *time.Time                  `json:"expires_at,omitempty"`
@@ -283,6 +310,21 @@ type CreatedToken struct {
 
 // CreatedTokenScopes defines model for CreatedToken.Scopes.
 type CreatedTokenScopes string
+
+// DeriveInstanceResult defines model for DeriveInstanceResult.
+type DeriveInstanceResult struct {
+	Instance  *Instance `json:"instance"`
+	Operation Operation `json:"operation"`
+
+	// StorageEfficiency Copy-on-write claim is allowed only when confirmed. Otherwise OpenBox must not imply storage-efficient copy behavior.
+	StorageEfficiency DeriveInstanceResultStorageEfficiency `json:"storage_efficiency"`
+
+	// Warnings Preflight warnings (full copy, retained guest secrets).
+	Warnings *[]string `json:"warnings,omitempty"`
+}
+
+// DeriveInstanceResultStorageEfficiency Copy-on-write claim is allowed only when confirmed. Otherwise OpenBox must not imply storage-efficient copy behavior.
+type DeriveInstanceResultStorageEfficiency string
 
 // EgressApplyError defines model for EgressApplyError.
 type EgressApplyError struct {
@@ -369,9 +411,18 @@ type Image struct {
 type Instance struct {
 	// ActualIsolation Runtime type that was provisioned. Never silently differs from a successful strong request.
 	ActualIsolation InstanceActualIsolation `json:"actual_isolation"`
-	CreatedAt       time.Time               `json:"created_at"`
-	DesiredState    InstanceDesiredState    `json:"desired_state"`
-	EgressProfileId *string                 `json:"egress_profile_id,omitempty"`
+
+	// CloneSourceImageId Immutable image fingerprint inherited from the source.
+	CloneSourceImageId *string `json:"clone_source_image_id,omitempty"`
+
+	// CloneSourceInstanceId Source instance id when this instance was cloned or restored.
+	CloneSourceInstanceId *string `json:"clone_source_instance_id,omitempty"`
+
+	// CloneSourceSnapshotId Checkpoint id for restore-as-new; empty for live clone.
+	CloneSourceSnapshotId *string              `json:"clone_source_snapshot_id,omitempty"`
+	CreatedAt             time.Time            `json:"created_at"`
+	DesiredState          InstanceDesiredState `json:"desired_state"`
+	EgressProfileId       *string              `json:"egress_profile_id,omitempty"`
 
 	// ErrorCode Machine-readable failure code when observed_state is error.
 	ErrorCode      *string `json:"error_code,omitempty"`
@@ -456,6 +507,11 @@ type ListRoutesResponse struct {
 // ListSSHKeysResponse defines model for ListSSHKeysResponse.
 type ListSSHKeysResponse struct {
 	Items []SSHKey `json:"items"`
+}
+
+// ListSnapshotsResponse defines model for ListSnapshotsResponse.
+type ListSnapshotsResponse struct {
+	Items []Snapshot `json:"items"`
 }
 
 // ListSoftwareResponse defines model for ListSoftwareResponse.
@@ -546,6 +602,14 @@ type Resources struct {
 	Vcpus       int   `json:"vcpus"`
 }
 
+// RestoreSnapshotRequest defines model for RestoreSnapshotRequest.
+type RestoreSnapshotRequest struct {
+	Name string `json:"name"`
+
+	// OwnerPublicKey OpenBox-managed SSH access rewritten onto the derived instance.
+	OwnerPublicKey string `json:"owner_public_key"`
+}
+
 // Route defines model for Route.
 type Route struct {
 	CreatedAt  time.Time       `json:"created_at"`
@@ -581,6 +645,17 @@ type Session struct {
 	CsrfToken *string   `json:"csrf_token,omitempty"`
 	ExpiresAt time.Time `json:"expires_at"`
 	OwnerId   string    `json:"owner_id"`
+}
+
+// Snapshot defines model for Snapshot.
+type Snapshot struct {
+	CreatedAt  time.Time `json:"created_at"`
+	Id         string    `json:"id"`
+	InstanceId string    `json:"instance_id"`
+	Name       string    `json:"name"`
+
+	// Ready True only after the disk-only runtime snapshot is available for restore or delete.
+	Ready bool `json:"ready"`
 }
 
 // SoftwarePackage defines model for SoftwarePackage.
@@ -653,6 +728,9 @@ type OperationID = string
 
 // RouteID defines model for RouteID.
 type RouteID = string
+
+// SnapshotID defines model for SnapshotID.
+type SnapshotID = string
 
 // Error defines model for Error.
 type Error = ErrorEnvelope
@@ -752,6 +830,16 @@ type MutateInstanceParams struct {
 	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
 }
 
+// CloneInstanceParams defines parameters for CloneInstance.
+type CloneInstanceParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion    `json:"X-OpenBox-API-Version,omitempty"`
+	IdempotencyKey     IdempotencyKey `json:"Idempotency-Key"`
+
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+}
+
 // ExecInstanceParams defines parameters for ExecInstance.
 type ExecInstanceParams struct {
 	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
@@ -777,6 +865,23 @@ type AttachInstanceEgressProfileParams struct {
 
 	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
 	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+}
+
+// ListInstanceSnapshotsParams defines parameters for ListInstanceSnapshots.
+type ListInstanceSnapshotsParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// CreateInstanceSnapshotParams defines parameters for CreateInstanceSnapshot.
+type CreateInstanceSnapshotParams struct {
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
 }
 
 // InstallInstanceSoftwareParams defines parameters for InstallInstanceSoftware.
@@ -981,6 +1086,33 @@ type CreateSessionParams struct {
 	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
 }
 
+// DeleteSnapshotParams defines parameters for DeleteSnapshot.
+type DeleteSnapshotParams struct {
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// GetSnapshotParams defines parameters for GetSnapshot.
+type GetSnapshotParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// RestoreSnapshotAsNewParams defines parameters for RestoreSnapshotAsNew.
+type RestoreSnapshotAsNewParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion    `json:"X-OpenBox-API-Version,omitempty"`
+	IdempotencyKey     IdempotencyKey `json:"Idempotency-Key"`
+
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+}
+
 // ListSoftwareCatalogParams defines parameters for ListSoftwareCatalog.
 type ListSoftwareCatalogParams struct {
 	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
@@ -1050,6 +1182,9 @@ type ConsumeBootstrapJSONRequestBody = BootstrapRequest
 // CreateInstanceJSONRequestBody defines body for CreateInstance for application/json ContentType.
 type CreateInstanceJSONRequestBody = CreateInstanceRequest
 
+// CloneInstanceJSONRequestBody defines body for CloneInstance for application/json ContentType.
+type CloneInstanceJSONRequestBody = CloneInstanceRequest
+
 // ExecInstanceJSONRequestBody defines body for ExecInstance for application/json ContentType.
 type ExecInstanceJSONRequestBody = ExecInstanceRequest
 
@@ -1058,6 +1193,9 @@ type ExtendInstanceExpiryJSONRequestBody = ExtendInstanceRequest
 
 // AttachInstanceEgressProfileJSONRequestBody defines body for AttachInstanceEgressProfile for application/json ContentType.
 type AttachInstanceEgressProfileJSONRequestBody = AttachEgressProfileRequest
+
+// CreateInstanceSnapshotJSONRequestBody defines body for CreateInstanceSnapshot for application/json ContentType.
+type CreateInstanceSnapshotJSONRequestBody = CreateSnapshotRequest
 
 // CreateEgressProfileJSONRequestBody defines body for CreateEgressProfile for application/json ContentType.
 type CreateEgressProfileJSONRequestBody = CreateEgressProfileRequest
@@ -1079,6 +1217,9 @@ type UpdateRouteJSONRequestBody = UpdateRouteRequest
 
 // CreateSessionJSONRequestBody defines body for CreateSession for application/json ContentType.
 type CreateSessionJSONRequestBody = LoginRequest
+
+// RestoreSnapshotAsNewJSONRequestBody defines body for RestoreSnapshotAsNew for application/json ContentType.
+type RestoreSnapshotAsNewJSONRequestBody = RestoreSnapshotRequest
 
 // CreateSSHKeyJSONRequestBody defines body for CreateSSHKey for application/json ContentType.
 type CreateSSHKeyJSONRequestBody = CreateSSHKeyRequest

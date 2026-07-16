@@ -172,6 +172,74 @@ func (c *Client) ExtendInstance(ctx context.Context, id string, durationSeconds 
 	return instance, instance.validate()
 }
 
+func (c *Client) ListSnapshots(ctx context.Context, instanceID string) ([]Snapshot, error) {
+	var response struct {
+		Items []Snapshot `json:"items"`
+	}
+	_, err := c.do(ctx, http.MethodGet, resourcePath("/v1/instances", instanceID, "snapshots"), "", nil, &response)
+	if err != nil {
+		return nil, err
+	}
+	if response.Items == nil {
+		return []Snapshot{}, nil
+	}
+	return response.Items, nil
+}
+
+func (c *Client) CreateSnapshot(ctx context.Context, instanceID, name, idempotencyKey string) (CreateSnapshotResult, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return CreateSnapshotResult{}, errors.New("idempotency key is required")
+	}
+	var result CreateSnapshotResult
+	_, err := c.do(ctx, http.MethodPost, resourcePath("/v1/instances", instanceID, "snapshots"), idempotencyKey, CreateSnapshotRequest{Name: name}, &result)
+	if err != nil {
+		return CreateSnapshotResult{}, err
+	}
+	return result, result.Operation.validate()
+}
+
+func (c *Client) GetSnapshot(ctx context.Context, snapshotID string) (Snapshot, error) {
+	var snapshot Snapshot
+	_, err := c.do(ctx, http.MethodGet, resourcePath("/v1/snapshots", snapshotID), "", nil, &snapshot)
+	return snapshot, err
+}
+
+func (c *Client) DeleteSnapshot(ctx context.Context, snapshotID, idempotencyKey string) (Operation, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return Operation{}, errors.New("idempotency key is required")
+	}
+	var operation Operation
+	_, err := c.do(ctx, http.MethodDelete, resourcePath("/v1/snapshots", snapshotID), idempotencyKey, nil, &operation)
+	if err != nil {
+		return Operation{}, err
+	}
+	return operation, operation.validate()
+}
+
+func (c *Client) RestoreSnapshot(ctx context.Context, snapshotID string, request RestoreSnapshotRequest, idempotencyKey string) (DeriveInstanceResult, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return DeriveInstanceResult{}, errors.New("idempotency key is required")
+	}
+	var result DeriveInstanceResult
+	_, err := c.do(ctx, http.MethodPost, resourcePath("/v1/snapshots", snapshotID, "restore"), idempotencyKey, request, &result)
+	if err != nil {
+		return DeriveInstanceResult{}, err
+	}
+	return result, result.Operation.validate()
+}
+
+func (c *Client) CloneInstance(ctx context.Context, instanceID string, request CloneInstanceRequest, idempotencyKey string) (DeriveInstanceResult, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return DeriveInstanceResult{}, errors.New("idempotency key is required")
+	}
+	var result DeriveInstanceResult
+	_, err := c.do(ctx, http.MethodPost, resourcePath("/v1/instances", instanceID, "clone"), idempotencyKey, request, &result)
+	if err != nil {
+		return DeriveInstanceResult{}, err
+	}
+	return result, result.Operation.validate()
+}
+
 // ExecInstance streams NDJSON exec frames. The returned ReadCloser must be
 // closed by the caller. Frames are never buffered server-side into SQLite.
 func (c *Client) ExecInstance(ctx context.Context, id string, request ExecInstanceRequest) (io.ReadCloser, error) {

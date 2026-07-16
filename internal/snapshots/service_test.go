@@ -4,6 +4,7 @@ package snapshots_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -68,17 +69,22 @@ func TestRestoreAsNewCreatesIndependentInstance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	clone, restoreOp, err := svc.RestoreAsNew(context.Background(), snapshots.RestoreInput{
-		OwnerID: instance.OwnerID, SnapshotID: created.ID, Name: "feature", IdempotencyKey: "restore-1",
+	result, err := svc.RestoreAsNew(context.Background(), snapshots.RestoreInput{
+		OwnerID: instance.OwnerID, SnapshotID: created.ID, Name: "feature",
+		OwnerPublicKey: "ssh-ed25519 owner", IdempotencyKey: "restore-1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.RecoverOperation(context.Background(), restoreOp); err != nil {
+	if err := svc.RecoverOperation(context.Background(), result.Operation); err != nil {
 		t.Fatal(err)
 	}
+	clone := result.Instance
 	if clone.Name != "feature" || clone.ID == instance.ID {
 		t.Fatalf("clone=%+v", clone)
+	}
+	if clone.CloneSourceInstanceID != instance.ID || clone.CloneSourceSnapshotID != created.ID || clone.CloneSourceImageID != instance.ImageID {
+		t.Fatalf("provenance missing: %+v", clone)
 	}
 	reloaded, err := repo.GetInstance(context.Background(), clone.OwnerID, clone.ID)
 	if err != nil {
@@ -90,21 +96,97 @@ func TestRestoreAsNewCreatesIndependentInstance(t *testing.T) {
 	if _, err := runtime.InspectInstance(context.Background(), reloaded.RuntimeRef); err != nil {
 		t.Fatal(err)
 	}
+	keys, ok := runtime.WrittenFile(reloaded.RuntimeRef, "/root/.ssh/authorized_keys")
+	if !ok || keys != "ssh-ed25519 owner\n" {
+		t.Fatalf("authorized_keys=%q ok=%v", keys, ok)
+	}
+}
+
+func TestRestoreRejectsSnapshotUntilRuntimeCheckpointExists(t *testing.T) {
+	t.Parallel()
+	svc, runtime, repo := newTestService(t)
+	instance := seedRunningInstance(t, repo, runtime, "inst-1", "base")
+	created, _, err := svc.Create(context.Background(), snapshots.CreateInput{
+		OwnerID: instance.OwnerID, InstanceID: instance.ID, Name: "pending", IdempotencyKey: "snap-pending",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.RuntimeRef != "" {
+		t.Fatalf("pending runtime ref=%q", created.RuntimeRef)
+	}
+	_, err = svc.RestoreAsNew(context.Background(), snapshots.RestoreInput{
+		OwnerID: instance.OwnerID, SnapshotID: created.ID, Name: "feature",
+		OwnerPublicKey: "ssh-ed25519 owner", IdempotencyKey: "restore-pending",
+	})
+	var domainErr *domain.Error
+	if !errors.As(err, &domainErr) || domainErr.Code != domain.CodeConflict || domainErr.Field != "snapshot" {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestRestoreAsNewWarnsForFullCopy(t *testing.T) {
+	t.Parallel()
+	runtime := fake.New(runtimeapi.Capabilities{Architecture: "x86_64", Containers: true, StorageDrivers: []string{"dir"}})
+	repo := &memoryRepo{
+		instances: map[domain.InstanceID]domain.Instance{},
+		snapshots: map[domain.SnapshotID]domain.Snapshot{},
+		ops:       map[string]domain.Operation{},
+		software:  map[domain.InstanceID][]domain.InstanceSoftware{},
+	}
+	n := 0
+	svc, err := snapshots.New(runtime, repo, snapshots.Options{
+		Now: func() time.Time { return time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC) },
+		NewID: func() string {
+			n++
+			return fmt.Sprintf("gen-%d", n)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance := seedRunningInstance(t, repo, runtime, "inst-1", "base")
+	instance.Protected = false
+	repo.instances[instance.ID] = instance
+	repo.software[instance.ID] = []domain.InstanceSoftware{{
+		InstanceID: instance.ID, OwnerID: instance.OwnerID, PackageID: "pi", Status: domain.SoftwareInstalled,
+	}}
+	created, op, err := svc.Create(context.Background(), snapshots.CreateInput{
+		OwnerID: instance.OwnerID, InstanceID: instance.ID, Name: "ready", IdempotencyKey: "snap-warn",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RecoverOperation(context.Background(), op); err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.RestoreAsNew(context.Background(), snapshots.RestoreInput{
+		OwnerID: instance.OwnerID, SnapshotID: created.ID, Name: "feature",
+		OwnerPublicKey: "ssh-ed25519 owner", IdempotencyKey: "restore-warn",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Warnings) < 2 {
+		t.Fatalf("warnings=%v", result.Warnings)
+	}
 }
 
 type memoryRepo struct {
 	instances map[domain.InstanceID]domain.Instance
 	snapshots map[domain.SnapshotID]domain.Snapshot
 	ops       map[string]domain.Operation
+	software  map[domain.InstanceID][]domain.InstanceSoftware
 }
 
 func newTestService(t *testing.T) (*snapshots.Service, *fake.Runtime, *memoryRepo) {
 	t.Helper()
-	runtime := fake.New(runtimeapi.Capabilities{Architecture: "x86_64", Containers: true})
+	runtime := fake.New(runtimeapi.Capabilities{Architecture: "x86_64", Containers: true, StorageDrivers: []string{"zfs"}})
 	repo := &memoryRepo{
 		instances: map[domain.InstanceID]domain.Instance{},
 		snapshots: map[domain.SnapshotID]domain.Snapshot{},
 		ops:       map[string]domain.Operation{},
+		software:  map[domain.InstanceID][]domain.InstanceSoftware{},
 	}
 	n := 0
 	svc, err := snapshots.New(runtime, repo, snapshots.Options{
@@ -251,4 +333,11 @@ func (m *memoryRepo) CreateDeleteOperation(_ context.Context, operation domain.O
 	}
 	m.ops[string(operation.ID)] = operation
 	return operation, false, nil
+}
+func (m *memoryRepo) ListInstanceSoftware(_ context.Context, owner domain.OwnerID, id domain.InstanceID) ([]domain.InstanceSoftware, error) {
+	instance, ok := m.instances[id]
+	if !ok || instance.OwnerID != owner {
+		return nil, &domain.Error{Code: domain.CodeNotFound, Field: "instance"}
+	}
+	return append([]domain.InstanceSoftware(nil), m.software[id]...), nil
 }

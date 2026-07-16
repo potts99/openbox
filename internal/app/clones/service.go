@@ -15,31 +15,35 @@ import (
 	"time"
 
 	"github.com/openbox-dev/openbox/internal/app/instances"
+	"github.com/openbox-dev/openbox/internal/app/reuse"
 	"github.com/openbox-dev/openbox/internal/domain"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 )
 
-const (
-	opCopy = "instance.copy"
+const opCopy = "instance.copy"
 
-	// WarningFullCopy is reported before execution when storage lacks CoW.
-	WarningFullCopy = "storage does not provide copy-on-write; OpenBox will use a full copy and will not claim copy-on-write behavior"
-	// WarningSecrets is reported when cloning an unprotected VPS that has Pi
-	// (or other guest-persisted agent state) installed.
-	WarningSecrets = "source has installed software that may retain secrets; cloned guest files may include them"
-)
+// WarningFullCopy is reported before execution when storage lacks CoW.
+const WarningFullCopy = reuse.WarningFullCopy
+
+// WarningSecrets is reported when cloning an unprotected VPS that has Pi
+// (or other guest-persisted agent state) installed.
+const WarningSecrets = reuse.WarningSecrets
 
 // CloneRuntime is the narrow runtime boundary used for efficient copies.
 type CloneRuntime interface {
-	DiscoverCapabilities(context.Context) (runtimeapi.Capabilities, error)
+	StoragePoolDriver(context.Context) (string, error)
 	CopyInstance(context.Context, runtimeapi.CopyRequest) (runtimeapi.Instance, error)
 	InspectInstance(context.Context, string) (runtimeapi.Instance, error)
+	WriteFile(context.Context, runtimeapi.WriteFileRequest) error
+	StartInstance(context.Context, string) error
+	StopInstance(context.Context, string) error
 }
 
 // Repository persists clone targets and durable operations.
 type Repository interface {
 	ListInstancesByOwner(context.Context, domain.OwnerID, int) ([]domain.Instance, error)
 	GetInstance(context.Context, domain.OwnerID, domain.InstanceID) (domain.Instance, error)
+	GetSnapshot(context.Context, domain.OwnerID, domain.SnapshotID) (domain.Snapshot, error)
 	CreateInstance(context.Context, domain.Instance, domain.Operation) (domain.Operation, bool, error)
 	UpdateInstanceObservation(context.Context, domain.OwnerID, domain.InstanceID, string, domain.IsolationType, domain.ObservedState, domain.ErrorCode, time.Time) error
 	GetOperationByIdempotency(context.Context, domain.OwnerID, string) (domain.Operation, bool, error)
@@ -50,41 +54,51 @@ type Repository interface {
 
 // Options configures clocks and ID generation.
 type Options struct {
-	Now   func() time.Time
-	NewID func() string
+	Now              func() time.Time
+	NewID            func() string
+	GatewayPublicKey string
+	NetworkPolicy    instances.NetworkPolicy
 }
 
 // Service orchestrates cp source target through durable operations.
 type Service struct {
-	runtime CloneRuntime
-	repo    Repository
-	now     func() time.Time
-	newID   func() string
+	runtime          CloneRuntime
+	repo             Repository
+	now              func() time.Time
+	newID            func() string
+	gatewayPublicKey string
+	networkPolicy    instances.NetworkPolicy
 }
 
 // CopyInput is the administrator-facing cp payload. Source may be a name or ID.
+// SnapshotID is optional for legacy callers; the supported HTTP clone path is
+// live-source only and leaves SnapshotID empty. Point-in-time fan-out uses
+// restore-as-new.
 type CopyInput struct {
 	OwnerID        domain.OwnerID
 	Source         string
 	Destination    string
 	SnapshotID     domain.SnapshotID
+	OwnerPublicKey string
 	IdempotencyKey string
 }
 
 // SubmitResult is the durable copy submission plus pre-execution warnings.
 type SubmitResult struct {
-	Instance  domain.Instance
-	Operation domain.Operation
-	Warnings  []string
+	Instance          domain.Instance
+	Operation         domain.Operation
+	Warnings          []string
+	StorageEfficiency reuse.StorageEfficiency
 }
 
 type copyPayload struct {
-	SourceRef   string            `json:"source_ref"`
-	SnapshotRef string            `json:"snapshot_ref"`
-	TargetRef   string            `json:"target_ref"`
-	SourceID    domain.InstanceID `json:"source_instance_id"`
-	ImageID     domain.ImageID    `json:"source_image_id"`
-	OwnerID     domain.OwnerID    `json:"owner_id"`
+	SourceRef      string            `json:"source_ref"`
+	SnapshotRef    string            `json:"snapshot_ref"`
+	TargetRef      string            `json:"target_ref"`
+	SourceID       domain.InstanceID `json:"source_instance_id"`
+	ImageID        domain.ImageID    `json:"source_image_id"`
+	OwnerID        domain.OwnerID    `json:"owner_id"`
+	OwnerPublicKey string            `json:"owner_public_key"`
 }
 
 // New constructs a clone Service.
@@ -98,27 +112,24 @@ func New(runtime CloneRuntime, repo Repository, options Options) (*Service, erro
 	if options.NewID == nil {
 		options.NewID = randomID
 	}
-	return &Service{runtime: runtime, repo: repo, now: options.Now, newID: options.NewID}, nil
+	return &Service{
+		runtime: runtime, repo: repo, now: options.Now, newID: options.NewID,
+		gatewayPublicKey: strings.TrimSpace(options.GatewayPublicKey), networkPolicy: options.NetworkPolicy,
+	}, nil
 }
 
 // StorageEfficientCopy reports whether any advertised driver supports CoW copies.
 // OpenBox never claims copy-on-write unless this returns true.
 func StorageEfficientCopy(drivers []string) bool {
-	for _, driver := range drivers {
-		switch strings.ToLower(strings.TrimSpace(driver)) {
-		case "btrfs", "zfs", "lvm", "ceph", "cephfs", "powerflex", "pure":
-			return true
-		}
-	}
-	return false
+	return reuse.StorageEfficientCopy(drivers)
 }
 
 // SubmitCopy records a new instance cloned from source without mutating runtime yet.
 func (s *Service) SubmitCopy(ctx context.Context, input CopyInput) (SubmitResult, error) {
-	if input.OwnerID == "" || input.Source == "" || input.Destination == "" || input.IdempotencyKey == "" {
+	if input.OwnerID == "" || input.Source == "" || input.Destination == "" || input.IdempotencyKey == "" || strings.TrimSpace(input.OwnerPublicKey) == "" {
 		return SubmitResult{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "copy"}
 	}
-	requestHash := hashString("copy:" + input.Source + ":" + input.Destination + ":" + string(input.SnapshotID))
+	requestHash := hashString("copy:" + input.Source + ":" + input.Destination + ":" + string(input.SnapshotID) + ":" + strings.TrimSpace(input.OwnerPublicKey))
 	if existing, found, err := s.repo.GetOperationByIdempotency(ctx, input.OwnerID, input.IdempotencyKey); err != nil {
 		return SubmitResult{}, err
 	} else if found {
@@ -126,7 +137,7 @@ func (s *Service) SubmitCopy(ctx context.Context, input CopyInput) (SubmitResult
 			return SubmitResult{}, &domain.Error{Code: domain.CodeIdempotencyConflict, Field: "idempotency_key"}
 		}
 		instance, getErr := s.repo.GetInstance(ctx, input.OwnerID, domain.InstanceID(existing.TargetID))
-		return SubmitResult{Instance: instance, Operation: existing}, getErr
+		return s.replayResult(ctx, instance, existing, getErr)
 	}
 	source, err := s.resolve(ctx, input.OwnerID, input.Source)
 	if err != nil {
@@ -135,25 +146,29 @@ func (s *Service) SubmitCopy(ctx context.Context, input CopyInput) (SubmitResult
 	if source.RuntimeRef == "" || source.DeletedAt != nil {
 		return SubmitResult{}, &domain.Error{Code: domain.CodeConflict, Field: "source"}
 	}
-	capabilities, err := s.runtime.DiscoverCapabilities(ctx)
+	snapshotRef := ""
+	if input.SnapshotID != "" {
+		snapshot, snapErr := s.repo.GetSnapshot(ctx, input.OwnerID, input.SnapshotID)
+		if snapErr != nil {
+			return SubmitResult{}, snapErr
+		}
+		if snapshot.InstanceID != source.ID {
+			return SubmitResult{}, &domain.Error{Code: domain.CodeInvalidArgument, Field: "snapshot_id"}
+		}
+		if snapshot.RuntimeRef == "" {
+			return SubmitResult{}, &domain.Error{Code: domain.CodeConflict, Field: "snapshot"}
+		}
+		snapshotRef = snapshot.RuntimeRef
+	}
+	software, err := s.repo.ListInstanceSoftware(ctx, source.OwnerID, source.ID)
 	if err != nil {
-		return SubmitResult{}, fmt.Errorf("discover runtime capabilities: %w", err)
+		return SubmitResult{}, err
 	}
-	warnings := make([]string, 0, 2)
-	if !StorageEfficientCopy(capabilities.StorageDrivers) {
+	driver, driverErr := s.runtime.StoragePoolDriver(ctx)
+	efficiency, warnings := reuse.Preflight(runtimeapi.Capabilities{StorageDrivers: []string{driver}}, source, software)
+	if driverErr != nil {
+		efficiency = reuse.StorageUnknown
 		warnings = append(warnings, WarningFullCopy)
-	}
-	if !source.Protected {
-		rows, listErr := s.repo.ListInstanceSoftware(ctx, source.OwnerID, source.ID)
-		if listErr != nil {
-			return SubmitResult{}, listErr
-		}
-		for _, row := range rows {
-			if row.PackageID == "pi" && (row.Status == domain.SoftwareInstalled || row.Status == domain.SoftwareFailed || row.Status == domain.SoftwarePending) {
-				warnings = append(warnings, WarningSecrets)
-				break
-			}
-		}
 	}
 	now := s.now().UTC()
 	clone, err := domain.NewInstance(domain.InstanceID(s.newID()), input.OwnerID, input.Destination, source.Kind, now)
@@ -166,6 +181,7 @@ func (s *Service) SubmitCopy(ctx context.Context, input CopyInput) (SubmitResult
 	clone.Resources = source.Resources
 	clone.RuntimeRef = runtimeReference(clone.ID)
 	clone.Protected = false
+	clone.ObservedState = domain.ObservedCreating
 	clone.CloneSourceInstanceID = source.ID
 	clone.CloneSourceSnapshotID = input.SnapshotID
 	clone.CloneSourceImageID = source.ImageID
@@ -178,7 +194,8 @@ func (s *Service) SubmitCopy(ctx context.Context, input CopyInput) (SubmitResult
 		CreatedAt: now, UpdatedAt: now,
 	}
 	payload, err := json.Marshal(copyPayload{
-		SourceRef: source.RuntimeRef, TargetRef: clone.RuntimeRef, SourceID: source.ID, ImageID: source.ImageID, OwnerID: input.OwnerID,
+		SourceRef: source.RuntimeRef, SnapshotRef: snapshotRef, TargetRef: clone.RuntimeRef,
+		SourceID: source.ID, ImageID: source.ImageID, OwnerID: input.OwnerID, OwnerPublicKey: strings.TrimSpace(input.OwnerPublicKey),
 	})
 	if err != nil {
 		return SubmitResult{}, fmt.Errorf("encode copy payload: %w", err)
@@ -190,9 +207,9 @@ func (s *Service) SubmitCopy(ctx context.Context, input CopyInput) (SubmitResult
 	}
 	if replay {
 		clone, err = s.repo.GetInstance(ctx, input.OwnerID, domain.InstanceID(recorded.TargetID))
-		return SubmitResult{Instance: clone, Operation: recorded, Warnings: warnings}, err
+		return SubmitResult{Instance: clone, Operation: recorded, Warnings: warnings, StorageEfficiency: efficiency}, err
 	}
-	return SubmitResult{Instance: clone, Operation: operation, Warnings: warnings}, nil
+	return SubmitResult{Instance: clone, Operation: operation, Warnings: warnings, StorageEfficiency: efficiency}, nil
 }
 
 // RecoverOperation executes or resumes a durable copy operation.
@@ -236,6 +253,16 @@ func (s *Service) RecoverOperation(ctx context.Context, operation domain.Operati
 	if err := instances.VerifyRuntimeIdentity(copied, clone.ID, clone.ActualIsolation); err != nil {
 		return err
 	}
+	if payload.OwnerPublicKey != "" {
+		if err := reuse.WriteOwnerAuthorizedKeys(ctx, s.runtime, payload.TargetRef, payload.OwnerPublicKey, s.gatewayPublicKey); err != nil {
+			return err
+		}
+	}
+	if s.networkPolicy != nil {
+		if err := s.networkPolicy.ApplyNetworkPolicy(ctx, clone); err != nil {
+			return fmt.Errorf("apply derived network policy: %w", err)
+		}
+	}
 	observed := domain.ObservedStopped
 	if copied.State == runtimeapi.StateRunning {
 		observed = domain.ObservedRunning
@@ -247,6 +274,27 @@ func (s *Service) RecoverOperation(ctx context.Context, operation domain.Operati
 		return err
 	}
 	return s.repo.CompleteOperation(ctx, operation.OwnerID, operation.ID, s.now())
+}
+
+func (s *Service) replayResult(ctx context.Context, instance domain.Instance, operation domain.Operation, getErr error) (SubmitResult, error) {
+	if getErr != nil {
+		return SubmitResult{}, getErr
+	}
+	source, err := s.repo.GetInstance(ctx, operation.OwnerID, instance.CloneSourceInstanceID)
+	if err != nil {
+		return SubmitResult{}, err
+	}
+	software, err := s.repo.ListInstanceSoftware(ctx, source.OwnerID, source.ID)
+	if err != nil {
+		return SubmitResult{}, err
+	}
+	driver, driverErr := s.runtime.StoragePoolDriver(ctx)
+	efficiency, warnings := reuse.Preflight(runtimeapi.Capabilities{StorageDrivers: []string{driver}}, source, software)
+	if driverErr != nil {
+		efficiency = reuse.StorageUnknown
+		warnings = append(warnings, WarningFullCopy)
+	}
+	return SubmitResult{Instance: instance, Operation: operation, Warnings: warnings, StorageEfficiency: efficiency}, nil
 }
 
 func managedMetadata(ownerID domain.OwnerID, instanceID domain.InstanceID) map[string]string {

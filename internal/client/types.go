@@ -90,24 +90,27 @@ type EgressProfile struct {
 }
 
 type Instance struct {
-	ID                 string              `json:"id"`
-	Name               string              `json:"name"`
-	Kind               string              `json:"kind"`
-	ImageID            string              `json:"image_id"`
-	RequestedIsolation string              `json:"requested_isolation"`
-	ActualIsolation    string              `json:"actual_isolation"`
-	DesiredState       string              `json:"desired_state"`
-	ObservedState      string              `json:"observed_state"`
-	Resources          Resources           `json:"resources"`
-	ExpiresAt          *time.Time          `json:"expires_at,omitempty"`
-	Protected          bool                `json:"protected"`
-	ErrorCode          string              `json:"error_code,omitempty"`
-	ErrorStage         string              `json:"error_stage,omitempty"`
-	ErrorRetryable     bool                `json:"error_retryable,omitempty"`
-	EgressProfileID    string              `json:"egress_profile_id,omitempty"`
-	NetworkPolicy      NetworkPolicyStatus `json:"network_policy"`
-	CreatedAt          time.Time           `json:"created_at"`
-	UpdatedAt          time.Time           `json:"updated_at"`
+	ID                    string              `json:"id"`
+	Name                  string              `json:"name"`
+	Kind                  string              `json:"kind"`
+	ImageID               string              `json:"image_id"`
+	RequestedIsolation    string              `json:"requested_isolation"`
+	ActualIsolation       string              `json:"actual_isolation"`
+	DesiredState          string              `json:"desired_state"`
+	ObservedState         string              `json:"observed_state"`
+	Resources             Resources           `json:"resources"`
+	ExpiresAt             *time.Time          `json:"expires_at,omitempty"`
+	Protected             bool                `json:"protected"`
+	ErrorCode             string              `json:"error_code,omitempty"`
+	ErrorStage            string              `json:"error_stage,omitempty"`
+	ErrorRetryable        bool                `json:"error_retryable,omitempty"`
+	EgressProfileID       string              `json:"egress_profile_id,omitempty"`
+	CloneSourceInstanceID string              `json:"clone_source_instance_id,omitempty"`
+	CloneSourceSnapshotID string              `json:"clone_source_snapshot_id,omitempty"`
+	CloneSourceImageID    string              `json:"clone_source_image_id,omitempty"`
+	NetworkPolicy         NetworkPolicyStatus `json:"network_policy"`
+	CreatedAt             time.Time           `json:"created_at"`
+	UpdatedAt             time.Time           `json:"updated_at"`
 }
 
 func (i Instance) validate() error {
@@ -138,6 +141,40 @@ type CreateInstanceRequest struct {
 	OwnerPublicKey     string    `json:"owner_public_key,omitempty"`
 	LifetimeSeconds    int       `json:"lifetime_seconds,omitempty"`
 	EgressProfileID    string    `json:"egress_profile_id,omitempty"`
+}
+
+type Snapshot struct {
+	ID         string    `json:"id"`
+	InstanceID string    `json:"instance_id"`
+	Name       string    `json:"name"`
+	Ready      bool      `json:"ready"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type CreateSnapshotRequest struct {
+	Name string `json:"name"`
+}
+
+type CreateSnapshotResult struct {
+	Snapshot  *Snapshot `json:"snapshot,omitempty"`
+	Operation Operation `json:"operation"`
+}
+
+type CloneInstanceRequest struct {
+	Name           string `json:"name"`
+	OwnerPublicKey string `json:"owner_public_key"`
+}
+
+type RestoreSnapshotRequest struct {
+	Name           string `json:"name"`
+	OwnerPublicKey string `json:"owner_public_key"`
+}
+
+type DeriveInstanceResult struct {
+	Instance          *Instance `json:"instance,omitempty"`
+	Operation         Operation `json:"operation"`
+	Warnings          []string  `json:"warnings,omitempty"`
+	StorageEfficiency string    `json:"storage_efficiency"`
 }
 
 type ExecInstanceRequest struct {

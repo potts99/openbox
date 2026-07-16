@@ -76,8 +76,26 @@ export interface InstanceDetail {
   errorCode?: string;
   errorStage?: string;
   egressProfileId?: string;
+  cloneSourceInstanceId?: string;
+  cloneSourceSnapshotId?: string;
+  cloneSourceImageId?: string;
   networkPolicy: NetworkPolicyStatus;
   software: InstanceSoftware[];
+}
+
+export interface SnapshotSummary {
+  id: string;
+  instanceId: string;
+  name: string;
+  ready: boolean;
+  createdAt: string;
+}
+
+export interface DeriveInstanceResult {
+  instance?: InstanceDetail;
+  operation: OperationSummary;
+  warnings: string[];
+  storageEfficiency: "confirmed" | "not_supported" | "unknown" | string;
 }
 
 export interface OperationSummary {
@@ -176,6 +194,11 @@ export interface OpenBoxApi {
   getInstance(id: string): Promise<InstanceDetail>;
   createInstance(input: CreateInstanceInput): Promise<CreateInstanceResult>;
   extendInstance(id: string, durationSeconds: number): Promise<InstanceDetail>;
+  listSnapshots(instanceId: string): Promise<SnapshotSummary[]>;
+  createSnapshot(instanceId: string, name: string): Promise<{ snapshot?: SnapshotSummary; operation: OperationSummary }>;
+  deleteSnapshot(snapshotId: string): Promise<OperationSummary>;
+  restoreSnapshot(snapshotId: string, name: string, ownerPublicKey: string): Promise<DeriveInstanceResult>;
+  cloneInstance(instanceId: string, name: string, ownerPublicKey: string): Promise<DeriveInstanceResult>;
   listSoftwareCatalog(): Promise<SoftwarePackage[]>;
   installSoftware(instanceId: string, packageId: string): Promise<InstanceSoftware>;
   mutateInstance(id: string, action: InstanceAction): Promise<OperationSummary>;
@@ -271,6 +294,9 @@ function normalizeInstance(value: unknown): InstanceDetail {
     errorCode: text(row.error_code) || undefined,
     errorStage: text(row.error_stage) || undefined,
     egressProfileId: text(row.egress_profile_id) || undefined,
+    cloneSourceInstanceId: text(row.clone_source_instance_id) || undefined,
+    cloneSourceSnapshotId: text(row.clone_source_snapshot_id) || undefined,
+    cloneSourceImageId: text(row.clone_source_image_id) || undefined,
     networkPolicy: {
       egressMode: text(networkPolicy.egress_mode),
       acls: Array.isArray(networkPolicy.acls) ? networkPolicy.acls.filter((acl): acl is string => typeof acl === "string") : [],
@@ -278,6 +304,30 @@ function normalizeInstance(value: unknown): InstanceDetail {
       deniedFlows: number(networkPolicy.denied_flows),
     },
     software: softwareRaw.map(normalizeInstanceSoftware),
+  };
+}
+
+function normalizeSnapshot(value: unknown): SnapshotSummary {
+  const row = asRecord(value);
+  return {
+    id: text(row.id),
+    instanceId: text(row.instance_id),
+    name: text(row.name),
+    ready: bool(row.ready),
+    createdAt: text(row.created_at),
+  };
+}
+
+function normalizeDeriveResult(value: unknown): DeriveInstanceResult {
+  const row = asRecord(value);
+  const warnings = Array.isArray(row.warnings)
+    ? row.warnings.filter((item): item is string => typeof item === "string")
+    : [];
+  return {
+    instance: row.instance ? normalizeInstance(row.instance) : undefined,
+    operation: normalizeOperation(row.operation),
+    warnings,
+    storageEfficiency: text(row.storage_efficiency) || "unknown",
   };
 }
 
@@ -461,6 +511,42 @@ export function createHttpApi(options: HttpApiOptions = {}): OpenBoxApi {
       return normalizeInstance(await request(`/v1/instances/${encodeURIComponent(id)}/extend`, {
         method: "POST",
         body: JSON.stringify({ duration_seconds: durationSeconds }),
+      }));
+    },
+    async listSnapshots(instanceId) {
+      const body = asRecord(await request(`/v1/instances/${encodeURIComponent(instanceId)}/snapshots`));
+      const items = Array.isArray(body.items) ? body.items : [];
+      return items.map(normalizeSnapshot);
+    },
+    async createSnapshot(instanceId, name) {
+      const body = asRecord(await request(`/v1/instances/${encodeURIComponent(instanceId)}/snapshots`, {
+        method: "POST",
+        headers: { "Idempotency-Key": newIdempotencyKey() },
+        body: JSON.stringify({ name }),
+      }));
+      return {
+        snapshot: body.snapshot ? normalizeSnapshot(body.snapshot) : undefined,
+        operation: normalizeOperation(body.operation),
+      };
+    },
+    async deleteSnapshot(snapshotId) {
+      return normalizeOperation(await request(`/v1/snapshots/${encodeURIComponent(snapshotId)}`, {
+        method: "DELETE",
+        headers: { "Idempotency-Key": newIdempotencyKey() },
+      }));
+    },
+    async restoreSnapshot(snapshotId, name, ownerPublicKey) {
+      return normalizeDeriveResult(await request(`/v1/snapshots/${encodeURIComponent(snapshotId)}/restore`, {
+        method: "POST",
+        headers: { "Idempotency-Key": newIdempotencyKey() },
+        body: JSON.stringify({ name, owner_public_key: ownerPublicKey }),
+      }));
+    },
+    async cloneInstance(instanceId, name, ownerPublicKey) {
+      return normalizeDeriveResult(await request(`/v1/instances/${encodeURIComponent(instanceId)}/clone`, {
+        method: "POST",
+        headers: { "Idempotency-Key": newIdempotencyKey() },
+        body: JSON.stringify({ name, owner_public_key: ownerPublicKey }),
       }));
     },
     async listSoftwareCatalog() {

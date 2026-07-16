@@ -270,6 +270,50 @@ func TestWatchOperationStopsWhenTerminalEventWasAlreadyConsumed(t *testing.T) {
 	}
 }
 
+func TestCheckpointClientRoutesAndIdempotency(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/instances/instance-1/snapshots":
+			if r.Method == http.MethodGet {
+				_, _ = fmt.Fprint(w, `{"items":[{"id":"snap-1","instance_id":"instance-1","name":"ready","ready":true,"created_at":"2026-07-16T12:00:00Z"}]}`)
+				return
+			}
+			if r.Header.Get("Idempotency-Key") != "snap-key" {
+				t.Fatalf("snapshot idempotency=%q", r.Header.Get("Idempotency-Key"))
+			}
+			_, _ = fmt.Fprint(w, `{"snapshot":{"id":"snap-1","instance_id":"instance-1","name":"ready","ready":false,"created_at":"2026-07-16T12:00:00Z"},"operation":{"id":"op-1","status":"pending"}}`)
+		case "/v1/snapshots/snap-1/restore":
+			if r.Header.Get("Idempotency-Key") != "restore-key" {
+				t.Fatalf("restore idempotency=%q", r.Header.Get("Idempotency-Key"))
+			}
+			_, _ = fmt.Fprint(w, `{"instance":{"id":"instance-2","name":"restored","kind":"vps","requested_isolation":"container","actual_isolation":"container","desired_state":"running","observed_state":"creating","resources":{},"protected":false,"network_policy":{},"created_at":"2026-07-16T12:00:00Z","updated_at":"2026-07-16T12:00:00Z"},"operation":{"id":"op-2","status":"pending"},"warnings":[],"storage_efficiency":"confirmed"}`)
+		case "/v1/instances/instance-1/clone":
+			if r.Header.Get("Idempotency-Key") != "clone-key" {
+				t.Fatalf("clone idempotency=%q", r.Header.Get("Idempotency-Key"))
+			}
+			_, _ = fmt.Fprint(w, `{"operation":{"id":"op-3","status":"pending"},"warnings":[],"storage_efficiency":"not_supported"}`)
+		default:
+			t.Fatalf("unexpected route %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	c := newTestClient(t, server.URL)
+	items, err := c.ListSnapshots(context.Background(), "instance-1")
+	if err != nil || len(items) != 1 || !items[0].Ready {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+	if _, err := c.CreateSnapshot(context.Background(), "instance-1", "ready", "snap-key"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.RestoreSnapshot(context.Background(), "snap-1", RestoreSnapshotRequest{Name: "restored", OwnerPublicKey: "ssh-ed25519 owner"}, "restore-key"); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := c.CloneInstance(context.Background(), "instance-1", CloneInstanceRequest{Name: "cloned", OwnerPublicKey: "ssh-ed25519 owner"}, "clone-key"); err != nil || result.StorageEfficiency != "not_supported" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
 func newTestClient(t *testing.T, baseURL string) *Client {
 	t.Helper()
 	c, err := New(Options{BaseURL: baseURL, HTTPClient: &http.Client{Timeout: time.Second}, MaxRetries: 2, RetryWait: time.Millisecond})

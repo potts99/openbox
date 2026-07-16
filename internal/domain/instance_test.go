@@ -187,6 +187,7 @@ func TestObservedTransitions(t *testing.T) {
 	}{
 		{domain.ObservedPending, domain.ObservedCreating, true},
 		{domain.ObservedCreating, domain.ObservedRunning, true},
+		{domain.ObservedCreating, domain.ObservedStopped, true},
 		{domain.ObservedRunning, domain.ObservedStopping, true},
 		{domain.ObservedStopping, domain.ObservedStopped, true},
 		{domain.ObservedStopped, domain.ObservedRunning, true},

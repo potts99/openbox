@@ -486,6 +486,126 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Instance" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/instances/{instance_id}/snapshots:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { $ref: "#/components/parameters/InstanceID" }
+    get:
+      operationId: listInstanceSnapshots
+      summary: List disk-only checkpoints for an instance
+      responses:
+        "200":
+          description: Snapshots owned by the caller for this instance.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListSnapshotsResponse" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createInstanceSnapshot
+      summary: Create a disk-only checkpoint
+      description: |
+        Creates an immutable disk-only Incus snapshot (`stateful: false`). Returns a
+        durable `snapshot.create` operation. Suspended-memory checkpoints are not supported.
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/CSRFToken" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateSnapshotRequest" }
+      responses:
+        "202":
+          description: Snapshot create accepted as a durable operation.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreateSnapshotResult" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/instances/{instance_id}/clone:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { $ref: "#/components/parameters/InstanceID" }
+      - { $ref: "#/components/parameters/IdempotencyKey" }
+      - { $ref: "#/components/parameters/CSRFToken" }
+    post:
+      operationId: cloneInstance
+      summary: Clone a live instance
+      description: |
+        Creates a new independent instance from the live source only. Point-in-time
+        fan-out uses checkpoint + restore. Rewrites ownership metadata and
+        OpenBox-managed SSH access. May return warnings for full-copy storage or
+        retained guest secrets. Copy-on-write is claimed only when
+        `storage_efficiency` is `confirmed`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CloneInstanceRequest" }
+      responses:
+        "202":
+          description: Clone accepted as a durable operation.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeriveInstanceResult" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/snapshots/{snapshot_id}:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { $ref: "#/components/parameters/SnapshotID" }
+    get:
+      operationId: getSnapshot
+      summary: Inspect a checkpoint
+      responses:
+        "200":
+          description: Snapshot details.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Snapshot" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteSnapshot
+      summary: Delete a checkpoint
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/CSRFToken" }
+      responses:
+        "202":
+          description: Snapshot delete accepted as a durable operation.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Operation" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/snapshots/{snapshot_id}/restore:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { $ref: "#/components/parameters/SnapshotID" }
+      - { $ref: "#/components/parameters/IdempotencyKey" }
+      - { $ref: "#/components/parameters/CSRFToken" }
+    post:
+      operationId: restoreSnapshotAsNew
+      summary: Restore a checkpoint as a new instance
+      description: |
+        Creates a new independent instance from a named disk-only checkpoint.
+        Rewrites ownership metadata and OpenBox-managed SSH access. Derived
+        instances use destination egress defaults (not source policy).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RestoreSnapshotRequest" }
+      responses:
+        "202":
+          description: Restore accepted as a durable operation.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeriveInstanceResult" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/network/egress-profiles:
     parameters:
       - { $ref: "#/components/parameters/APIVersion" }
@@ -809,6 +929,11 @@ components:
       in: path
       required: true
       schema: { type: string, minLength: 1 }
+    SnapshotID:
+      name: snapshot_id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
     OperationID:
       name: operation_id
       in: path
@@ -1082,9 +1207,86 @@ components:
         error_stage: { type: string, description: Stage or phase where cleanup/runtime failure was recorded. }
         error_retryable: { type: boolean }
         egress_profile_id: { type: string }
+        clone_source_instance_id:
+          type: string
+          description: Source instance id when this instance was cloned or restored.
+        clone_source_snapshot_id:
+          type: string
+          description: Checkpoint id for restore-as-new; empty for live clone.
+        clone_source_image_id:
+          type: string
+          description: Immutable image fingerprint inherited from the source.
         network_policy: { $ref: "#/components/schemas/NetworkPolicyStatus" }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    Snapshot:
+      type: object
+      required: [id, instance_id, name, ready, created_at]
+      properties:
+        id: { type: string }
+        instance_id: { type: string }
+        name: { type: string }
+        ready:
+          type: boolean
+          description: True only after the disk-only runtime snapshot is available for restore or delete.
+        created_at: { type: string, format: date-time }
+    ListSnapshotsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Snapshot" }
+    CreateSnapshotRequest:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: { type: string, description: Checkpoint name; same validation as instance names. }
+    CreateSnapshotResult:
+      type: object
+      required: [operation]
+      properties:
+        snapshot:
+          allOf: [{ $ref: "#/components/schemas/Snapshot" }]
+          nullable: true
+        operation: { $ref: "#/components/schemas/Operation" }
+    CloneInstanceRequest:
+      type: object
+      required: [name, owner_public_key]
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        owner_public_key:
+          type: string
+          description: OpenBox-managed SSH access rewritten onto the derived instance.
+    RestoreSnapshotRequest:
+      type: object
+      required: [name, owner_public_key]
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        owner_public_key:
+          type: string
+          description: OpenBox-managed SSH access rewritten onto the derived instance.
+    DeriveInstanceResult:
+      type: object
+      required: [operation, storage_efficiency]
+      properties:
+        instance:
+          allOf: [{ $ref: "#/components/schemas/Instance" }]
+          nullable: true
+        operation: { $ref: "#/components/schemas/Operation" }
+        warnings:
+          type: array
+          items: { type: string }
+          description: Preflight warnings (full copy, retained guest secrets).
+        storage_efficiency:
+          type: string
+          enum: [confirmed, not_supported, unknown]
+          description: >
+            Copy-on-write claim is allowed only when confirmed. Otherwise OpenBox
+            must not imply storage-efficient copy behavior.
     InstanceSoftware:
       type: object
       required: [package_id, status, updated_at]
