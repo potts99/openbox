@@ -112,6 +112,10 @@ describe("CreateInstancePage", () => {
         packages: ["pi"],
       });
     });
+    expect(onCreated).not.toHaveBeenCalled();
+    expect(await screen.findByRole("heading", { name: "Instance created" })).toBeInTheDocument();
+    expect(screen.getByText("ssh fresh@app.example.com -p 2222")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open instance" }));
     expect(onCreated).toHaveBeenCalled();
   });
 
