@@ -221,7 +221,7 @@ type CreateInstanceRequest struct {
 	Image           string                     `json:"image"`
 	Kind            *CreateInstanceRequestKind `json:"kind,omitempty"`
 
-	// LifetimeSeconds Sandbox TTL from create time. Defaults to 3600 (1h) for sandboxes. Ignored for non-sandbox kinds. Must not exceed 86400 (24h).
+	// LifetimeSeconds Sandbox TTL from create time. Defaults to 3600 (1h) for sandboxes. Valid only for sandbox kinds. Must not exceed 86400 (24h).
 	LifetimeSeconds *int   `json:"lifetime_seconds,omitempty"`
 	Name            string `json:"name"`
 	OwnerPublicKey  string `json:"owner_public_key"`

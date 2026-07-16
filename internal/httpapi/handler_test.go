@@ -169,6 +169,43 @@ func TestCreateMapsSandboxLifetimeSeconds(t *testing.T) {
 	}
 }
 
+func TestCreateRejectsInvalidLifetimeSeconds(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "zero",
+			body: `{"name":"agent","kind":"sandbox","image":"openbox:sandbox/ubuntu/24.04","owner_public_key":"ssh-ed25519 AAAA","lifetime_seconds":0}`,
+		},
+		{
+			name: "over maximum",
+			body: `{"name":"agent","kind":"sandbox","image":"openbox:sandbox/ubuntu/24.04","owner_public_key":"ssh-ed25519 AAAA","lifetime_seconds":36028797018963968}`,
+		},
+		{
+			name: "persistent instance",
+			body: `{"name":"dev","kind":"vps","image":"ubuntu","owner_public_key":"ssh-ed25519 AAAA","lifetime_seconds":3600}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			service := &fakeService{}
+			handler := newTestHandler(t, service)
+			request := httptest.NewRequest(http.MethodPost, "/v1/instances", strings.NewReader(test.body))
+			request.Header.Set(HeaderIdempotencyKey, "create-lifetime")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			assertJSONContains(t, response.Body.Bytes(), `"code":"invalid_argument"`, `"field":"lifetime_seconds"`)
+		})
+	}
+}
+
 func TestMutationActionsAndErrorEnvelope(t *testing.T) {
 	t.Parallel()
 

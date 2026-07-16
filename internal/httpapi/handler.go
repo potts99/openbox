@@ -504,6 +504,17 @@ func (h *Handler) createInstance(response http.ResponseWriter, request *http.Req
 	if input.Kind != nil {
 		kind = domain.InstanceKind(*input.Kind)
 	}
+	if input.LifetimeSeconds != nil {
+		maxLifetimeSeconds := int(domain.MaxSandboxLifetime / time.Second)
+		if *input.LifetimeSeconds < 1 || *input.LifetimeSeconds > maxLifetimeSeconds {
+			h.writeError(response, requestID, http.StatusBadRequest, string(domain.CodeInvalidArgument), "lifetime_seconds")
+			return
+		}
+		if kind != domain.KindSandbox {
+			h.writeError(response, requestID, http.StatusBadRequest, string(domain.CodeInvalidArgument), "lifetime_seconds")
+			return
+		}
+	}
 	var isolation domain.IsolationRequest
 	if input.RequestedIsolation != nil {
 		isolation = domain.IsolationRequest(*input.RequestedIsolation)
