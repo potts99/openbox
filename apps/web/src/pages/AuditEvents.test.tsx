@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { OpenBoxApi } from "../api/client";
 import { AuditEventsPage } from "./AuditEvents";
@@ -44,12 +45,23 @@ function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
     listAuditEvents: vi.fn().mockResolvedValue([
       {
         id: "evt-1",
+        actor: "openboxd",
         action: "egress.deny",
         outcome: "blocked",
         targetType: "instance",
         targetId: "box-1",
         metadata: { hostname: "evil.example" },
         createdAt: "2026-07-17T09:00:00Z",
+      },
+      {
+        id: "evt-2",
+        actor: "openboxd",
+        action: "policy.apply",
+        outcome: "succeeded",
+        targetType: "instance",
+        targetId: "box-1",
+        metadata: { mode: "restricted" },
+        createdAt: "2026-07-17T08:00:00Z",
       },
     ]),
     listTokens: vi.fn().mockResolvedValue([]),
@@ -63,9 +75,22 @@ function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
 }
 
 describe("AuditEventsPage", () => {
-  it("wraps the events table for horizontal scroll on narrow viewports", async () => {
+  it("renders events as a scannable ledger with metadata", async () => {
     render(<AuditEventsPage api={createApi()} onBack={() => {}} />);
-    expect(await screen.findByRole("columnheader", { name: "When" })).toBeInTheDocument();
-    expect(document.querySelector(".table-wrap")).not.toBeNull();
+    expect(await screen.findByText("egress.deny")).toBeInTheDocument();
+    expect(screen.getByText("evil.example")).toBeInTheDocument();
+    expect(screen.getByText("blocked")).toBeInTheDocument();
+    expect(document.querySelector(".audit-list")).not.toBeNull();
+  });
+
+  it("filters events by outcome", async () => {
+    const user = userEvent.setup();
+    render(<AuditEventsPage api={createApi()} onBack={() => {}} />);
+    expect(await screen.findByText("egress.deny")).toBeInTheDocument();
+    expect(screen.getByText("policy.apply")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Blocked/i }));
+    expect(screen.getByText("egress.deny")).toBeInTheDocument();
+    expect(screen.queryByText("policy.apply")).not.toBeInTheDocument();
   });
 });
