@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+# OpenBox control plane (openboxd).
+# Install with deploy/install.sh; override defaults in /etc/openbox/openboxd.env.
+
+[Unit]
+Description=OpenBox control plane
+Documentation=https://github.com/openbox-dev/openbox
+After=network-online.target incus.service incus.socket
+Wants=network-online.target
+Requires=incus.socket
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/openbox/openboxd.env
+Environment=OPENBOX_DATABASE=/var/lib/openbox/openbox.db
+Environment=OPENBOX_INCUS_SOCKET=/var/lib/incus/unix.socket
+Environment=OPENBOX_INCUS_PROJECT=openbox
+Environment=OPENBOX_CONTAINER_PROFILE=openbox-container
+Environment=OPENBOX_VM_PROFILE=openbox-vm
+Environment=OPENBOX_STORAGE_POOL=openbox
+Environment=OPENBOX_API_ADDRESS=127.0.0.1:8443
+Environment=OPENBOX_SSH_ADDRESS=:2222
+Environment=OPENBOX_SSH_PUBLIC_HOST=
+Environment=OPENBOX_SSH_PUBLIC_PORT=2222
+Environment=OPENBOX_SSH_HOST_KEY=/var/lib/openbox/ssh/gateway_host
+Environment=OPENBOX_SSH_INSTANCE_KEY=/var/lib/openbox/ssh/instance_client
+Environment=OPENBOX_SSH_KNOWN_HOSTS=/var/lib/openbox/ssh/known_instances
+Environment=OPENBOX_OWNER_ID=owner-local
+Environment=OPENBOX_OWNER_NAME=Local owner
+ExecStart=/usr/local/bin/openboxd \
+  --database ${OPENBOX_DATABASE} \
+  --incus-socket ${OPENBOX_INCUS_SOCKET} \
+  --incus-project ${OPENBOX_INCUS_PROJECT} \
+  --container-profile ${OPENBOX_CONTAINER_PROFILE} \
+  --vm-profile ${OPENBOX_VM_PROFILE} \
+  --storage-pool ${OPENBOX_STORAGE_POOL} \
+  --api-address ${OPENBOX_API_ADDRESS} \
+  --ssh-address ${OPENBOX_SSH_ADDRESS} \
+  --ssh-public-host ${OPENBOX_SSH_PUBLIC_HOST} \
+  --ssh-public-port ${OPENBOX_SSH_PUBLIC_PORT} \
+  --ssh-host-key ${OPENBOX_SSH_HOST_KEY} \
+  --ssh-instance-key ${OPENBOX_SSH_INSTANCE_KEY} \
+  --ssh-known-hosts ${OPENBOX_SSH_KNOWN_HOSTS} \
+  --owner-id ${OPENBOX_OWNER_ID} \
+  --owner-name ${OPENBOX_OWNER_NAME}
+Restart=on-failure
+RestartSec=2
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
