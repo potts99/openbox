@@ -52,21 +52,11 @@ const (
 	CreateInstanceRequestRequestedIsolationStrong    CreateInstanceRequestRequestedIsolation = "strong"
 )
 
-// Defines values for CreateTokenRequestScopes.
-const (
-	CreateTokenRequestScopesOwner CreateTokenRequestScopes = "owner"
-)
-
 // Defines values for CreateWebhookSubscriptionRequestEvents.
 const (
 	CreateWebhookSubscriptionRequestEventsInstanceDeleted   CreateWebhookSubscriptionRequestEvents = "instance.deleted"
 	CreateWebhookSubscriptionRequestEventsInstanceExpired   CreateWebhookSubscriptionRequestEvents = "instance.expired"
 	CreateWebhookSubscriptionRequestEventsOperationTerminal CreateWebhookSubscriptionRequestEvents = "operation.terminal"
-)
-
-// Defines values for CreatedTokenScopes.
-const (
-	CreatedTokenScopesOwner CreatedTokenScopes = "owner"
 )
 
 // Defines values for CreatedWebhookSubscriptionEvents.
@@ -178,9 +168,21 @@ const (
 	Public  RouteVisibility = "public"
 )
 
-// Defines values for TokenMetadataScopes.
+// Defines values for TokenScope.
 const (
-	Owner TokenMetadataScopes = "owner"
+	ArtifactsRead  TokenScope = "artifacts:read"
+	ArtifactsWrite TokenScope = "artifacts:write"
+	AuditRead      TokenScope = "audit:read"
+	InstancesRead  TokenScope = "instances:read"
+	InstancesWrite TokenScope = "instances:write"
+	OperationsRead TokenScope = "operations:read"
+	Owner          TokenScope = "owner"
+	ProfilesRead   TokenScope = "profiles:read"
+	ProfilesWrite  TokenScope = "profiles:write"
+	RoutesRead     TokenScope = "routes:read"
+	RoutesWrite    TokenScope = "routes:write"
+	WebhooksRead   TokenScope = "webhooks:read"
+	WebhooksWrite  TokenScope = "webhooks:write"
 )
 
 // Defines values for UpdateEgressProfileRequestMode.
@@ -395,13 +397,10 @@ type CreateSnapshotResult struct {
 
 // CreateTokenRequest defines model for CreateTokenRequest.
 type CreateTokenRequest struct {
-	ExpiresAt *time.Time                  `json:"expires_at,omitempty"`
-	Name      string                      `json:"name"`
-	Scopes    *[]CreateTokenRequestScopes `json:"scopes,omitempty"`
+	ExpiresAt *time.Time    `json:"expires_at,omitempty"`
+	Name      string        `json:"name"`
+	Scopes    *[]TokenScope `json:"scopes,omitempty"`
 }
-
-// CreateTokenRequestScopes defines model for CreateTokenRequest.Scopes.
-type CreateTokenRequestScopes string
 
 // CreateWebhookSubscriptionRequest defines model for CreateWebhookSubscriptionRequest.
 type CreateWebhookSubscriptionRequest struct {
@@ -416,18 +415,15 @@ type CreateWebhookSubscriptionRequestEvents string
 
 // CreatedToken defines model for CreatedToken.
 type CreatedToken struct {
-	CreatedAt  time.Time            `json:"created_at"`
-	ExpiresAt  *time.Time           `json:"expires_at,omitempty"`
-	Id         string               `json:"id"`
-	LastUsedAt *time.Time           `json:"last_used_at,omitempty"`
-	Name       string               `json:"name"`
-	RevokedAt  *time.Time           `json:"revoked_at,omitempty"`
-	Scopes     []CreatedTokenScopes `json:"scopes"`
-	Secret     *string              `json:"secret,omitempty"`
+	CreatedAt  time.Time    `json:"created_at"`
+	ExpiresAt  *time.Time   `json:"expires_at,omitempty"`
+	Id         string       `json:"id"`
+	LastUsedAt *time.Time   `json:"last_used_at,omitempty"`
+	Name       string       `json:"name"`
+	RevokedAt  *time.Time   `json:"revoked_at,omitempty"`
+	Scopes     []TokenScope `json:"scopes"`
+	Secret     *string      `json:"secret,omitempty"`
 }
-
-// CreatedTokenScopes defines model for CreatedToken.Scopes.
-type CreatedTokenScopes string
 
 // CreatedWebhookSubscription defines model for CreatedWebhookSubscription.
 type CreatedWebhookSubscription struct {
@@ -523,9 +519,17 @@ type ExtendInstanceRequest struct {
 
 // Health defines model for Health.
 type Health struct {
-	ApiVersion    HealthApiVersion `json:"api_version"`
-	ServerVersion string           `json:"server_version"`
-	Status        HealthStatus     `json:"status"`
+	ApiVersion HealthApiVersion `json:"api_version"`
+
+	// Degraded True when a transient operation or reconciliation failure has degraded the control plane.
+	Degraded *bool `json:"degraded,omitempty"`
+
+	// Kvm Whether the daemon can use KVM-backed virtual machines.
+	Kvm           *bool                   `json:"kvm,omitempty"`
+	Operations    *HealthOperationSummary `json:"operations,omitempty"`
+	Pool          *HealthPoolSummary      `json:"pool,omitempty"`
+	ServerVersion string                  `json:"server_version"`
+	Status        HealthStatus            `json:"status"`
 }
 
 // HealthApiVersion defines model for Health.ApiVersion.
@@ -533,6 +537,26 @@ type HealthApiVersion string
 
 // HealthStatus defines model for Health.Status.
 type HealthStatus string
+
+// HealthOperationSummary defines model for HealthOperationSummary.
+type HealthOperationSummary struct {
+	// Failed Durable operations in the failed state.
+	Failed int `json:"failed"`
+
+	// Pending Durable operations currently in the pending state.
+	Pending int `json:"pending"`
+}
+
+// HealthPoolSummary defines model for HealthPoolSummary.
+type HealthPoolSummary struct {
+	Claiming    int    `json:"claiming"`
+	CowStorage  bool   `json:"cow_storage"`
+	Enabled     bool   `json:"enabled"`
+	GoldenReady bool   `json:"golden_ready"`
+	Running     int    `json:"running"`
+	Stopped     int    `json:"stopped"`
+	Substrate   string `json:"substrate"`
+}
 
 // Image defines model for Image.
 type Image struct {
@@ -831,17 +855,17 @@ type SuggestedPortsResponse struct {
 
 // TokenMetadata defines model for TokenMetadata.
 type TokenMetadata struct {
-	CreatedAt  time.Time             `json:"created_at"`
-	ExpiresAt  *time.Time            `json:"expires_at,omitempty"`
-	Id         string                `json:"id"`
-	LastUsedAt *time.Time            `json:"last_used_at,omitempty"`
-	Name       string                `json:"name"`
-	RevokedAt  *time.Time            `json:"revoked_at,omitempty"`
-	Scopes     []TokenMetadataScopes `json:"scopes"`
+	CreatedAt  time.Time    `json:"created_at"`
+	ExpiresAt  *time.Time   `json:"expires_at,omitempty"`
+	Id         string       `json:"id"`
+	LastUsedAt *time.Time   `json:"last_used_at,omitempty"`
+	Name       string       `json:"name"`
+	RevokedAt  *time.Time   `json:"revoked_at,omitempty"`
+	Scopes     []TokenScope `json:"scopes"`
 }
 
-// TokenMetadataScopes defines model for TokenMetadata.Scopes.
-type TokenMetadataScopes string
+// TokenScope The owner scope preserves full self-hosted owner access. Instances covers instance lifecycle, images, snapshots, terminal and exec; operations is read-only; profiles covers Pi and egress profiles. Non-owner scopes are least-privilege bearer capabilities and do not grant token, SSH-key, or session management.
+type TokenScope string
 
 // UpdateEgressProfileRequest defines model for UpdateEgressProfileRequest.
 type UpdateEgressProfileRequest struct {

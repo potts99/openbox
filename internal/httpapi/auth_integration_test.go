@@ -146,6 +146,39 @@ func TestCookieCSRFSessionRefreshAndBearerRevocation(t *testing.T) {
 	}
 }
 
+func TestScopedBearerCannotMutateInstances(t *testing.T) {
+	h, manager, bootstrap := newAuthHandler(t)
+	if _, _, err := manager.Bootstrap(context.Background(), "loopback", bootstrap, "a sufficiently long password"); err != nil {
+		t.Fatal(err)
+	}
+	token, err := manager.CreateToken(context.Background(), "owner-local", "instance-reader", []string{auth.ScopeInstancesRead}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := func(method, target string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, target, nil)
+		r.Header.Set("Authorization", "Bearer "+token.Secret)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	if response := request(http.MethodGet, "/v1/instances"); response.Code != http.StatusOK {
+		t.Fatalf("read-only list status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := request(http.MethodPost, "/v1/instances"); response.Code != http.StatusForbidden {
+		t.Fatalf("read-only create status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := request(http.MethodPost, "/v1/tokens"); response.Code != http.StatusForbidden {
+		t.Fatalf("read-only token management status=%d body=%s", response.Code, response.Body.String())
+	}
+	if got := requiredScope([]string{"v1", "instances", "inst-1", "artifacts"}, http.MethodGet); got != auth.ScopeArtifactsRead {
+		t.Fatalf("artifact GET scope=%q", got)
+	}
+	if got := requiredScope([]string{"v1", "instances", "inst-1", "artifacts"}, http.MethodPut); got != auth.ScopeArtifactsWrite {
+		t.Fatalf("artifact PUT scope=%q", got)
+	}
+}
+
 func TestLoginFailuresAreGenericRateLimitedAndRecover(t *testing.T) {
 	now := time.Date(2026, 7, 15, 13, 0, 0, 0, time.UTC)
 	h, m, bootstrap := newAuthHandlerWithClock(t, &now)

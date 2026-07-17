@@ -25,8 +25,25 @@ const (
 	CSRFHeader    = "X-CSRF-Token"
 	// CSRFQuery is the browser-deliverable CSRF channel for WebSocket upgrades
 	// (browsers cannot set custom headers on the WebSocket constructor).
-	CSRFQuery           = "csrf"
+	CSRFQuery = "csrf"
+
+	// ScopeOwner preserves the pre-organization token behavior. It is a
+	// compatibility super-scope for local owner tokens and cannot be combined
+	// with a least-privilege scope.
 	ScopeOwner          = "owner"
+	ScopeInstancesRead  = "instances:read"
+	ScopeInstancesWrite = "instances:write"
+	ScopeOperationsRead = "operations:read"
+	ScopeAuditRead      = "audit:read"
+	ScopeWebhooksRead   = "webhooks:read"
+	ScopeWebhooksWrite  = "webhooks:write"
+	ScopeRoutesRead     = "routes:read"
+	ScopeRoutesWrite    = "routes:write"
+	ScopeProfilesRead   = "profiles:read"
+	ScopeProfilesWrite  = "profiles:write"
+	ScopeArtifactsRead  = "artifacts:read"
+	ScopeArtifactsWrite = "artifacts:write"
+
 	DefaultBootstrapTTL = 20 * time.Minute
 	DefaultSessionTTL   = 12 * time.Hour
 )
@@ -54,6 +71,14 @@ type Token struct {
 	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	Secret     string     `json:"secret,omitempty"`
+}
+
+// Principal is the authenticated token identity. It keeps bearer scopes
+// separate from owner identity so the HTTP transport can enforce them before
+// calling application services.
+type Principal struct {
+	OwnerID domain.OwnerID
+	Scopes  []string
 }
 type SSHKey struct {
 	ID          string    `json:"id"`
@@ -258,12 +283,9 @@ func (m *Manager) CreateToken(ctx context.Context, owner domain.OwnerID, name st
 	if name == "" || len(name) > 100 {
 		return Token{}, errors.New("invalid token name")
 	}
-	if len(scopes) == 0 {
-		scopes = []string{ScopeOwner}
-	}
-	sort.Strings(scopes)
-	if len(scopes) != 1 || scopes[0] != ScopeOwner {
-		return Token{}, errors.New("unsupported token scope")
+	normalized, err := normalizeScopes(scopes)
+	if err != nil {
+		return Token{}, err
 	}
 	if expires != nil && !expires.After(m.now()) {
 		return Token{}, errors.New("token expiry must be in the future")
@@ -276,28 +298,39 @@ func (m *Manager) CreateToken(ctx context.Context, owner domain.OwnerID, name st
 	if err != nil {
 		return Token{}, err
 	}
-	t := Token{ID: "tok_" + id, Name: name, Scopes: scopes, CreatedAt: m.now(), ExpiresAt: expires, Secret: "obx_" + secret}
+	t := Token{ID: "tok_" + id, Name: name, Scopes: normalized, CreatedAt: m.now(), ExpiresAt: expires, Secret: "obx_" + secret}
 	if err := m.store.CreateToken(ctx, t, owner, digest(raw)); err != nil {
 		return Token{}, err
 	}
 	return t, nil
 }
 func (m *Manager) AuthenticateBearer(ctx context.Context, value string) (domain.OwnerID, error) {
+	principal, err := m.AuthenticateBearerPrincipal(ctx, value)
+	if err != nil {
+		return "", err
+	}
+	if len(principal.Scopes) != 1 || principal.Scopes[0] != ScopeOwner {
+		return "", ErrForbidden
+	}
+	return principal.OwnerID, nil
+}
+func (m *Manager) AuthenticateBearerPrincipal(ctx context.Context, value string) (Principal, error) {
 	if !strings.HasPrefix(value, "obx_") {
-		return "", ErrUnauthenticated
+		return Principal{}, ErrUnauthenticated
 	}
 	raw, err := decodeSecret(strings.TrimPrefix(value, "obx_"))
 	if err != nil {
-		return "", ErrUnauthenticated
+		return Principal{}, ErrUnauthenticated
 	}
 	owner, scopes, err := m.store.TokenOwner(ctx, digest(raw), m.now())
 	if err != nil {
-		return "", ErrUnauthenticated
+		return Principal{}, ErrUnauthenticated
 	}
-	if len(scopes) != 1 || scopes[0] != ScopeOwner {
-		return "", ErrForbidden
+	normalized, err := normalizeScopes(scopes)
+	if err != nil {
+		return Principal{}, ErrForbidden
 	}
-	return owner, nil
+	return Principal{OwnerID: owner, Scopes: normalized}, nil
 }
 func (m *Manager) ListTokens(ctx context.Context, owner domain.OwnerID) ([]Token, error) {
 	return m.store.ListTokens(ctx, owner)
@@ -337,6 +370,36 @@ func (m *Manager) UpdateSSHKey(ctx context.Context, owner domain.OwnerID, id, la
 }
 func (m *Manager) DeleteSSHKey(ctx context.Context, owner domain.OwnerID, id string) error {
 	return m.store.DeleteSSHKey(ctx, owner, id)
+}
+
+func normalizeScopes(scopes []string) ([]string, error) {
+	if len(scopes) == 0 {
+		return []string{ScopeOwner}, nil
+	}
+	normalized := append([]string(nil), scopes...)
+	seen := make(map[string]struct{}, len(normalized))
+	for _, scope := range normalized {
+		if _, ok := supportedScopes[scope]; !ok {
+			return nil, errors.New("unsupported token scope")
+		}
+		if _, ok := seen[scope]; ok {
+			return nil, errors.New("duplicate token scope")
+		}
+		seen[scope] = struct{}{}
+	}
+	if _, owner := seen[ScopeOwner]; owner && len(seen) != 1 {
+		return nil, errors.New("owner scope cannot be combined")
+	}
+	sort.Strings(normalized)
+	return normalized, nil
+}
+
+var supportedScopes = map[string]struct{}{
+	ScopeOwner: {}, ScopeInstancesRead: {}, ScopeInstancesWrite: {},
+	ScopeOperationsRead: {}, ScopeAuditRead: {}, ScopeWebhooksRead: {},
+	ScopeWebhooksWrite: {}, ScopeRoutesRead: {}, ScopeRoutesWrite: {},
+	ScopeProfilesRead: {}, ScopeProfilesWrite: {}, ScopeArtifactsRead: {},
+	ScopeArtifactsWrite: {},
 }
 
 func digest(raw []byte) []byte { sum := sha256.Sum256(raw); return sum[:] }

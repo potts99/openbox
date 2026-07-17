@@ -348,6 +348,9 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 		ImageBuilds:       imageBuildService,
 		Webhooks:          webhookService,
 		WebhookDeliveries: store,
+		Mode:              mode,
+		Operations:        store,
+		SandboxPool:       sandboxPool,
 	})
 	if err != nil {
 		return fail(err)

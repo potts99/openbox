@@ -13,6 +13,18 @@ import (
 	"github.com/openbox-dev/openbox/internal/domain"
 )
 
+// OperationCounts reports global durable-operation states for operator health.
+func (s *Store) OperationCounts(ctx context.Context) (pending, failed int, err error) {
+	err = s.db.QueryRowContext(ctx, `SELECT
+		COALESCE(SUM(CASE WHEN status=? THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN status=? THEN 1 ELSE 0 END), 0)
+		FROM operations`, domain.OperationPending, domain.OperationFailed).Scan(&pending, &failed)
+	if err != nil {
+		return 0, 0, fmt.Errorf("count operations: %w", err)
+	}
+	return pending, failed, nil
+}
+
 func (s *Store) ListClaimableOperations(ctx context.Context, now time.Time, limit int) ([]domain.Operation, error) {
 	if limit <= 0 {
 		return nil, &domain.Error{Code: domain.CodeInvalidArgument, Field: "limit"}

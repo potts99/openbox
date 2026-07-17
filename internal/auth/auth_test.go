@@ -248,6 +248,45 @@ func TestSessionCSRFTokenRevocationAndSSHKeyValidation(t *testing.T) {
 	}
 }
 
+func TestScopedTokenPrincipalAndOwnerCompatibility(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(ctx, t.TempDir()+"/auth.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	now := time.Date(2026, 7, 17, 9, 0, 0, 0, time.UTC)
+	if err := store.CreateOwner(ctx, domain.Owner{ID: "owner-local", Name: "Owner", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := auth.New(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.WithClock(func() time.Time { return now })
+
+	token, err := manager.CreateToken(ctx, "owner-local", "reader", []string{auth.ScopeOperationsRead, auth.ScopeInstancesRead}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(token.Scopes, ","), auth.ScopeInstancesRead+","+auth.ScopeOperationsRead; got != want {
+		t.Fatalf("scopes=%q want %q", got, want)
+	}
+	principal, err := manager.AuthenticateBearerPrincipal(ctx, token.Secret)
+	if err != nil || principal.OwnerID != "owner-local" || strings.Join(principal.Scopes, ",") != strings.Join(token.Scopes, ",") {
+		t.Fatalf("principal=%+v err=%v", principal, err)
+	}
+	if _, err := manager.AuthenticateBearer(ctx, token.Secret); !errors.Is(err, auth.ErrForbidden) {
+		t.Fatalf("scoped token authenticated as full owner: %v", err)
+	}
+	if _, err := manager.CreateToken(ctx, "owner-local", "mixed", []string{auth.ScopeOwner, auth.ScopeInstancesRead}, nil); err == nil {
+		t.Fatal("owner scope combined with scoped capability")
+	}
+	if _, err := manager.CreateToken(ctx, "owner-local", "unknown", []string{"admin"}, nil); err == nil {
+		t.Fatal("unknown scope accepted")
+	}
+}
+
 func TestLoginLimiterIsBounded(t *testing.T) {
 	l := auth.NewLimiter(2, time.Minute, 2)
 	now := time.Now()

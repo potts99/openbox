@@ -16,6 +16,12 @@ import (
 
 type principalKey struct{}
 
+type requestPrincipal struct {
+	ownerID domain.OwnerID
+	scopes  map[string]struct{}
+	bearer  bool
+}
+
 func isPublicAuthRoute(segments []string, method string) bool {
 	if len(segments) == 2 {
 		if segments[1] == "health" || segments[1] == "bootstrap" {
@@ -37,11 +43,15 @@ func isPublicAuthRoute(segments []string, method string) bool {
 func (h *Handler) authenticate(r *http.Request) (*http.Request, error) {
 	authorization := r.Header.Get("Authorization")
 	if strings.HasPrefix(authorization, "Bearer ") {
-		owner, err := h.auth.AuthenticateBearer(r.Context(), strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer ")))
+		principal, err := h.auth.AuthenticateBearerPrincipal(r.Context(), strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer ")))
 		if err != nil {
 			return r, err
 		}
-		return r.WithContext(context.WithValue(r.Context(), principalKey{}, owner)), nil
+		scopes := make(map[string]struct{}, len(principal.Scopes))
+		for _, scope := range principal.Scopes {
+			scopes[scope] = struct{}{}
+		}
+		return r.WithContext(context.WithValue(r.Context(), principalKey{}, requestPrincipal{ownerID: principal.OwnerID, scopes: scopes, bearer: true})), nil
 	}
 	cookie, err := r.Cookie(auth.SessionCookie)
 	if err != nil {
@@ -54,14 +64,83 @@ func (h *Handler) authenticate(r *http.Request) (*http.Request, error) {
 	if err != nil {
 		return r, err
 	}
-	return r.WithContext(context.WithValue(r.Context(), principalKey{}, owner)), nil
+	return r.WithContext(context.WithValue(r.Context(), principalKey{}, requestPrincipal{ownerID: owner})), nil
 }
 
 func (h *Handler) requestOwner(r *http.Request) domain.OwnerID {
-	if owner, ok := r.Context().Value(principalKey{}).(domain.OwnerID); ok {
-		return owner
+	if principal, ok := r.Context().Value(principalKey{}).(requestPrincipal); ok {
+		return principal.ownerID
 	}
 	return h.fixedOwnerID
+}
+
+// authorizeScope is intentionally transport-level: application services
+// continue receiving an owner context while bearer capabilities are rejected
+// before any resource lookup or durable mutation begins.
+func (h *Handler) authorizeScope(r *http.Request, segments []string) error {
+	principal, ok := r.Context().Value(principalKey{}).(requestPrincipal)
+	if !ok || !principal.bearer {
+		return nil // browser sessions retain the local owner compatibility path.
+	}
+	if _, owner := principal.scopes[auth.ScopeOwner]; owner {
+		return nil
+	}
+	required := requiredScope(segments, r.Method)
+	if required == "" {
+		return auth.ErrForbidden
+	}
+	if _, allowed := principal.scopes[required]; !allowed {
+		return auth.ErrForbidden
+	}
+	return nil
+}
+
+func requiredScope(segments []string, method string) string {
+	if len(segments) < 2 {
+		return ""
+	}
+	read := method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions
+	readWrite := func(readScope, writeScope string) string {
+		if read {
+			return readScope
+		}
+		return writeScope
+	}
+	switch segments[1] {
+	case "capabilities", "connection", "software":
+		return auth.ScopeInstancesRead
+	case "images":
+		return readWrite(auth.ScopeInstancesRead, auth.ScopeInstancesWrite)
+	case "instances":
+		if len(segments) >= 4 && segments[3] == "artifacts" {
+			return readWrite(auth.ScopeArtifactsRead, auth.ScopeArtifactsWrite)
+		}
+		if len(segments) >= 4 && segments[3] == "terminal" {
+			return auth.ScopeInstancesWrite
+		}
+		return readWrite(auth.ScopeInstancesRead, auth.ScopeInstancesWrite)
+	case "operations":
+		if read {
+			return auth.ScopeOperationsRead
+		}
+		return auth.ScopeInstancesWrite
+	case "routes":
+		return readWrite(auth.ScopeRoutesRead, auth.ScopeRoutesWrite)
+	case "pi-profiles", "network":
+		return readWrite(auth.ScopeProfilesRead, auth.ScopeProfilesWrite)
+	case "snapshots":
+		return readWrite(auth.ScopeInstancesRead, auth.ScopeInstancesWrite)
+	case "audit-events":
+		return auth.ScopeAuditRead
+	case "webhook-subscriptions":
+		return readWrite(auth.ScopeWebhooksRead, auth.ScopeWebhooksWrite)
+	case "webhook-deliveries":
+		return auth.ScopeWebhooksRead
+	case "tokens", "ssh-keys", "session":
+		return ""
+	default:
+		return ""
+	}
 }
 
 func (h *Handler) routeBootstrap(w http.ResponseWriter, r *http.Request, requestID string) bool {

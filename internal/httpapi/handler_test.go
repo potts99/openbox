@@ -19,6 +19,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/execstream"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 	"github.com/openbox-dev/openbox/internal/sandbox"
+	sandboxpool "github.com/openbox-dev/openbox/internal/sandbox/pool"
 )
 
 func TestHealthAndCompatibilityNegotiation(t *testing.T) {
@@ -51,6 +52,29 @@ func TestHealthAndCompatibilityNegotiation(t *testing.T) {
 		}
 		assertJSONContains(t, response.Body.Bytes(), `"code":"unsupported_api_version"`, `"request_id":`)
 	})
+}
+
+func TestHealthIncludesOperatorSignals(t *testing.T) {
+	t.Parallel()
+
+	handler := newTestHandlerWithOptions(t, &fakeService{
+		capabilities: runtimeapi.Capabilities{KVM: true},
+	}, Options{
+		OwnerID:     "owner-local",
+		Mode:        degradedMode(true),
+		Operations:  operationCounter{pending: 2, failed: 1},
+		SandboxPool: poolStatus{enabled: true, stats: sandboxpool.Stats{GoldenReady: true, Stopped: 8, Running: 3, Claiming: 1, CoWStorage: true, Substrate: sandboxpool.SubstrateVM}},
+	})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/health", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	assertJSONContains(t, response.Body.Bytes(),
+		`"degraded":true`, `"kvm":true`, `"operations":{"failed":1,"pending":2}`,
+		`"pool":{"claiming":1,"cow_storage":true,"enabled":true,"golden_ready":true,"running":3,"stopped":8,"substrate":"virtual_machine"}`,
+	)
 }
 
 func TestSoftwareCatalogAndInstall(t *testing.T) {
@@ -468,6 +492,32 @@ type fakeService struct {
 	eventBatches   [][]domain.OperationEvent
 	eventCalls     int
 	eventAfter     []int
+}
+
+type degradedMode bool
+
+func (m degradedMode) Degraded() bool { return bool(m) }
+
+type operationCounter struct {
+	pending int
+	failed  int
+	err     error
+}
+
+func (c operationCounter) OperationCounts(context.Context) (int, int, error) {
+	return c.pending, c.failed, c.err
+}
+
+type poolStatus struct {
+	enabled bool
+	stats   sandboxpool.Stats
+	err     error
+}
+
+func (p poolStatus) Enabled() bool { return p.enabled }
+
+func (p poolStatus) Stats(context.Context) (sandboxpool.Stats, error) {
+	return p.stats, p.err
 }
 
 func (f *fakeService) Health(context.Context) error { return f.err }

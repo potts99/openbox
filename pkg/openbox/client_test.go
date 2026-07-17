@@ -35,6 +35,49 @@ func TestNegotiatesV1AndSendsVersionHeader(t *testing.T) {
 	}
 }
 
+func TestHealthDecodesOperatorSignals(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(APIVersionHeader, APIVersionV1)
+		_, _ = w.Write([]byte(`{"status":"ok","server_version":"v0.1.0","api_version":"v1","degraded":true,"kvm":false,"operations":{"pending":2,"failed":1},"pool":{"enabled":true,"golden_ready":true,"stopped":8,"running":3,"claiming":1,"cow_storage":true,"substrate":"virtual_machine"}}`))
+	}))
+	defer server.Close()
+
+	health, err := newTestClient(t, server.URL).Health(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if health.Degraded == nil || !*health.Degraded || health.KVM == nil || *health.KVM {
+		t.Fatalf("health signals=%+v", health)
+	}
+	if health.Operations == nil || health.Operations.Pending != 2 || health.Operations.Failed != 1 {
+		t.Fatalf("operations=%+v", health.Operations)
+	}
+	if health.Pool == nil || health.Pool.Running != 3 || health.Pool.Substrate != "virtual_machine" {
+		t.Fatalf("pool=%+v", health.Pool)
+	}
+}
+
+func TestListWebhookDeliveriesPreservesQuery(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/webhook-deliveries" {
+			t.Fatalf("path=%q", r.URL.Path)
+		}
+		if r.URL.Query().Get("limit") != "5" || r.URL.Query().Get("status") != "dead" {
+			t.Fatalf("query=%q", r.URL.RawQuery)
+		}
+		w.Header().Set(APIVersionHeader, APIVersionV1)
+		_, _ = w.Write([]byte(`{"items":[]}`))
+	}))
+	defer server.Close()
+
+	_, err := newTestClient(t, server.URL).ListWebhookDeliveries(context.Background(), ListWebhookDeliveriesOptions{
+		Status: "dead", Limit: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSendsConfiguredBearerToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer owner-token" {
