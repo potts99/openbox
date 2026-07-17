@@ -27,7 +27,10 @@ export function AuthScreen({ mode, api, onAuthenticated }: AuthScreenProps) {
     try {
       const session = mode === "setup"
         ? await api.setup({ secret: String(form.get("secret") ?? ""), password })
-        : await api.login({ password });
+        : await api.login({
+          username: String(form.get("username") ?? "").trim(),
+          password,
+        });
       onAuthenticated(session);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Authentication failed");
@@ -50,7 +53,7 @@ export function AuthScreen({ mode, api, onAuthenticated }: AuthScreenProps) {
           <p className="lede">
             {isSetup
               ? "Use the one-time secret from the openboxd log, then choose a password."
-              : "Sign in as the local owner."}
+              : "Sign in with your OpenBox username and password."}
           </p>
           <form onSubmit={(event) => { void submit(event); }} aria-describedby={error ? "auth-error" : undefined}>
             {isSetup ? (
@@ -58,7 +61,20 @@ export function AuthScreen({ mode, api, onAuthenticated }: AuthScreenProps) {
                 <span>One-time setup secret</span>
                 <input name="secret" type="password" autoComplete="one-time-code" required autoFocus />
               </label>
-            ) : null}
+            ) : (
+              <label>
+                <span>Username</span>
+                <input
+                  name="username"
+                  type="text"
+                  autoComplete="username"
+                  spellCheck={false}
+                  autoCapitalize="none"
+                  required
+                  autoFocus
+                />
+              </label>
+            )}
             <label>
               <span>{isSetup ? "New password" : "Password"}</span>
               <input
@@ -67,7 +83,6 @@ export function AuthScreen({ mode, api, onAuthenticated }: AuthScreenProps) {
                 autoComplete={isSetup ? "new-password" : "current-password"}
                 minLength={12}
                 required
-                autoFocus={!isSetup}
               />
             </label>
             {isSetup ? (

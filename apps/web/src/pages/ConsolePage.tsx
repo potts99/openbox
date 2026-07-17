@@ -195,7 +195,10 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
           </button>
         </nav>
         <div className="owner-control">
-          <span><small>OWNER</small>{session.owner.displayName}</span>
+          <span>
+            <small>{session.role === "admin" ? "ADMIN" : "MEMBER"}</small>
+            {session.username}
+          </span>
           <button type="button" onClick={() => { void logout(); }} disabled={logoutPending}>
             {logoutPending ? "Signing out…" : "Sign out"}
           </button>

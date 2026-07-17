@@ -11,7 +11,14 @@ import type { OpenBoxApi, Session } from "./api/client";
 function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
   return {
     getBootstrapStatus: vi.fn().mockResolvedValue({ required: false }),
-    getSession: vi.fn().mockResolvedValue({ authenticated: true, owner: { displayName: "Operator" }, csrfToken: "test-csrf" }),
+    getSession: vi.fn().mockResolvedValue({
+      authenticated: true,
+      owner: { displayName: "Operator" },
+      userId: "usr_operator",
+      username: "operator",
+      role: "admin",
+      csrfToken: "test-csrf",
+    }),
     getCsrfToken: vi.fn().mockReturnValue("test-csrf"),
     getCapabilities: vi.fn().mockResolvedValue({
       architecture: "x86_64",
@@ -113,7 +120,14 @@ describe("App", () => {
 
   it("submits setup without storing secrets in browser storage", async () => {
     const user = userEvent.setup();
-    const setup = vi.fn().mockResolvedValue({ authenticated: true, owner: { displayName: "Owner" }, csrfToken: "setup-csrf" });
+    const setup = vi.fn().mockResolvedValue({
+      authenticated: true,
+      owner: { displayName: "Owner" },
+      userId: "usr_owner-local",
+      username: "owner-local",
+      role: "admin",
+      csrfToken: "setup-csrf",
+    });
     const api = createApi({
       getBootstrapStatus: vi.fn().mockResolvedValue({ required: true }),
       getSession: vi.fn().mockResolvedValue({ authenticated: false }),
@@ -157,15 +171,18 @@ describe("App", () => {
 
   it("shows login and announces invalid credentials", async () => {
     const user = userEvent.setup();
+    const login = vi.fn().mockRejectedValue(new Error("Invalid credentials"));
     const api = createApi({
       getSession: vi.fn().mockResolvedValue({ authenticated: false }),
-      login: vi.fn().mockRejectedValue(new Error("Invalid credentials")),
+      login,
     });
 
     render(<App api={api} />);
-    await user.type(await screen.findByLabelText("Password"), "wrong-password");
+    await user.type(await screen.findByLabelText("Username"), "owner-local");
+    await user.type(screen.getByLabelText("Password"), "wrong-password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
+    expect(login).toHaveBeenCalledWith({ username: "owner-local", password: "wrong-password" });
     expect(await screen.findByRole("alert")).toHaveTextContent("Invalid credentials");
   });
 

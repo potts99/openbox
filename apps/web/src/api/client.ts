@@ -10,7 +10,14 @@ export interface BootstrapStatus { required: boolean }
 export interface Owner { displayName: string }
 export type Session =
   | { authenticated: false }
-  | { authenticated: true; owner: Owner; csrfToken: string };
+  | {
+    authenticated: true;
+    owner: Owner;
+    userId: string;
+    username: string;
+    role: string;
+    csrfToken: string;
+  };
 
 export interface Capabilities {
   architecture: string;
@@ -253,7 +260,7 @@ export interface OpenBoxApi {
   attachEgressProfile(instanceId: string, profileId: string): Promise<InstanceDetail>;
   listAuditEvents(limit?: number): Promise<AuditEvent[]>;
   setup(input: { secret: string; password: string }): Promise<Session>;
-  login(input: { password: string }): Promise<Session>;
+  login(input: { username?: string; password: string }): Promise<Session>;
   logout(): Promise<void>;
 }
 
@@ -271,6 +278,7 @@ const safeErrors: Record<string, string> = {
   forbidden: "This session is not allowed to perform that action.",
   invalid_argument: "Check the submitted values and try again.",
   rate_limited: "Too many attempts. Wait a moment and try again.",
+  ambiguous_organization: "This username belongs to more than one organization.",
 };
 
 function asRecord(value: unknown): JsonRecord {
@@ -429,9 +437,13 @@ function normalizeSession(value: unknown, fallbackCsrf = ""): Session {
   const authenticated = bool(result.authenticated) || text(result.owner_id) !== "";
   if (!authenticated) return { authenticated: false };
   const owner = asRecord(result.owner);
+  const username = text(result.username, text(result.owner_id, "owner"));
   return {
     authenticated: true,
     owner: { displayName: text(owner.display_name ?? owner.displayName ?? result.owner_name, "Owner") },
+    userId: text(result.user_id),
+    username,
+    role: text(result.role, "member"),
     csrfToken: text(result.csrf_token, fallbackCsrf),
   };
 }
@@ -788,7 +800,10 @@ export function createHttpApi(options: HttpApiOptions = {}): OpenBoxApi {
       return normalizeSession(await request("/v1/bootstrap", { method: "POST", body: JSON.stringify(input) }), csrfToken);
     },
     async login(input) {
-      return normalizeSession(await request("/v1/sessions", { method: "POST", body: JSON.stringify(input) }), csrfToken);
+      const body: { password: string; username?: string } = { password: input.password };
+      const username = input.username?.trim();
+      if (username) body.username = username;
+      return normalizeSession(await request("/v1/sessions", { method: "POST", body: JSON.stringify(body) }), csrfToken);
     },
     async logout() {
       await request("/v1/session", { method: "DELETE" });

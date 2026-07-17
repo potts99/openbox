@@ -11,10 +11,11 @@ describe("createHttpApi", () => {
     }));
     const api = createHttpApi({ fetcher, csrfToken: "csrf-token" });
 
-    await api.login({ password: "secret" });
+    await api.login({ username: "owner-local", password: "secret" });
 
     expect(fetcher).toHaveBeenCalledWith("/v1/sessions", expect.objectContaining({
       method: "POST",
+      body: JSON.stringify({ password: "secret", username: "owner-local" }),
       credentials: "same-origin",
       headers: expect.objectContaining({
         "Content-Type": "application/json",
@@ -49,6 +50,9 @@ describe("createHttpApi", () => {
 
     const loggedInFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       owner_id: "owner-local",
+      user_id: "usr_owner-local",
+      username: "owner-local",
+      role: "admin",
       expires_at: "2026-07-15T18:00:00Z",
       csrf_token: "rotated-token",
     }), { status: 200, headers: { "content-type": "application/json" } }));
@@ -56,6 +60,9 @@ describe("createHttpApi", () => {
     await expect(api.getSession()).resolves.toEqual({
       authenticated: true,
       owner: { displayName: "Owner" },
+      userId: "usr_owner-local",
+      username: "owner-local",
+      role: "admin",
       csrfToken: "rotated-token",
     });
     expect(api.getCsrfToken()).toBe("rotated-token");
