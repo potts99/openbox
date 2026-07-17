@@ -23,8 +23,9 @@ python3 -m http.server 4173
 # open http://127.0.0.1:4173/
 ```
 
-Console CTA links default to `https://app.kindling.systems/`. Edit
-`index.html` if the public console hostname changes.
+Primary CTAs point at the public GitHub repo (self-host / source). There is
+no managed OpenBox cloud yet — do not link the marketing site at a hosted
+console hostname.
 
 ## Claims
 
