@@ -6,6 +6,9 @@ package egress
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
+	"sync"
 
 	"github.com/openbox-dev/openbox/internal/dnsproxy"
 	"github.com/openbox-dev/openbox/internal/domain"
@@ -31,10 +34,17 @@ type Applicator struct {
 	resolver *dnsproxy.AllowlistResolver
 	runtime  PolicyRuntime
 	auditor  PolicyAuditor
+
+	mu           sync.Mutex
+	lastPrograms map[domain.InstanceID]string
 }
 
 func NewApplicator(resolver *dnsproxy.AllowlistResolver, runtime PolicyRuntime) *Applicator {
-	return &Applicator{resolver: resolver, runtime: runtime}
+	return &Applicator{
+		resolver:     resolver,
+		runtime:      runtime,
+		lastPrograms: make(map[domain.InstanceID]string),
+	}
 }
 
 // SetAuditor optionally records redacted policy.apply / policy.apply_failed events.
@@ -64,24 +74,26 @@ func (r AdapterRuntime) SetAllowlistResolution(instanceID domain.InstanceID, res
 
 // Apply resolves the profile allowlist and programs the instance NIC policy.
 func (a *Applicator) Apply(ctx context.Context, instance domain.Instance, profile domain.EgressProfile) error {
-	return a.apply(ctx, instance, profile, true)
+	_, err := a.apply(ctx, instance, profile, true)
+	return err
 }
 
 // apply resolves and programs policy. When audit is false, callers emit their
-// own policy.refresh events instead of policy.apply.
-func (a *Applicator) apply(ctx context.Context, instance domain.Instance, profile domain.EgressProfile, audit bool) error {
+// own policy.refresh events instead of policy.apply. changed is false when a
+// refresh would reprogram the same destination set already on the instance.
+func (a *Applicator) apply(ctx context.Context, instance domain.Instance, profile domain.EgressProfile, audit bool) (changed bool, err error) {
 	if instance.RuntimeRef == "" {
-		return fmt.Errorf("network policy runtime ref is required")
+		return false, fmt.Errorf("network policy runtime ref is required")
 	}
 	instance.EgressMode = profile.Mode
 	literals, hostnames, err := domain.ParseAllowlistEntries(profile.AllowedDestinationsJSON)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if profile.Mode == domain.EgressRestricted {
 		for _, literal := range literals {
 			if !domain.SafeRestrictedAllowlistLiteral(literal) {
-				return fmt.Errorf("restricted allowlist destination %q is not a public unicast address or CIDR", literal)
+				return false, fmt.Errorf("restricted allowlist destination %q is not a public unicast address or CIDR", literal)
 			}
 		}
 	}
@@ -109,7 +121,7 @@ func (a *Applicator) apply(ctx context.Context, instance domain.Instance, profil
 			if audit {
 				a.recordApply(ctx, instance, profile, resolution.State, "failed", err)
 			}
-			return err
+			return false, err
 		}
 		resolved := make([]string, 0, len(hostnames))
 		for _, hostname := range hostnames {
@@ -123,7 +135,7 @@ func (a *Applicator) apply(ctx context.Context, instance domain.Instance, profil
 				if audit {
 					a.recordApply(ctx, instance, profile, resolution.State, "failed", resolveErr)
 				}
-				return resolveErr
+				return false, resolveErr
 			}
 			for _, address := range addresses {
 				destinations = append(destinations, address.String())
@@ -136,6 +148,12 @@ func (a *Applicator) apply(ctx context.Context, instance domain.Instance, profil
 		resolution.Failed = []string{}
 	}
 
+	fingerprint := destinationFingerprint(destinations)
+	if !audit && a.programmedFingerprint(instance.ID) == fingerprint {
+		a.runtime.SetAllowlistResolution(instance.ID, resolution)
+		return false, nil
+	}
+
 	apply := PolicyApply{
 		Instance:     instance,
 		Mode:         profile.Mode,
@@ -146,13 +164,32 @@ func (a *Applicator) apply(ctx context.Context, instance domain.Instance, profil
 		if audit {
 			a.recordApply(ctx, instance, profile, resolution.State, "failed", err)
 		}
-		return err
+		return false, err
 	}
+	a.rememberProgrammed(instance.ID, fingerprint)
 	a.runtime.SetAllowlistResolution(instance.ID, resolution)
 	if audit {
 		a.recordApply(ctx, instance, profile, resolution.State, "succeeded", nil)
 	}
-	return nil
+	return true, nil
+}
+
+func destinationFingerprint(destinations []string) string {
+	sorted := append([]string(nil), destinations...)
+	sort.Strings(sorted)
+	return strings.Join(sorted, "\n")
+}
+
+func (a *Applicator) programmedFingerprint(instanceID domain.InstanceID) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.lastPrograms[instanceID]
+}
+
+func (a *Applicator) rememberProgrammed(instanceID domain.InstanceID, fingerprint string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.lastPrograms[instanceID] = fingerprint
 }
 
 func (a *Applicator) recordApply(ctx context.Context, instance domain.Instance, profile domain.EgressProfile, resolutionState, outcome string, applyErr error) {
