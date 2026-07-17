@@ -18,6 +18,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/images"
 	"github.com/openbox-dev/openbox/internal/operations"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
+	"github.com/openbox-dev/openbox/internal/software"
 )
 
 const operationType = "image.build"
@@ -28,6 +29,7 @@ type Runtime interface {
 	StartInstance(context.Context, string) error
 	StopInstance(context.Context, string) error
 	Exec(context.Context, runtimeapi.ExecRequest) (runtimeapi.ExecResult, error)
+	WriteFile(context.Context, runtimeapi.WriteFileRequest) error
 	DeleteInstance(context.Context, string) error
 	PublishImageAlias(context.Context, string, string) (string, error)
 }
@@ -178,6 +180,11 @@ func (s *Service) RecoverOperation(ctx context.Context, operation domain.Operati
 	if err := s.stage(runCtx, operation, "running_setup", 25); err != nil {
 		return err
 	}
+	if needsNodeSource(definition) {
+		if err := software.ConfigureNodeSource(runCtx, s.runtime, build.BuilderRef, build.Architecture); err != nil {
+			return runtimeFailure("configure NodeSource", err)
+		}
+	}
 	for _, command := range recipeCommands(definition) {
 		if err := s.execAndLog(runCtx, operation, "running_setup", build.BuilderRef, command); err != nil {
 			return err
@@ -222,6 +229,15 @@ func recipeCommands(definition images.DevboxDefinition) []string {
 		}
 	}
 	return commands
+}
+
+func needsNodeSource(definition images.DevboxDefinition) bool {
+	for _, pin := range definition.Packages {
+		if pin.Manager == "apt" && pin.Name == "nodejs" && strings.Contains(pin.Version, "nodesource") {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) execAndLog(ctx context.Context, operation domain.Operation, stage, builderRef, command string) error {

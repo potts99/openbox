@@ -4,6 +4,7 @@ package build
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,6 +30,45 @@ func TestRecipeCommandsUsePinnedPackageManagers(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing translated commands: %v", want)
+	}
+}
+
+func TestRecoverOperationConfiguresNodeSourceBeforeInstallingNodeJS(t *testing.T) {
+	runtime := &recordingRuntime{}
+	repo := &fakeRepository{build: domain.ImageBuild{
+		ID:           "build-000000000000",
+		OwnerID:      "owner",
+		Architecture: "x86_64",
+		Runtime:      "container",
+		Alias:        "openbox:devbox/ubuntu/24.04",
+		BuilderRef:   "obx-build-build-0000000000",
+	}}
+	service, err := New(runtime, repo, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = service.RecoverOperation(context.Background(), domain.Operation{
+		ID:         "operation-0000000",
+		OwnerID:    "owner",
+		Type:       operationType,
+		TargetType: "image",
+		TargetID:   repo.build.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nodeInstall := "exec:sh -lc DEBIAN_FRONTEND=noninteractive apt-get install -y 'nodejs=22.23.1-1nodesource1'"
+	for _, event := range []string{
+		"write:/etc/apt/keyrings/nodesource.gpg",
+		"write:/etc/apt/sources.list.d/nodesource.sources",
+	} {
+		if indexOf(runtime.events, event) == -1 {
+			t.Fatalf("missing %s; events=%v", event, runtime.events)
+		}
+		if indexOf(runtime.events, event) > indexOf(runtime.events, nodeInstall) {
+			t.Fatalf("%s must precede nodejs install; events=%v", event, runtime.events)
+		}
 	}
 }
 
@@ -73,9 +113,34 @@ func (fakeRuntime) StopInstance(context.Context, string) error  { return nil }
 func (fakeRuntime) Exec(context.Context, runtimeapi.ExecRequest) (runtimeapi.ExecResult, error) {
 	return runtimeapi.ExecResult{}, nil
 }
-func (fakeRuntime) DeleteInstance(context.Context, string) error { return nil }
+func (fakeRuntime) WriteFile(context.Context, runtimeapi.WriteFileRequest) error { return nil }
+func (fakeRuntime) DeleteInstance(context.Context, string) error                 { return nil }
 func (fakeRuntime) PublishImageAlias(context.Context, string, string) (string, error) {
 	return "digest", nil
+}
+
+type recordingRuntime struct {
+	fakeRuntime
+	events []string
+}
+
+func (r *recordingRuntime) Exec(_ context.Context, request runtimeapi.ExecRequest) (runtimeapi.ExecResult, error) {
+	r.events = append(r.events, "exec:"+strings.Join(request.Command, " "))
+	return runtimeapi.ExecResult{}, nil
+}
+
+func (r *recordingRuntime) WriteFile(_ context.Context, request runtimeapi.WriteFileRequest) error {
+	r.events = append(r.events, "write:"+request.Path)
+	return nil
+}
+
+func indexOf(events []string, want string) int {
+	for i, event := range events {
+		if event == want {
+			return i
+		}
+	}
+	return -1
 }
 
 type fakeRepository struct {

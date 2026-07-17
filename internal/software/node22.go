@@ -20,49 +20,43 @@ const (
 	nodeSourceSourcesPath = "/etc/apt/sources.list.d/nodesource.sources"
 )
 
+// ConfigureNodeSource configures the NodeSource Node 22 apt repository for an
+// OpenBox architecture. Repo metadata is written via WriteFile so guests never
+// curl it during installation.
+func ConfigureNodeSource(ctx context.Context, guest Guest, runtimeRef, architecture string) error {
+	debArch, err := debArchitecture(architecture)
+	if err != nil {
+		return err
+	}
+	return configureNodeSource(ctx, guest, runtimeRef, debArch)
+}
+
 // installNodeJS configures the pinned NodeSource Node 22 apt repo and installs
 // nodejs. Repo metadata is written via WriteFile so guest recipes never curl.
 func installNodeJS(ctx context.Context, guest Guest, runtimeRef, debArch, version string) error {
-	if guest == nil {
-		return fmt.Errorf("nodejs install: guest is required")
-	}
-	if runtimeRef == "" {
-		return fmt.Errorf("nodejs install: runtime ref is required")
-	}
 	if debArch == "" || version == "" {
 		return fmt.Errorf("nodejs install: deb architecture and version are required")
 	}
-	env := map[string]string{
-		"DEBIAN_FRONTEND": "noninteractive",
-		"PATH":            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-	}
-	run := func(step []string) error {
-		result, err := guest.Exec(ctx, runtimeapi.ExecRequest{
-			Ref:        runtimeRef,
-			Command:    step,
-			WorkingDir: "/",
-			Env:        env,
-		})
-		if err != nil {
-			return fmt.Errorf("nodejs install (%s): %w", strings.Join(step, " "), err)
-		}
-		if result.ExitCode != 0 {
-			detail := strings.TrimSpace(string(result.Stderr))
-			if detail == "" {
-				detail = strings.TrimSpace(string(result.Stdout))
-			}
-			if detail == "" {
-				detail = fmt.Sprintf("exit %d", result.ExitCode)
-			}
-			return fmt.Errorf("nodejs install (%s): %s", strings.Join(step, " "), detail)
-		}
-		return nil
-	}
-
-	if err := run([]string{"apt-get", "update"}); err != nil {
+	if err := configureNodeSource(ctx, guest, runtimeRef, debArch); err != nil {
 		return err
 	}
-	if err := run([]string{"apt-get", "install", "-y", "ca-certificates", "gnupg", "apt-transport-https"}); err != nil {
+	return runNodeSourceCommand(ctx, guest, runtimeRef, []string{"apt-get", "install", "-y", "nodejs=" + version})
+}
+
+func configureNodeSource(ctx context.Context, guest Guest, runtimeRef, debArch string) error {
+	if guest == nil {
+		return fmt.Errorf("nodesource configure: guest is required")
+	}
+	if runtimeRef == "" {
+		return fmt.Errorf("nodesource configure: runtime ref is required")
+	}
+	if debArch == "" {
+		return fmt.Errorf("nodesource configure: deb architecture is required")
+	}
+	if err := runNodeSourceCommand(ctx, guest, runtimeRef, []string{"apt-get", "update"}); err != nil {
+		return err
+	}
+	if err := runNodeSourceCommand(ctx, guest, runtimeRef, []string{"apt-get", "install", "-y", "ca-certificates", "gnupg", "apt-transport-https"}); err != nil {
 		return err
 	}
 	if err := guest.WriteFile(ctx, runtimeapi.WriteFileRequest{
@@ -73,7 +67,7 @@ func installNodeJS(ctx context.Context, guest Guest, runtimeRef, debArch, versio
 		UID:  0,
 		GID:  0,
 	}); err != nil {
-		return fmt.Errorf("nodejs install write %s: %w", nodeSourceKeyPath, err)
+		return fmt.Errorf("nodesource configure write %s: %w", nodeSourceKeyPath, err)
 	}
 	sources := nodeSourceSources(debArch)
 	if err := guest.WriteFile(ctx, runtimeapi.WriteFileRequest{
@@ -84,12 +78,36 @@ func installNodeJS(ctx context.Context, guest Guest, runtimeRef, debArch, versio
 		UID:  0,
 		GID:  0,
 	}); err != nil {
-		return fmt.Errorf("nodejs install write %s: %w", nodeSourceSourcesPath, err)
+		return fmt.Errorf("nodesource configure write %s: %w", nodeSourceSourcesPath, err)
 	}
-	if err := run([]string{"apt-get", "update"}); err != nil {
-		return err
+	return runNodeSourceCommand(ctx, guest, runtimeRef, []string{"apt-get", "update"})
+}
+
+func runNodeSourceCommand(ctx context.Context, guest Guest, runtimeRef string, step []string) error {
+	env := map[string]string{
+		"DEBIAN_FRONTEND": "noninteractive",
+		"PATH":            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 	}
-	return run([]string{"apt-get", "install", "-y", "nodejs=" + version})
+	result, err := guest.Exec(ctx, runtimeapi.ExecRequest{
+		Ref:        runtimeRef,
+		Command:    step,
+		WorkingDir: "/",
+		Env:        env,
+	})
+	if err != nil {
+		return fmt.Errorf("nodesource (%s): %w", strings.Join(step, " "), err)
+	}
+	if result.ExitCode != 0 {
+		detail := strings.TrimSpace(string(result.Stderr))
+		if detail == "" {
+			detail = strings.TrimSpace(string(result.Stdout))
+		}
+		if detail == "" {
+			detail = fmt.Sprintf("exit %d", result.ExitCode)
+		}
+		return fmt.Errorf("nodesource (%s): %s", strings.Join(step, " "), detail)
+	}
+	return nil
 }
 
 func nodeSourceSources(debArch string) string {
