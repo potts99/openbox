@@ -31,7 +31,21 @@ export interface NetworkPolicyStatus {
   egressMode: string;
   acls: string[];
   resolutionState: string;
+  resolutionPending: string[];
+  resolutionResolved: string[];
+  resolutionFailed: string[];
   deniedFlows: number;
+}
+
+export interface AuditEvent {
+  id: string;
+  actor: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  outcome: string;
+  metadata: Record<string, string>;
+  createdAt: string;
 }
 
 export interface EgressProfile {
@@ -39,6 +53,7 @@ export interface EgressProfile {
   name: string;
   mode: "standard" | "restricted" | string;
   allowedDestinations: string[];
+  dnsPolicy: string;
   system: boolean;
   attachedInstanceCount?: number;
 }
@@ -157,6 +172,7 @@ export interface CreateInstanceInput {
   ownerPublicKey: string;
   packages?: string[];
   lifetimeSeconds?: number;
+  egressProfileId?: string;
 }
 
 export interface CreateInstanceResult {
@@ -221,6 +237,7 @@ export interface OpenBoxApi {
   }>;
   deleteEgressProfile(id: string): Promise<void>;
   attachEgressProfile(instanceId: string, profileId: string): Promise<InstanceDetail>;
+  listAuditEvents(limit?: number): Promise<AuditEvent[]>;
   setup(input: { secret: string; password: string }): Promise<Session>;
   login(input: { password: string }): Promise<Session>;
   logout(): Promise<void>;
@@ -252,6 +269,11 @@ function text(value: unknown, fallback = ""): string {
 
 function bool(value: unknown): boolean {
   return value === true;
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string");
 }
 
 function number(value: unknown, fallback = 0): number {
@@ -300,7 +322,10 @@ function normalizeInstance(value: unknown): InstanceDetail {
     networkPolicy: {
       egressMode: text(networkPolicy.egress_mode),
       acls: Array.isArray(networkPolicy.acls) ? networkPolicy.acls.filter((acl): acl is string => typeof acl === "string") : [],
-      resolutionState: text(resolution.state),
+      resolutionState: text(resolution.state) || "idle",
+      resolutionPending: stringList(resolution.pending),
+      resolutionResolved: stringList(resolution.resolved),
+      resolutionFailed: stringList(resolution.failed),
       deniedFlows: number(networkPolicy.denied_flows),
     },
     software: softwareRaw.map(normalizeInstanceSoftware),
@@ -341,6 +366,7 @@ function normalizeEgressProfile(value: unknown): EgressProfile {
     name: text(row.name),
     mode: text(row.mode),
     allowedDestinations: destinations,
+    dnsPolicy: text(row.dns_policy) || "host_resolve",
     system: bool(row.system),
     attachedInstanceCount: number(row.attached_instance_count) || undefined,
   };
@@ -495,6 +521,9 @@ export function createHttpApi(options: HttpApiOptions = {}): OpenBoxApi {
       };
       if (input.lifetimeSeconds && input.lifetimeSeconds > 0) {
         payload.lifetime_seconds = input.lifetimeSeconds;
+      }
+      if (input.egressProfileId) {
+        payload.egress_profile_id = input.egressProfileId;
       }
       const body = asRecord(await request("/v1/instances", {
         method: "POST",
@@ -680,6 +709,29 @@ export function createHttpApi(options: HttpApiOptions = {}): OpenBoxApi {
         `/v1/instances/${encodeURIComponent(instanceId)}/network/egress-profile`,
         { method: "PUT", body: JSON.stringify({ egress_profile_id: profileId }) },
       ));
+    },
+    async listAuditEvents(limit = 100) {
+      const query = limit > 0 ? `?limit=${encodeURIComponent(String(limit))}` : "";
+      const body = asRecord(await request(`/v1/audit-events${query}`));
+      const items = Array.isArray(body.items) ? body.items : [];
+      return items.map((item) => {
+        const row = asRecord(item);
+        const metadataRaw = asRecord(row.metadata);
+        const metadata: Record<string, string> = {};
+        for (const [key, value] of Object.entries(metadataRaw)) {
+          if (typeof value === "string") metadata[key] = value;
+        }
+        return {
+          id: text(row.id),
+          actor: text(row.actor),
+          action: text(row.action),
+          targetType: text(row.target_type),
+          targetId: text(row.target_id),
+          outcome: text(row.outcome),
+          metadata,
+          createdAt: text(row.created_at),
+        };
+      });
     },
     async setup(input) {
       return normalizeSession(await request("/v1/bootstrap", { method: "POST", body: JSON.stringify(input) }), csrfToken);

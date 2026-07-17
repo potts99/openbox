@@ -83,10 +83,22 @@ type EgressProfile struct {
 	Name                  string    `json:"name"`
 	Mode                  string    `json:"mode"`
 	AllowedDestinations   []string  `json:"allowed_destinations"`
+	DNSPolicy             string    `json:"dns_policy"`
 	System                bool      `json:"system"`
 	AttachedInstanceCount int       `json:"attached_instance_count,omitempty"`
 	CreatedAt             time.Time `json:"created_at"`
 	UpdatedAt             time.Time `json:"updated_at"`
+}
+
+type AuditEvent struct {
+	ID         string            `json:"id"`
+	Actor      string            `json:"actor"`
+	Action     string            `json:"action"`
+	TargetType string            `json:"target_type"`
+	TargetID   string            `json:"target_id"`
+	Outcome    string            `json:"outcome"`
+	Metadata   map[string]string `json:"metadata"`
+	CreatedAt  time.Time         `json:"created_at"`
 }
 
 type Instance struct {

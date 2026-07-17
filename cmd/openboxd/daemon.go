@@ -198,6 +198,9 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
+	policyAuditor := &egress.DurablePolicyAuditor{Store: store}
+	egressService.SetInstanceMarker(service)
+	egressService.SetAuditor(policyAuditor)
 	routeService, err := routes.New(store, routes.Options{})
 	if err != nil {
 		return fail(err)
@@ -317,6 +320,7 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 		SSHPublicPort:     publicPort,
 		Snapshots:         snapshotService,
 		Clones:            cloneService,
+		AuditEvents:       store,
 	})
 	if err != nil {
 		return fail(err)
@@ -340,7 +344,7 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	}
 	return daemonComponents{
 		operations:  worker,
-		reconciler:  expiryThenReconcile{expiry: expiry, inner: reconciler},
+		reconciler:  expiryThenReconcile{expiry: expiry, egress: egressService, inner: reconciler},
 		metrics:     metricsSampler,
 		sandboxPool: sandboxPool,
 		closer:      store,
@@ -349,14 +353,26 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	}, nil
 }
 
+type egressRefresher interface {
+	RefreshHostnameAllowlists(context.Context) (egress.RefreshReport, error)
+}
+
 type expiryThenReconcile struct {
 	expiry *sandbox.ExpiryScheduler
+	egress egressRefresher
 	inner  reconciliationRunner
 }
 
 func (r expiryThenReconcile) RunOnce(ctx context.Context) (reconcile.Report, error) {
 	if _, err := r.expiry.RunOnce(ctx); err != nil {
 		return reconcile.Report{}, err
+	}
+	if r.egress != nil {
+		if report, err := r.egress.RefreshHostnameAllowlists(ctx); err != nil {
+			log.Printf("openboxd: egress dns refresh: %v", err)
+		} else if report.Refreshed > 0 || len(report.Errors) > 0 {
+			log.Printf("openboxd: egress dns refresh refreshed=%d skipped=%d errors=%d", report.Refreshed, report.Skipped, len(report.Errors))
+		}
 	}
 	return r.inner.RunOnce(ctx)
 }

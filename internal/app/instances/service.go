@@ -1327,6 +1327,16 @@ func (s *Service) markError(ctx context.Context, instance domain.Instance) error
 	return nil
 }
 
+// MarkInstanceError marks an owned instance observed_state=error after a
+// host-side policy apply failure (for example egress profile fan-out).
+func (s *Service) MarkInstanceError(ctx context.Context, ownerID domain.OwnerID, id domain.InstanceID) error {
+	instance, err := s.repo.GetInstance(ctx, ownerID, id)
+	if err != nil {
+		return err
+	}
+	return s.markError(ctx, instance)
+}
+
 func resolveIsolationRequest(request domain.IsolationRequest, capabilities runtimeapi.Capabilities) domain.IsolationRequest {
 	if request != "" {
 		return request

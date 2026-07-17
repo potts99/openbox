@@ -14,6 +14,7 @@ import { OperationDrawer } from "../components/OperationDrawer";
 import { CreateInstancePage } from "./CreateInstancePage";
 import { InstancePage } from "./InstancePage";
 import { InstanceTerminal } from "./InstanceTerminal";
+import { AuditEventsPage } from "./AuditEvents";
 import { NetworkPolicyPage } from "./NetworkPolicy";
 
 interface ConsolePageProps {
@@ -32,7 +33,8 @@ type View =
   | { kind: "create" }
   | { kind: "detail"; instanceId: string }
   | { kind: "terminal"; instanceId: string; instanceName: string }
-  | { kind: "network-policy" };
+  | { kind: "network-policy" }
+  | { kind: "audit-events" };
 
 export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
   const [data, setData] = useState<ConsoleData>({ status: "loading" });
@@ -152,6 +154,10 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
     return <NetworkPolicyPage api={api} onBack={() => setView({ kind: "list" })} />;
   }
 
+  if (view.kind === "audit-events") {
+    return <AuditEventsPage api={api} onBack={() => setView({ kind: "list" })} />;
+  }
+
   if (view.kind === "create") {
     return (
       <CreateInstancePage
@@ -172,6 +178,9 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
           <a href="#instances" aria-current="page">Instances</a>
           <button className="nav-button" type="button" onClick={() => setView({ kind: "network-policy" })}>
             Network policy
+          </button>
+          <button className="nav-button" type="button" onClick={() => setView({ kind: "audit-events" })}>
+            Audit
           </button>
           <button
             className="nav-button"

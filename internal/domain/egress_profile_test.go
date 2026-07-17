@@ -62,3 +62,39 @@ func TestDefaultEgressProfileID(t *testing.T) {
 		t.Fatalf("vps default=%q", got)
 	}
 }
+
+func TestRestrictedProfileRejectsBypassAllowlistLiterals(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(0, 0).UTC()
+	for _, destinations := range []string{
+		`["0.0.0.0/0"]`,
+		`["10.0.0.0/8"]`,
+		`["10.42.0.0/24"]`,
+		`["192.168.1.1"]`,
+		`["127.0.0.1"]`,
+		`["100.64.0.1"]`,
+	} {
+		p := domain.EgressProfile{
+			ID: "prof-1", Name: "restricted", Mode: domain.EgressRestricted,
+			AllowedDestinationsJSON: []byte(destinations), DNSPolicy: domain.DNSPolicyHostResolve,
+			CreatedAt: now, UpdatedAt: now,
+		}
+		if err := p.Validate(); err == nil {
+			t.Fatalf("expected rejection for %s", destinations)
+		}
+	}
+}
+
+func TestRestrictedProfileAcceptsPublicAllowlistLiterals(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(0, 0).UTC()
+	p := domain.EgressProfile{
+		ID: "prof-1", Name: "restricted", Mode: domain.EgressRestricted,
+		AllowedDestinationsJSON: []byte(`["203.0.113.10","1.1.1.1/32"]`),
+		DNSPolicy:               domain.DNSPolicyHostResolve,
+		CreatedAt:               now, UpdatedAt: now,
+	}
+	if err := p.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}

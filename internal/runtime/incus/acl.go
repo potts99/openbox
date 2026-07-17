@@ -111,8 +111,9 @@ func managedBridgePeerCIDRs() []string {
 	}
 }
 
-// RestrictedACL builds a named ACL for a restricted egress profile. Its
-// destinations must first be validated by networkpolicy.ParseAllowedDestinations.
+// RestrictedACL builds a named ACL for a restricted egress profile. Callers
+// must supply resolved public IP/CIDR destinations (see domain.ParseAllowlistEntries
+// and domain.SafeRestrictedAllowlistLiteral).
 func RestrictedACL(name string, destinations []string) resource {
 	rules := make([]networkACLRule, 0, len(destinations))
 	for _, destination := range destinations {
@@ -340,16 +341,16 @@ func sameStrings(left, right []string) bool {
 }
 
 // NICACLs returns the ACL names to attach to an instance NIC. Restricted modes
-// must provide the stable, per-profile ACL name when it is known.
+// must provide the stable, per-profile ACL name when it is known. Public-internet
+// ACL attachment follows networkpolicy.AllowsPublicInternet so runtime stacks
+// cannot drift from Evaluate(mode, DestinationInternet).
 func NICACLs(mode domain.EgressMode, restrictedACLName ...string) []string {
 	acls := []string{DefaultDenyACLName}
-	switch mode {
-	case domain.EgressStandard:
+	if networkpolicy.AllowsPublicInternet(mode) {
 		return append(acls, StandardEgressACLName)
-	case domain.EgressRestricted:
-		if len(restrictedACLName) > 0 && restrictedACLName[0] != "" {
-			return append(acls, restrictedACLName[0])
-		}
+	}
+	if mode == domain.EgressRestricted && len(restrictedACLName) > 0 && restrictedACLName[0] != "" {
+		return append(acls, restrictedACLName[0])
 	}
 	return acls
 }

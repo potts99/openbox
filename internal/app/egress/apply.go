@@ -30,10 +30,18 @@ type PolicyRuntime interface {
 type Applicator struct {
 	resolver *dnsproxy.AllowlistResolver
 	runtime  PolicyRuntime
+	auditor  PolicyAuditor
 }
 
 func NewApplicator(resolver *dnsproxy.AllowlistResolver, runtime PolicyRuntime) *Applicator {
 	return &Applicator{resolver: resolver, runtime: runtime}
+}
+
+// SetAuditor optionally records redacted policy.apply / policy.apply_failed events.
+func (a *Applicator) SetAuditor(auditor PolicyAuditor) {
+	if a != nil {
+		a.auditor = auditor
+	}
 }
 
 // AdapterRuntime adapts *incus.Adapter to PolicyRuntime.
@@ -56,6 +64,12 @@ func (r AdapterRuntime) SetAllowlistResolution(instanceID domain.InstanceID, res
 
 // Apply resolves the profile allowlist and programs the instance NIC policy.
 func (a *Applicator) Apply(ctx context.Context, instance domain.Instance, profile domain.EgressProfile) error {
+	return a.apply(ctx, instance, profile, true)
+}
+
+// apply resolves and programs policy. When audit is false, callers emit their
+// own policy.refresh events instead of policy.apply.
+func (a *Applicator) apply(ctx context.Context, instance domain.Instance, profile domain.EgressProfile, audit bool) error {
 	if instance.RuntimeRef == "" {
 		return fmt.Errorf("network policy runtime ref is required")
 	}
@@ -63,6 +77,13 @@ func (a *Applicator) Apply(ctx context.Context, instance domain.Instance, profil
 	literals, hostnames, err := domain.ParseAllowlistEntries(profile.AllowedDestinationsJSON)
 	if err != nil {
 		return err
+	}
+	if profile.Mode == domain.EgressRestricted {
+		for _, literal := range literals {
+			if !domain.SafeRestrictedAllowlistLiteral(literal) {
+				return fmt.Errorf("restricted allowlist destination %q is not a public unicast address or CIDR", literal)
+			}
+		}
 	}
 
 	resolution := domain.AllowlistResolution{
@@ -84,7 +105,11 @@ func (a *Applicator) Apply(ctx context.Context, instance domain.Instance, profil
 			resolution.Pending = []string{}
 			resolution.Failed = append([]string(nil), hostnames...)
 			a.runtime.SetAllowlistResolution(instance.ID, resolution)
-			return fmt.Errorf("dns allowlist resolver is required")
+			err := fmt.Errorf("dns allowlist resolver is required")
+			if audit {
+				a.recordApply(ctx, instance, profile, resolution.State, "failed", err)
+			}
+			return err
 		}
 		resolved := make([]string, 0, len(hostnames))
 		for _, hostname := range hostnames {
@@ -95,6 +120,9 @@ func (a *Applicator) Apply(ctx context.Context, instance domain.Instance, profil
 				resolution.Failed = []string{hostname}
 				resolution.Resolved = resolved
 				a.runtime.SetAllowlistResolution(instance.ID, resolution)
+				if audit {
+					a.recordApply(ctx, instance, profile, resolution.State, "failed", resolveErr)
+				}
 				return resolveErr
 			}
 			for _, address := range addresses {
@@ -115,8 +143,31 @@ func (a *Applicator) Apply(ctx context.Context, instance domain.Instance, profil
 		Resolution:   resolution,
 	}
 	if err := a.runtime.ProgramNetworkPolicy(ctx, apply); err != nil {
+		if audit {
+			a.recordApply(ctx, instance, profile, resolution.State, "failed", err)
+		}
 		return err
 	}
 	a.runtime.SetAllowlistResolution(instance.ID, resolution)
+	if audit {
+		a.recordApply(ctx, instance, profile, resolution.State, "succeeded", nil)
+	}
 	return nil
+}
+
+func (a *Applicator) recordApply(ctx context.Context, instance domain.Instance, profile domain.EgressProfile, resolutionState, outcome string, applyErr error) {
+	if a == nil || a.auditor == nil {
+		return
+	}
+	action := ActionPolicyApply
+	message := ""
+	if applyErr != nil {
+		action = ActionPolicyApplyFailed
+		message = applyErr.Error()
+	}
+	_ = a.auditor.RecordPolicyEvent(ctx, PolicyAuditEvent{
+		OwnerID: instance.OwnerID, Actor: "openboxd", Action: action,
+		InstanceID: instance.ID, ProfileID: profile.ID, Mode: profile.Mode,
+		Outcome: outcome, Message: message, Resolution: resolutionState,
+	})
 }

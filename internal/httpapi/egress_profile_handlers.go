@@ -170,10 +170,14 @@ func mapEgressProfile(profile domain.EgressProfile, attached int) generated.Egre
 			destinations = []string{}
 		}
 	}
+	dnsPolicy := profile.DNSPolicy
+	if dnsPolicy == "" {
+		dnsPolicy = domain.DNSPolicyHostResolve
+	}
 	out := generated.EgressProfile{
 		Id: string(profile.ID), Name: profile.Name, Mode: generated.EgressProfileMode(profile.Mode),
-		AllowedDestinations: destinations, System: profile.System,
-		CreatedAt: profile.CreatedAt, UpdatedAt: profile.UpdatedAt,
+		AllowedDestinations: destinations, DnsPolicy: generated.EgressProfileDnsPolicy(dnsPolicy),
+		System: profile.System, CreatedAt: profile.CreatedAt, UpdatedAt: profile.UpdatedAt,
 	}
 	if attached > 0 {
 		count := attached

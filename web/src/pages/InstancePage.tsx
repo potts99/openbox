@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useEffect, useState } from "react";
-import type { ConnectionInfo, InstanceAction, InstanceDetail, OpenBoxApi, SnapshotSummary, SoftwarePackage } from "../api/client";
+import type {
+  ConnectionInfo,
+  EgressProfile,
+  InstanceAction,
+  InstanceDetail,
+  OpenBoxApi,
+  SnapshotSummary,
+  SoftwarePackage,
+} from "../api/client";
 import { InstanceMetrics } from "../components/InstanceMetrics";
 import { InstanceOperationLogs } from "../components/InstanceOperationLogs";
 import { SSHConnect } from "../components/SSHConnect";
@@ -19,7 +27,13 @@ interface InstancePageProps {
 type PageData =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; instance: InstanceDetail; catalog: SoftwarePackage[]; connection: ConnectionInfo };
+  | {
+    status: "ready";
+    instance: InstanceDetail;
+    catalog: SoftwarePackage[];
+    connection: ConnectionInfo;
+    egressProfiles: EgressProfile[];
+  };
 
 function formatBytes(bytes: number): string {
   if (bytes <= 0) return "—";
@@ -66,6 +80,9 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
   const [checkpointError, setCheckpointError] = useState("");
   const [checkpointWarnings, setCheckpointWarnings] = useState<string[]>([]);
   const [storageNote, setStorageNote] = useState("");
+  const [attachProfileId, setAttachProfileId] = useState("");
+  const [attachPending, setAttachPending] = useState(false);
+  const [attachError, setAttachError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -74,11 +91,13 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
       api.listSoftwareCatalog(),
       api.getConnection().catch(() => ({ ssh: null }) as ConnectionInfo),
       api.listSnapshots(instanceId).catch(() => [] as SnapshotSummary[]),
+      api.listEgressProfiles().catch(() => [] as EgressProfile[]),
     ])
-      .then(([instance, catalog, connection, listed]) => {
+      .then(([instance, catalog, connection, listed, egressProfiles]) => {
         if (active) {
-          setData({ status: "ready", instance, catalog, connection });
+          setData({ status: "ready", instance, catalog, connection, egressProfiles });
           setSnapshots(listed);
+          setAttachProfileId(instance.egressProfileId || egressProfiles[0]?.id || "");
         }
       })
       .catch((error: unknown) => {
@@ -93,14 +112,33 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
   }, [api, instanceId]);
 
   async function reloadReady() {
-    const [instance, catalog, connection, listed] = await Promise.all([
+    const [instance, catalog, connection, listed, egressProfiles] = await Promise.all([
       api.getInstance(instanceId),
       api.listSoftwareCatalog(),
       api.getConnection().catch(() => ({ ssh: null }) as ConnectionInfo),
       api.listSnapshots(instanceId).catch(() => [] as SnapshotSummary[]),
+      api.listEgressProfiles().catch(() => [] as EgressProfile[]),
     ]);
-    setData({ status: "ready", instance, catalog, connection });
+    setData({ status: "ready", instance, catalog, connection, egressProfiles });
     setSnapshots(listed);
+    setAttachProfileId(instance.egressProfileId || egressProfiles[0]?.id || "");
+  }
+
+  async function attachEgressProfile() {
+    if (!attachProfileId) return;
+    setAttachError("");
+    setAttachPending(true);
+    try {
+      const instance = await api.attachEgressProfile(instanceId, attachProfileId);
+      setData((current) => {
+        if (current.status !== "ready") return current;
+        return { ...current, instance };
+      });
+    } catch (error: unknown) {
+      setAttachError(error instanceof Error ? error.message : "Could not attach egress profile");
+    } finally {
+      setAttachPending(false);
+    }
   }
 
   async function ownerKey(): Promise<string> {
@@ -370,35 +408,67 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
                       : ""}
                   </dd>
                 </div>
-                {instance.kind !== "sandbox" ? (
-                  <>
-                    <div>
-                      <dt>Egress</dt>
-                      <dd>{instance.networkPolicy?.egressMode || "unknown"}</dd>
-                    </div>
-                    <div>
-                      <dt>Egress profile</dt>
-                      <dd>{instance.egressProfileId || "—"}</dd>
-                    </div>
-                    <div>
-                      <dt>Network ACLs</dt>
-                      <dd>{instance.networkPolicy?.acls?.join(", ") || "—"}</dd>
-                    </div>
-                    <div>
-                      <dt>Resolution</dt>
-                      <dd>{instance.networkPolicy?.resolutionState || "idle"}</dd>
-                    </div>
-                    <div>
-                      <dt>Denied flows</dt>
-                      <dd>{instance.networkPolicy?.deniedFlows ?? 0}</dd>
-                    </div>
-                  </>
-                ) : (
-                  <div>
-                    <dt>Egress profile</dt>
-                    <dd>{instance.egressProfileId || "—"}</dd>
+                <div>
+                  <dt>Egress</dt>
+                  <dd>{instance.networkPolicy?.egressMode || "unknown"}</dd>
+                </div>
+                <div>
+                  <dt>Egress profile</dt>
+                  <dd>{instance.egressProfileId || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Network ACLs</dt>
+                  <dd>{instance.networkPolicy?.acls?.join(", ") || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Resolution</dt>
+                  <dd>{instance.networkPolicy?.resolutionState || "idle"}</dd>
+                </div>
+                <div>
+                  <dt>Pending hostnames</dt>
+                  <dd>{instance.networkPolicy?.resolutionPending?.join(", ") || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Resolved hostnames</dt>
+                  <dd>{instance.networkPolicy?.resolutionResolved?.join(", ") || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Failed hostnames</dt>
+                  <dd>{instance.networkPolicy?.resolutionFailed?.join(", ") || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Denied flows</dt>
+                  <dd>{instance.networkPolicy?.deniedFlows ?? 0}</dd>
+                </div>
+                {data.status === "ready" && data.egressProfiles.length > 0 ? (
+                  <div className="detail-span">
+                    <dt>Attach profile</dt>
+                    <dd>
+                      <div className="create-choice-row">
+                        <select
+                          aria-label="Attach egress profile"
+                          value={attachProfileId}
+                          onChange={(event) => setAttachProfileId(event.target.value)}
+                        >
+                          {data.egressProfiles.map((profile) => (
+                            <option key={profile.id} value={profile.id}>
+                              {profile.name} ({profile.mode})
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={attachPending || !attachProfileId || attachProfileId === instance.egressProfileId}
+                          onClick={() => { void attachEgressProfile(); }}
+                        >
+                          {attachPending ? "Attaching…" : "Attach"}
+                        </button>
+                      </div>
+                      {attachError ? <p className="data-message is-error" role="alert">{attachError}</p> : null}
+                    </dd>
                   </div>
-                )}
+                ) : null}
                 <div>
                   <dt>Desired</dt>
                   <dd>{instance.desiredState}</dd>

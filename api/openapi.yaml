@@ -606,6 +606,24 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/DeriveInstanceResult" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/audit-events:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - name: limit
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+        description: Maximum number of newest audit events to return.
+    get:
+      operationId: listAuditEvents
+      responses:
+        "200":
+          description: Owner-scoped immutable audit events, newest first.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListAuditEventsResponse" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/network/egress-profiles:
     parameters:
       - { $ref: "#/components/parameters/APIVersion" }
@@ -1113,7 +1131,7 @@ components:
         denied_flows: { type: integer, format: int64, minimum: 0 }
     EgressProfile:
       type: object
-      required: [id, name, mode, allowed_destinations, system, created_at, updated_at]
+      required: [id, name, mode, allowed_destinations, dns_policy, system, created_at, updated_at]
       properties:
         id: { type: string }
         name: { type: string }
@@ -1121,10 +1139,40 @@ components:
         allowed_destinations:
           type: array
           items: { type: string }
+        dns_policy:
+          type: string
+          enum: [host_resolve]
+          description: Host-side allowlist hostname resolution policy.
         system: { type: boolean }
         attached_instance_count: { type: integer, minimum: 0 }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    AuditEvent:
+      type: object
+      required: [id, actor, action, target_type, target_id, outcome, metadata, created_at]
+      description: Immutable security audit record without payloads or secrets.
+      properties:
+        id: { type: string }
+        actor: { type: string }
+        action:
+          type: string
+          description: >
+            Stable action vocabulary includes policy.apply, policy.apply_failed,
+            policy.refresh, policy.refresh_failed, ssh.session, and terminal.session.
+        target_type: { type: string }
+        target_id: { type: string }
+        outcome: { type: string }
+        metadata:
+          type: object
+          additionalProperties: { type: string }
+        created_at: { type: string, format: date-time }
+    ListAuditEventsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AuditEvent" }
     ListEgressProfilesResponse:
       type: object
       required: [items]
