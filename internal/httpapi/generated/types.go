@@ -179,6 +179,18 @@ type AllowlistResolution struct {
 // AllowlistResolutionState defines model for AllowlistResolution.State.
 type AllowlistResolutionState string
 
+// Artifact defines model for Artifact.
+type Artifact struct {
+	ContentType string    `json:"content_type"`
+	CreatedAt   time.Time `json:"created_at"`
+	Id          string    `json:"id"`
+	InstanceId  string    `json:"instance_id"`
+	Path        string    `json:"path"`
+	Sha256      string    `json:"sha256"`
+	SizeBytes   int64     `json:"size_bytes"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 // AttachEgressProfileRequest defines model for AttachEgressProfileRequest.
 type AttachEgressProfileRequest struct {
 	EgressProfileId string `json:"egress_profile_id"`
@@ -503,6 +515,11 @@ type InstanceSoftware struct {
 // InstanceSoftwareStatus defines model for InstanceSoftware.Status.
 type InstanceSoftwareStatus string
 
+// ListArtifactsResponse defines model for ListArtifactsResponse.
+type ListArtifactsResponse struct {
+	Items []Artifact `json:"items"`
+}
+
 // ListAuditEventsResponse defines model for ListAuditEventsResponse.
 type ListAuditEventsResponse struct {
 	Items []AuditEvent `json:"items"`
@@ -743,6 +760,12 @@ type UpdateSSHKeyRequest struct {
 // APIVersion defines model for APIVersion.
 type APIVersion string
 
+// ArtifactIdempotencyKey defines model for ArtifactIdempotencyKey.
+type ArtifactIdempotencyKey = string
+
+// ArtifactPath defines model for ArtifactPath.
+type ArtifactPath = string
+
 // CSRFToken defines model for CSRFToken.
 type CSRFToken = string
 
@@ -866,6 +889,46 @@ type MutateInstanceParams struct {
 
 	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
 	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+}
+
+// ListInstanceArtifactsParams defines parameters for ListInstanceArtifacts.
+type ListInstanceArtifactsParams struct {
+	Prefix *string `form:"prefix,omitempty" json:"prefix,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// DeleteInstanceArtifactParams defines parameters for DeleteInstanceArtifact.
+type DeleteInstanceArtifactParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// GetInstanceArtifactParams defines parameters for GetInstanceArtifact.
+type GetInstanceArtifactParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// PutInstanceArtifactParams defines parameters for PutInstanceArtifact.
+type PutInstanceArtifactParams struct {
+	IdempotencyKey *ArtifactIdempotencyKey `json:"Idempotency-Key,omitempty"`
+
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// DownloadInstanceArtifactParams defines parameters for DownloadInstanceArtifact.
+type DownloadInstanceArtifactParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
 }
 
 // CloneInstanceParams defines parameters for CloneInstance.

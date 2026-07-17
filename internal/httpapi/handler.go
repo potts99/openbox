@@ -23,6 +23,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/app/egress"
 	"github.com/openbox-dev/openbox/internal/app/instances"
 	"github.com/openbox-dev/openbox/internal/app/metrics"
+	"github.com/openbox-dev/openbox/internal/artifacts"
 	"github.com/openbox-dev/openbox/internal/auth"
 	"github.com/openbox-dev/openbox/internal/domain"
 	"github.com/openbox-dev/openbox/internal/httpapi/generated"
@@ -119,6 +120,9 @@ type Options struct {
 	// AuditEvents serves owner-scoped immutable audit listings. When nil,
 	// GET /v1/audit-events returns not_implemented.
 	AuditEvents AuditEvents
+	// Artifacts serves owner-scoped instance artifact transfer. When nil, those
+	// routes return not_implemented.
+	Artifacts *artifacts.Service
 }
 
 type Handler struct {
@@ -145,6 +149,7 @@ type Handler struct {
 	snapshots          *snapshots.Service
 	clones             *clones.Service
 	auditEvents        AuditEvents
+	artifacts          *artifacts.Service
 }
 
 func New(service Service, options Options) (*Handler, error) {
@@ -193,6 +198,7 @@ func New(service Service, options Options) (*Handler, error) {
 		snapshots:          options.Snapshots,
 		clones:             options.Clones,
 		auditEvents:        options.AuditEvents,
+		artifacts:          options.Artifacts,
 	}, nil
 }
 
@@ -396,6 +402,9 @@ func (h *Handler) routeInstances(response http.ResponseWriter, request *http.Req
 			h.methodNotAllowed(response, requestID, http.MethodGet, http.MethodPost)
 		}
 		return true
+	}
+	if len(rest) >= 2 && rest[1] == "artifacts" {
+		return h.routeArtifacts(response, request, requestID, rest[0], rest[2:])
 	}
 	if len(rest) == 2 && rest[1] == "clone" {
 		if !h.requireMethod(response, request, requestID, http.MethodPost) {
@@ -726,7 +735,7 @@ func classifyError(err error) (int, string, string) {
 			return http.StatusForbidden, string(domainError.Code), domainError.Field
 		case domain.CodeNotImplemented:
 			return http.StatusNotImplemented, string(domainError.Code), domainError.Field
-		case domain.CodeConflict, domain.CodeInvalidTransition, domain.CodeProtectedBase, domain.CodeIdempotencyConflict, domain.CodeRuntimeMissing, domain.CodeCancellationUnsafe:
+		case domain.CodeConflict, domain.CodeInvalidTransition, domain.CodeProtectedBase, domain.CodeIdempotencyConflict, domain.CodeRuntimeMissing, domain.CodeCancellationUnsafe, domain.CodeQuotaExceeded:
 			return http.StatusConflict, string(domainError.Code), domainError.Field
 		case domain.CodeUnavailable:
 			return http.StatusServiceUnavailable, string(domainError.Code), domainError.Field
@@ -762,7 +771,7 @@ func publicMessage(code string) string {
 		return "The request is invalid."
 	case string(domain.CodeNotFound):
 		return "The requested resource was not found."
-	case string(domain.CodeConflict), string(domain.CodeInvalidTransition), string(domain.CodeProtectedBase), string(domain.CodeIdempotencyConflict), string(domain.CodeRuntimeMissing), string(domain.CodeCancellationUnsafe):
+	case string(domain.CodeConflict), string(domain.CodeInvalidTransition), string(domain.CodeProtectedBase), string(domain.CodeIdempotencyConflict), string(domain.CodeRuntimeMissing), string(domain.CodeCancellationUnsafe), string(domain.CodeQuotaExceeded):
 		return "The request conflicts with the current resource state."
 	case string(domain.CodeUnavailable):
 		return "The service is temporarily unavailable."

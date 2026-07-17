@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type {
+  ArtifactSummary,
   ConnectionInfo,
   EgressProfile,
   InstanceAction,
@@ -10,6 +11,7 @@ import type {
   SnapshotSummary,
   SoftwarePackage,
 } from "../api/client";
+import { Artifacts } from "../components/Artifacts";
 import { InstanceMetrics } from "../components/InstanceMetrics";
 import { InstanceOperationLogs } from "../components/InstanceOperationLogs";
 import { SSHConnect } from "../components/SSHConnect";
@@ -76,6 +78,9 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
   const [extendError, setExtendError] = useState("");
   const [operationsRefreshKey, setOperationsRefreshKey] = useState(0);
   const [snapshots, setSnapshots] = useState<SnapshotSummary[]>([]);
+  const [artifacts, setArtifacts] = useState<ArtifactSummary[]>([]);
+  const [artifactPending, setArtifactPending] = useState(false);
+  const [artifactError, setArtifactError] = useState("");
   const [checkpointPending, setCheckpointPending] = useState(false);
   const [checkpointError, setCheckpointError] = useState("");
   const [checkpointWarnings, setCheckpointWarnings] = useState<string[]>([]);
@@ -91,12 +96,13 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
       api.listSoftwareCatalog(),
       api.getConnection().catch(() => ({ ssh: null }) as ConnectionInfo),
       api.listSnapshots(instanceId).catch(() => [] as SnapshotSummary[]),
+      api.listArtifacts(instanceId).catch(() => [] as ArtifactSummary[]),
       api.listEgressProfiles().catch(() => [] as EgressProfile[]),
-    ])
-      .then(([instance, catalog, connection, listed, egressProfiles]) => {
+    ]).then(([instance, catalog, connection, listed, artifactItems, egressProfiles]) => {
         if (active) {
           setData({ status: "ready", instance, catalog, connection, egressProfiles });
           setSnapshots(listed);
+          setArtifacts(artifactItems);
           setAttachProfileId(instance.egressProfileId || egressProfiles[0]?.id || "");
         }
       })
@@ -112,16 +118,48 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
   }, [api, instanceId]);
 
   async function reloadReady() {
-    const [instance, catalog, connection, listed, egressProfiles] = await Promise.all([
+    const [instance, catalog, connection, listed, artifactItems, egressProfiles] = await Promise.all([
       api.getInstance(instanceId),
       api.listSoftwareCatalog(),
       api.getConnection().catch(() => ({ ssh: null }) as ConnectionInfo),
       api.listSnapshots(instanceId).catch(() => [] as SnapshotSummary[]),
+      api.listArtifacts(instanceId).catch(() => [] as ArtifactSummary[]),
       api.listEgressProfiles().catch(() => [] as EgressProfile[]),
     ]);
     setData({ status: "ready", instance, catalog, connection, egressProfiles });
     setSnapshots(listed);
+    setArtifacts(artifactItems);
     setAttachProfileId(instance.egressProfileId || egressProfiles[0]?.id || "");
+  }
+
+  async function uploadArtifact(path: string, file: File) {
+    setArtifactError("");
+    setArtifactPending(true);
+    try {
+      await api.uploadArtifact(instanceId, path, file);
+      setArtifacts(await api.listArtifacts(instanceId));
+    } catch (error: unknown) {
+      setArtifactError(error instanceof Error ? error.message : "Could not upload artifact");
+    } finally {
+      setArtifactPending(false);
+    }
+  }
+
+  async function downloadArtifact(artifact: ArtifactSummary) {
+    setArtifactError("");
+    setArtifactPending(true);
+    try {
+      const blob = await api.downloadArtifact(instanceId, artifact.path);
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = artifact.path.split("/").at(-1) || "artifact";
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } catch (error: unknown) {
+      setArtifactError(error instanceof Error ? error.message : "Could not download artifact");
+    } finally {
+      setArtifactPending(false);
+    }
   }
 
   async function attachEgressProfile() {
@@ -552,6 +590,15 @@ export function InstancePage({ api, instanceId, csrfToken, onBack, onOpenTermina
               onRestore={(snapshotId, name) => { void restoreCheckpoint(snapshotId, name); }}
               onDelete={(snapshotId) => { void deleteCheckpoint(snapshotId); }}
               onClone={(name) => { void cloneLive(name); }}
+            />
+          ) : null}
+          {instance ? (
+            <Artifacts
+              artifacts={artifacts}
+              pending={artifactPending}
+              error={artifactError}
+              onUpload={(path, file) => { void uploadArtifact(path, file); }}
+              onDownload={(artifact) => { void downloadArtifact(artifact); }}
             />
           ) : null}
         </main>

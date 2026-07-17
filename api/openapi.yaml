@@ -523,6 +523,97 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/CreateSnapshotResult" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/instances/{instance_id}/artifacts:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { $ref: "#/components/parameters/InstanceID" }
+    get:
+      operationId: listInstanceArtifacts
+      summary: List instance artifacts
+      parameters:
+        - name: prefix
+          in: query
+          required: false
+          schema: { type: string, maxLength: 256 }
+      responses:
+        "200":
+          description: Artifacts owned by the caller for this instance, sorted by path.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListArtifactsResponse" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/instances/{instance_id}/artifacts/{path}:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { $ref: "#/components/parameters/InstanceID" }
+      - { $ref: "#/components/parameters/ArtifactPath" }
+    get:
+      operationId: getInstanceArtifact
+      summary: Inspect an artifact
+      responses:
+        "200":
+          description: Artifact metadata.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Artifact" }
+        default: { $ref: "#/components/responses/Error" }
+    put:
+      operationId: putInstanceArtifact
+      summary: Upload or replace an artifact
+      parameters:
+        - { $ref: "#/components/parameters/ArtifactIdempotencyKey" }
+        - { $ref: "#/components/parameters/CSRFToken" }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "200":
+          description: Existing artifact replaced.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Artifact" }
+        "201":
+          description: Artifact stored.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Artifact" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteInstanceArtifact
+      summary: Delete an artifact
+      parameters:
+        - { $ref: "#/components/parameters/CSRFToken" }
+      responses:
+        "204":
+          description: Artifact deleted.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/instances/{instance_id}/artifacts/{path}/content:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { $ref: "#/components/parameters/InstanceID" }
+      - { $ref: "#/components/parameters/ArtifactPath" }
+    get:
+      operationId: downloadInstanceArtifact
+      summary: Download an artifact
+      responses:
+        "200":
+          description: Artifact bytes.
+          headers:
+            X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" }
+            ETag: { schema: { type: string } }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "304":
+          description: Artifact is unchanged.
+        default: { $ref: "#/components/responses/Error" }
   /v1/instances/{instance_id}/clone:
     parameters:
       - { $ref: "#/components/parameters/APIVersion" }
@@ -942,6 +1033,11 @@ components:
       in: header
       required: true
       schema: { type: string, minLength: 1, maxLength: 255 }
+    ArtifactIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string, minLength: 1, maxLength: 255 }
     InstanceID:
       name: instance_id
       in: path
@@ -952,6 +1048,12 @@ components:
       in: path
       required: true
       schema: { type: string, minLength: 1 }
+    ArtifactPath:
+      name: path
+      in: path
+      required: true
+      description: Percent-encoded logical artifact path.
+      schema: { type: string, minLength: 1, maxLength: 512 }
     OperationID:
       name: operation_id
       in: path
@@ -976,6 +1078,23 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   schemas:
+    Artifact:
+      type: object
+      required: [id, instance_id, path, size_bytes, content_type, sha256, created_at, updated_at]
+      properties:
+        id: { type: string }
+        instance_id: { type: string }
+        path: { type: string }
+        size_bytes: { type: integer, format: int64, minimum: 0 }
+        content_type: { type: string }
+        sha256: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ListArtifactsResponse:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Artifact" } }
     BootstrapStatus:
       type: object
       required: [required]

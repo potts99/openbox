@@ -106,6 +106,17 @@ export interface SnapshotSummary {
   createdAt: string;
 }
 
+export interface ArtifactSummary {
+  id: string;
+  instanceId: string;
+  path: string;
+  sizeBytes: number;
+  contentType: string;
+  sha256: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DeriveInstanceResult {
   instance?: InstanceDetail;
   operation: OperationSummary;
@@ -211,6 +222,9 @@ export interface OpenBoxApi {
   createInstance(input: CreateInstanceInput): Promise<CreateInstanceResult>;
   extendInstance(id: string, durationSeconds: number): Promise<InstanceDetail>;
   listSnapshots(instanceId: string): Promise<SnapshotSummary[]>;
+  listArtifacts(instanceId: string): Promise<ArtifactSummary[]>;
+  uploadArtifact(instanceId: string, path: string, file: File): Promise<ArtifactSummary>;
+  downloadArtifact(instanceId: string, path: string): Promise<Blob>;
   createSnapshot(instanceId: string, name: string): Promise<{ snapshot?: SnapshotSummary; operation: OperationSummary }>;
   deleteSnapshot(snapshotId: string): Promise<OperationSummary>;
   restoreSnapshot(snapshotId: string, name: string, ownerPublicKey: string): Promise<DeriveInstanceResult>;
@@ -340,6 +354,20 @@ function normalizeSnapshot(value: unknown): SnapshotSummary {
     name: text(row.name),
     ready: bool(row.ready),
     createdAt: text(row.created_at),
+  };
+}
+
+function normalizeArtifact(value: unknown): ArtifactSummary {
+  const row = asRecord(value);
+  return {
+    id: text(row.id),
+    instanceId: text(row.instance_id),
+    path: text(row.path),
+    sizeBytes: number(row.size_bytes),
+    contentType: text(row.content_type, "application/octet-stream"),
+    sha256: text(row.sha256),
+    createdAt: text(row.created_at),
+    updatedAt: text(row.updated_at),
   };
 }
 
@@ -546,6 +574,29 @@ export function createHttpApi(options: HttpApiOptions = {}): OpenBoxApi {
       const body = asRecord(await request(`/v1/instances/${encodeURIComponent(instanceId)}/snapshots`));
       const items = Array.isArray(body.items) ? body.items : [];
       return items.map(normalizeSnapshot);
+    },
+    async listArtifacts(instanceId) {
+      const body = asRecord(await request(`/v1/instances/${encodeURIComponent(instanceId)}/artifacts`));
+      const items = Array.isArray(body.items) ? body.items : [];
+      return items.map(normalizeArtifact);
+    },
+    async uploadArtifact(instanceId, artifactPath, file) {
+      return normalizeArtifact(await request(
+        `/v1/instances/${encodeURIComponent(instanceId)}/artifacts/${encodeURIComponent(artifactPath)}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": file.type || "application/octet-stream" },
+          body: file,
+        },
+      ));
+    },
+    async downloadArtifact(instanceId, artifactPath) {
+      const response = await fetcher(
+        `/v1/instances/${encodeURIComponent(instanceId)}/artifacts/${encodeURIComponent(artifactPath)}/content`,
+        { credentials: "same-origin", headers: { "X-OpenBox-API-Version": "v1" } },
+      );
+      if (!response.ok) throw new Error("OpenBox rejected the download");
+      return response.blob();
     },
     async createSnapshot(instanceId, name) {
       const body = asRecord(await request(`/v1/instances/${encodeURIComponent(instanceId)}/snapshots`, {

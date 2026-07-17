@@ -133,6 +133,7 @@ type Options struct {
 	InstanceGatewayPublicKey string
 	NetworkPolicy            NetworkPolicy
 	SandboxPool              SandboxPool
+	DeleteArtifacts          func(context.Context, domain.OwnerID, domain.InstanceID) error
 }
 
 type Service struct {
@@ -144,6 +145,7 @@ type Service struct {
 	instanceGatewayPublicKey string
 	networkPolicy            NetworkPolicy
 	sandboxPool              SandboxPool
+	deleteArtifacts          func(context.Context, domain.OwnerID, domain.InstanceID) error
 	mutationGate             chan struct{}
 	execGate                 *sandbox.ExecGate
 	installSoftwareFn        func(context.Context, software.Guest, string, software.Package, software.InstallOptions) error
@@ -165,7 +167,7 @@ func New(runtime InstanceRuntime, repo Repository, options Options) (*Service, e
 	if options.Mode == nil {
 		options.Mode = &operations.Mode{}
 	}
-	service := &Service{runtime: runtime, repo: repo, now: options.Now, newID: options.NewID, mode: options.Mode, instanceGatewayPublicKey: strings.TrimSpace(options.InstanceGatewayPublicKey), networkPolicy: options.NetworkPolicy, sandboxPool: options.SandboxPool, mutationGate: make(chan struct{}, 1), execGate: sandbox.NewExecGate(sandbox.DefaultMaxConcurrentExecsPerInstance)}
+	service := &Service{runtime: runtime, repo: repo, now: options.Now, newID: options.NewID, mode: options.Mode, instanceGatewayPublicKey: strings.TrimSpace(options.InstanceGatewayPublicKey), networkPolicy: options.NetworkPolicy, sandboxPool: options.SandboxPool, deleteArtifacts: options.DeleteArtifacts, mutationGate: make(chan struct{}, 1), execGate: sandbox.NewExecGate(sandbox.DefaultMaxConcurrentExecsPerInstance)}
 	service.mutationGate <- struct{}{}
 	return service, nil
 }
@@ -1205,6 +1207,11 @@ func (s *Service) Delete(ctx context.Context, ownerID domain.OwnerID, id domain.
 	}
 	if err := s.repo.UpdateInstanceObservation(ctx, ownerID, id, instance.RuntimeRef, instance.ActualIsolation, domain.ObservedDeleted, "", s.now()); err != nil {
 		return err
+	}
+	if s.deleteArtifacts != nil {
+		if err := s.deleteArtifacts(ctx, ownerID, id); err != nil {
+			return fmt.Errorf("delete instance artifacts: %w", err)
+		}
 	}
 	return s.repo.FinalizeInstanceDeletion(ctx, ownerID, id, op.ID, s.now())
 }

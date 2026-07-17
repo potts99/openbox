@@ -6,6 +6,7 @@ package openbox
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"time"
 )
 
@@ -172,6 +173,24 @@ type Snapshot struct {
 	Name       string    `json:"name"`
 	Ready      bool      `json:"ready"`
 	CreatedAt  time.Time `json:"created_at"`
+}
+
+type Artifact struct {
+	ID          string    `json:"id"`
+	InstanceID  string    `json:"instance_id"`
+	Path        string    `json:"path"`
+	SizeBytes   int64     `json:"size_bytes"`
+	ContentType string    `json:"content_type"`
+	SHA256      string    `json:"sha256"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type ArtifactDownload struct {
+	ContentType string
+	SizeBytes   int64
+	SHA256      string
+	Body        io.ReadCloser
 }
 
 type CreateSnapshotRequest struct {
