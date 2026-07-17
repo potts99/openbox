@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Minimal agent-style server: create sandbox → exec → cleanup via pkg/openbox.
+// Optionally registers a webhook subscription and verifies signed deliveries.
 //
 // Run from repo root:
 //
@@ -40,6 +41,16 @@ func main() {
 	}
 	if _, err := client.Negotiate(ctx); err != nil {
 		log.Fatal(err)
+	}
+
+	subscriptionID, secret := maybeRegisterWebhook(ctx, client)
+	if subscriptionID != "" {
+		defer func() {
+			if err := client.DeleteWebhookSubscription(ctx, subscriptionID); err != nil {
+				log.Printf("delete webhook subscription: %v", err)
+			}
+		}()
+		startWebhookListener(secret)
 	}
 
 	name := fmt.Sprintf("agent-server-%d", time.Now().Unix())
@@ -86,9 +97,40 @@ func main() {
 	}
 	log.Printf("deleted instance %s", instanceID)
 
-	// TODO(Slice E): when pkg/openbox exposes webhook subscription CRUD, register
-	// a subscription and drive readiness from signed POSTs instead of polling.
-	_ = startWebhookStub()
+	if subscriptionID != "" {
+		deliveries, err := client.ListWebhookDeliveries(ctx, openbox.ListWebhookDeliveriesOptions{
+			SubscriptionID: subscriptionID,
+			Limit:          20,
+		})
+		if err != nil {
+			log.Printf("list webhook deliveries: %v", err)
+		} else {
+			log.Printf("webhook deliveries: %d", len(deliveries))
+			for _, item := range deliveries {
+				log.Printf("  %s status=%s event=%s", item.ID, item.Status, item.EventID)
+			}
+		}
+	}
+}
+
+func maybeRegisterWebhook(ctx context.Context, client *openbox.Client) (id, secret string) {
+	url := strings.TrimSpace(os.Getenv("OPENBOX_WEBHOOK_URL"))
+	if url == "" {
+		log.Print("webhook registration skipped (set OPENBOX_WEBHOOK_URL to enable)")
+		return "", ""
+	}
+	enabled := true
+	created, err := client.CreateWebhookSubscription(ctx, openbox.CreateWebhookSubscriptionRequest{
+		URL:         url,
+		Description: "examples/agent-server",
+		Events:      []string{"operation.terminal", "instance.deleted"},
+		Enabled:     &enabled,
+	})
+	if err != nil {
+		log.Fatalf("create webhook subscription: %v", err)
+	}
+	log.Printf("registered webhook %s → %s", created.ID, created.URL)
+	return created.ID, created.Secret
 }
 
 func waitOperation(ctx context.Context, client *openbox.Client, id string) error {
@@ -134,33 +176,37 @@ func drainExec(body io.Reader, stdout, stderr io.Writer) (int, error) {
 	return exitCode, scanner.Err()
 }
 
-// webhookStubHandler demonstrates verifying X-OpenBox-Signature once webhooks ship.
-// Not started by default — call startWebhookStub when integrating Slice E.
-func webhookStubHandler(secret string) http.HandlerFunc {
+func webhookHandler(secret string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		sig := r.Header.Get("X-OpenBox-Signature")
 		payload, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 		if err != nil {
 			http.Error(w, "read body", http.StatusBadRequest)
 			return
 		}
-		if secret != "" && !verifyWebhookSignature(secret, payload, sig) {
+		if !verifyWebhookSignature(secret, payload, r.Header) {
 			http.Error(w, "invalid signature", http.StatusUnauthorized)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		log.Printf("webhook delivery (%d bytes)", len(payload))
+		log.Printf("webhook delivery event=%s delivery=%s (%d bytes)",
+			r.Header.Get("X-OpenBox-Event-Id"),
+			r.Header.Get("X-OpenBox-Delivery-Id"),
+			len(payload),
+		)
 	}
 }
 
-func verifyWebhookSignature(secret string, payload []byte, header string) bool {
-	// Expected format documented in docs/api/webhooks.md (sha256=…).
-	const prefix = "sha256="
-	if !strings.HasPrefix(header, prefix) {
+func verifyWebhookSignature(secret string, payload []byte, headers http.Header) bool {
+	timestamp := headers.Get("X-OpenBox-Signature-Timestamp")
+	eventID := headers.Get("X-OpenBox-Event-Id")
+	deliveryID := headers.Get("X-OpenBox-Delivery-Id")
+	header := headers.Get("X-OpenBox-Signature")
+	const prefix = "v1="
+	if timestamp == "" || eventID == "" || deliveryID == "" || !strings.HasPrefix(header, prefix) {
 		return false
 	}
 	want, err := hex.DecodeString(strings.TrimPrefix(header, prefix))
@@ -168,24 +214,21 @@ func verifyWebhookSignature(secret string, payload []byte, header string) bool {
 		return false
 	}
 	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write(payload)
+	_, _ = fmt.Fprintf(mac, "v1|%s|%s|%s|%s", timestamp, eventID, deliveryID, payload)
 	return hmac.Equal(mac.Sum(nil), want)
 }
 
-func startWebhookStub() error {
-	secret := os.Getenv("OPENBOX_WEBHOOK_SECRET")
+func startWebhookListener(secret string) {
 	if secret == "" {
-		log.Print("webhook stub not started (set OPENBOX_WEBHOOK_SECRET to enable listener)")
-		return nil
+		return
 	}
 	addr := envOr("OPENBOX_WEBHOOK_LISTEN", ":8787")
 	go func() {
-		log.Printf("webhook stub listening on %s (TODO: register subscription via SDK)", addr)
-		if err := http.ListenAndServe(addr, webhookStubHandler(secret)); err != nil {
-			log.Printf("webhook stub: %v", err)
+		log.Printf("webhook listener on %s", addr)
+		if err := http.ListenAndServe(addr, webhookHandler(secret)); err != nil {
+			log.Printf("webhook listener: %v", err)
 		}
 	}()
-	return nil
 }
 
 func envOr(name, fallback string) string {
