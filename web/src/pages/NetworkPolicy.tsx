@@ -202,41 +202,43 @@ export function NetworkPolicyPage({ api, onBack }: NetworkPolicyPageProps) {
                     <p>Create a restricted profile to start approving destinations.</p>
                   </div>
                 ) : (
-                  <table>
-                    <caption className="sr-only">Egress profiles</caption>
-                    <thead>
-                      <tr>
-                        <th>Name</th>
-                        <th>Mode</th>
-                        <th>Attached</th>
-                        <th>Type</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.profiles.map((item) => {
-                        const selected = item.id === selectedId;
-                        return (
-                          <tr key={item.id} className={selected ? "is-selected" : undefined}>
-                            <th scope="row">
-                              <button
-                                type="button"
-                                className="link-button instance-link"
-                                aria-current={selected ? "true" : undefined}
-                                onClick={() => selectProfile(item.id, data.profiles)}
-                              >
-                                {item.name}
-                              </button>
-                            </th>
-                            <td>
-                              <span className={`state-pill state-mode-${item.mode}`}>{item.mode}</span>
-                            </td>
-                            <td>{item.attachedInstanceCount ?? 0}</td>
-                            <td>{item.system ? "system" : "custom"}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                  <div className="table-wrap">
+                    <table>
+                      <caption className="sr-only">Egress profiles</caption>
+                      <thead>
+                        <tr>
+                          <th>Name</th>
+                          <th>Mode</th>
+                          <th>Attached</th>
+                          <th>Type</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.profiles.map((item) => {
+                          const selected = item.id === selectedId;
+                          return (
+                            <tr key={item.id} className={selected ? "is-selected" : undefined}>
+                              <th scope="row">
+                                <button
+                                  type="button"
+                                  className="link-button instance-link"
+                                  aria-current={selected ? "true" : undefined}
+                                  onClick={() => selectProfile(item.id, data.profiles)}
+                                >
+                                  {item.name}
+                                </button>
+                              </th>
+                              <td>
+                                <span className={`state-pill state-mode-${item.mode}`}>{item.mode}</span>
+                              </td>
+                              <td>{item.attachedInstanceCount ?? 0}</td>
+                              <td>{item.system ? "system" : "custom"}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
                 <form
                   className="policy-create-row"

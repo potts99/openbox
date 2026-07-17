@@ -163,6 +163,10 @@ describe("App", () => {
     });
 
     render(<App api={api} />);
+    expect(await screen.findByRole("heading", {
+      name: "Self-hosted sandboxes for you and your agents.",
+    })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open console" }));
     await user.type(await screen.findByLabelText("Password"), "wrong-password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
@@ -398,12 +402,17 @@ describe("App", () => {
     expect(logout).toHaveBeenCalledOnce();
   });
 
-  it("has no automated accessibility violations on auth and console views", async () => {
+  it("has no automated accessibility violations on landing, auth and console views", async () => {
     const loginApi = createApi({ getSession: vi.fn().mockResolvedValue({ authenticated: false }) });
-    const loginView = render(<App api={loginApi} />);
+    const landingView = render(<App api={loginApi} />);
+    await screen.findByRole("heading", {
+      name: "Self-hosted sandboxes for you and your agents.",
+    });
+    expect((await axe.run(landingView.container)).violations).toEqual([]);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Open console" }));
     await screen.findByRole("heading", { name: "Sign in" });
-    expect((await axe.run(loginView.container)).violations).toEqual([]);
-    loginView.unmount();
+    expect((await axe.run(landingView.container)).violations).toEqual([]);
+    landingView.unmount();
 
     const consoleView = render(<App api={createApi()} />);
     await screen.findByRole("heading", { level: 1, name: "Instances" });

@@ -230,25 +230,27 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
                     </button>
                   </div>
                 ) : (
-                  <table>
-                    <caption className="sr-only">OpenBox instances</caption>
-                    <thead><tr><th>Name</th><th>Kind</th><th>Status</th></tr></thead>
-                    <tbody>{data.instances.map((instance) => (
-                      <tr key={instance.id}>
-                        <th scope="row">
-                          <button
-                            type="button"
-                            className="link-button instance-link"
-                            onClick={() => setView({ kind: "detail", instanceId: instance.id })}
-                          >
-                            {instance.name}
-                          </button>
-                        </th>
-                        <td>{instance.kind}</td>
-                        <td>{instance.status}</td>
-                      </tr>
-                    ))}</tbody>
-                  </table>
+                  <div className="table-wrap">
+                    <table>
+                      <caption className="sr-only">OpenBox instances</caption>
+                      <thead><tr><th>Name</th><th>Kind</th><th>Status</th></tr></thead>
+                      <tbody>{data.instances.map((instance) => (
+                        <tr key={instance.id}>
+                          <th scope="row">
+                            <button
+                              type="button"
+                              className="link-button instance-link"
+                              onClick={() => setView({ kind: "detail", instanceId: instance.id })}
+                            >
+                              {instance.name}
+                            </button>
+                          </th>
+                          <td>{instance.kind}</td>
+                          <td>{instance.status}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
                 )}
               </section>
             </>
