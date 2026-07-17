@@ -179,6 +179,20 @@ export interface SSHKeySummary {
   createdAt: string;
 }
 
+export interface TokenSummary {
+  id: string;
+  name: string;
+  scopes: string[];
+  createdAt: string;
+  expiresAt?: string;
+  revokedAt?: string;
+  lastUsedAt?: string;
+}
+
+export interface CreatedToken extends TokenSummary {
+  secret: string;
+}
+
 export interface CreateInstanceInput {
   name: string;
   kind: InstanceKind;
@@ -259,6 +273,9 @@ export interface OpenBoxApi {
   deleteEgressProfile(id: string): Promise<void>;
   attachEgressProfile(instanceId: string, profileId: string): Promise<InstanceDetail>;
   listAuditEvents(limit?: number): Promise<AuditEvent[]>;
+  listTokens(): Promise<TokenSummary[]>;
+  createToken(input: { name: string }): Promise<CreatedToken>;
+  revokeToken(id: string): Promise<void>;
   setup(input: { username: string; password: string }): Promise<Session>;
   login(input: { username?: string; password: string }): Promise<Session>;
   logout(): Promise<void>;
@@ -422,6 +439,19 @@ function normalizeOperation(value: unknown): OperationSummary {
     attempts: number(row.attempts),
     createdAt: text(row.created_at),
     updatedAt: text(row.updated_at),
+  };
+}
+
+function normalizeToken(value: unknown): TokenSummary {
+  const row = asRecord(value);
+  return {
+    id: text(row.id),
+    name: text(row.name),
+    scopes: stringList(row.scopes),
+    createdAt: text(row.created_at),
+    expiresAt: text(row.expires_at) || undefined,
+    revokedAt: text(row.revoked_at) || undefined,
+    lastUsedAt: text(row.last_used_at) || undefined,
   };
 }
 
@@ -795,6 +825,21 @@ export function createHttpApi(options: HttpApiOptions = {}): OpenBoxApi {
           createdAt: text(row.created_at),
         };
       });
+    },
+    async listTokens() {
+      const body = asRecord(await request("/v1/tokens"));
+      const items = Array.isArray(body.items) ? body.items : [];
+      return items.map(normalizeToken);
+    },
+    async createToken(input) {
+      const body = asRecord(await request("/v1/tokens", {
+        method: "POST",
+        body: JSON.stringify({ name: input.name }),
+      }, [201]));
+      return { ...normalizeToken(body), secret: text(body.secret) };
+    },
+    async revokeToken(id) {
+      await request(`/v1/tokens/${encodeURIComponent(id)}`, { method: "DELETE" }, [204]);
     },
     async setup(input) {
       return normalizeSession(await request("/v1/bootstrap", { method: "POST", body: JSON.stringify(input) }), csrfToken);

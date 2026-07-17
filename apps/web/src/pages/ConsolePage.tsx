@@ -17,6 +17,7 @@ import { InstancePage } from "./InstancePage";
 import { InstanceTerminal } from "./InstanceTerminal";
 import { AuditEventsPage } from "./AuditEvents";
 import { NetworkPolicyPage } from "./NetworkPolicy";
+import { SettingsPage } from "./Settings";
 
 interface ConsolePageProps {
   api: OpenBoxApi;
@@ -35,7 +36,8 @@ type View =
   | { kind: "detail"; instanceId: string }
   | { kind: "terminal"; instanceId: string; instanceName: string }
   | { kind: "network-policy" }
-  | { kind: "audit-events" };
+  | { kind: "audit-events" }
+  | { kind: "settings" };
 
 export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
   const [data, setData] = useState<ConsoleData>({ status: "loading" });
@@ -160,6 +162,16 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
     return <AuditEventsPage api={api} onBack={() => setView({ kind: "list" })} />;
   }
 
+  if (view.kind === "settings") {
+    return (
+      <SettingsPage
+        api={api}
+        session={session}
+        onBack={() => setView({ kind: "list" })}
+      />
+    );
+  }
+
   if (view.kind === "create") {
     return (
       <CreateInstancePage
@@ -183,6 +195,9 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
           </button>
           <button className="nav-button" type="button" onClick={() => setView({ kind: "audit-events" })}>
             Audit
+          </button>
+          <button className="nav-button" type="button" onClick={() => setView({ kind: "settings" })}>
+            Settings
           </button>
           <button
             className="nav-button"
@@ -223,6 +238,7 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
                 dismissSetupChecklist();
                 setChecklistUsername("");
               }}
+              onOpenSettings={() => setView({ kind: "settings" })}
             />
           ) : null}
           {data.status === "loading" ? <p className="data-message" role="status">Loading…</p> : null}

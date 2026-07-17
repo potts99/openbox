@@ -33,9 +33,10 @@ export function dismissSetupChecklist(): void {
 interface SetupChecklistProps {
   username: string;
   onDismiss(): void;
+  onOpenSettings(): void;
 }
 
-export function SetupChecklist({ username, onDismiss }: SetupChecklistProps) {
+export function SetupChecklist({ username, onDismiss, onOpenSettings }: SetupChecklistProps) {
   return (
     <section className="setup-checklist" aria-labelledby="setup-checklist-heading">
       <div className="setup-checklist-header">
@@ -44,10 +45,14 @@ export function SetupChecklist({ username, onDismiss }: SetupChecklistProps) {
       </div>
       <p>Signed in as <strong>{username}</strong>. A few useful next steps:</p>
       <ol>
-        <li>Create an API token for the CLI (<code>POST /v1/tokens</code>).</li>
+        <li>
+          <button type="button" className="link-button" onClick={onOpenSettings}>
+            Create an API token in Settings
+          </button>
+          {" "}for the CLI.
+        </li>
         <li>Export <code>OPENBOX_TOKEN</code> and run <code>openbox doctor</code>.</li>
         <li>Create your first instance from this console.</li>
-        <li>Add teammates with <code>POST /v1/users</code> when you need them.</li>
       </ol>
     </section>
   );

@@ -282,6 +282,69 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   padding: .05rem .3rem;
   border: 1px solid var(--line);
 }
+.setup-checklist .link-button {
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: .12em;
+}
+
+.settings-section {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  margin-bottom: 1.5rem;
+}
+.settings-body {
+  padding: 1rem 1.15rem 1.25rem;
+}
+.settings-token-form {
+  margin: 1rem 0 0;
+  max-width: 28rem;
+}
+.token-secret-panel {
+  margin: 1rem 0;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--ink);
+  background: color-mix(in srgb, var(--panel) 88%, var(--ink) 12%);
+}
+.token-secret-panel h3 {
+  margin: 0 0 .25rem;
+  font-size: .9375rem;
+  font-weight: 550;
+}
+.token-secret-panel p {
+  margin: 0 0 .75rem;
+  color: var(--muted);
+  font-size: .8125rem;
+}
+.token-secret {
+  display: block;
+  margin: 0 0 .75rem;
+  padding: .7rem .75rem;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: .8125rem;
+  word-break: break-all;
+}
+.token-secret-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .65rem;
+  margin-bottom: .75rem;
+}
+.token-export-hint {
+  margin: 0;
+  padding: .7rem .75rem;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: .75rem;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
 
 .capability-strip {
   display: flex;

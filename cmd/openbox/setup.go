@@ -69,7 +69,7 @@ func runSetup(args []string, options commonOptions, stdout, stderr io.Writer) in
 	}
 	fmt.Fprintf(stdout, "Admin created: %s\n", session.Username)
 	fmt.Fprintf(stdout, "Sign in at %s\n", options.server)
-	fmt.Fprintf(stdout, "Next: create an API token, export OPENBOX_TOKEN, then run openbox doctor.\n")
+	fmt.Fprintf(stdout, "Next: open Settings in the console to create an API token, export OPENBOX_TOKEN, then run openbox doctor.\n")
 	return 0
 }
 

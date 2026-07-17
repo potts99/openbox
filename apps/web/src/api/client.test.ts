@@ -257,6 +257,38 @@ describe("createHttpApi", () => {
     }));
   });
 
+  it("lists, creates, and revokes API tokens", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        items: [{
+          id: "tok_1", name: "ci", scopes: ["owner"], created_at: "2026-07-17T10:00:00Z",
+        }],
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: "tok_2", name: "laptop", scopes: ["owner"], created_at: "2026-07-17T11:00:00Z",
+        secret: "obx_secret",
+      }), { status: 201, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const api = createHttpApi({ fetcher, csrfToken: "csrf" });
+
+    await expect(api.listTokens()).resolves.toEqual([{
+      id: "tok_1", name: "ci", scopes: ["owner"], createdAt: "2026-07-17T10:00:00Z",
+    }]);
+    await expect(api.createToken({ name: "laptop" })).resolves.toEqual({
+      id: "tok_2", name: "laptop", scopes: ["owner"], createdAt: "2026-07-17T11:00:00Z", secret: "obx_secret",
+    });
+    await expect(api.revokeToken("tok_1")).resolves.toBeUndefined();
+    expect(fetcher).toHaveBeenNthCalledWith(2, "/v1/tokens", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ name: "laptop" }),
+      headers: expect.objectContaining({ "X-CSRF-Token": "csrf" }),
+    }));
+    expect(fetcher).toHaveBeenLastCalledWith("/v1/tokens/tok_1", expect.objectContaining({
+      method: "DELETE",
+      headers: expect.objectContaining({ "X-CSRF-Token": "csrf" }),
+    }));
+  });
+
   it("loads instance detail and posts lifecycle actions with an idempotency key", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({
