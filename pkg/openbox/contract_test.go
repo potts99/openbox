@@ -47,6 +47,10 @@ var supportedSDKMethods = map[string]string{
 	"AttachEgressProfile": "attachInstanceEgressProfile",
 	"ListAuditEvents":     "listAuditEvents",
 	"ListSuggestedPorts":  "listSuggestedPorts",
+	"PutArtifact":         "putInstanceArtifact",
+	"ListArtifacts":       "listInstanceArtifacts",
+	"GetArtifact":         "downloadInstanceArtifact",
+	"DeleteArtifact":      "deleteInstanceArtifact",
 }
 
 func TestSupportedSDKMethodsExistInOpenAPI(t *testing.T) {

@@ -20,8 +20,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	openbox "github.com/openbox-dev/openbox/pkg/openbox"
 	"github.com/openbox-dev/openbox/internal/version"
+	openbox "github.com/openbox-dev/openbox/pkg/openbox"
 )
 
 const usage = `usage: openbox COMMAND [OPTIONS]
@@ -43,6 +43,7 @@ Commands:
   snapshot delete ID       Delete a checkpoint
   restore SNAPSHOT NAME    Restore a checkpoint as a new instance
   clone INSTANCE NAME      Clone a live instance
+  artifact put|get|list|rm Manage instance-attached artifacts
   route                  Manage HTTPS routes
   network                Manage egress profiles and attach policy
   audit list             List policy and security audit events
@@ -130,6 +131,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runRestore(ctx, api, rest, options.json, stdout, stderr)
 	case "clone":
 		return runClone(ctx, api, rest, options.json, stdout, stderr)
+	case "artifact":
+		return runArtifact(ctx, api, rest, options.json, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", command, usage)
 		return 2

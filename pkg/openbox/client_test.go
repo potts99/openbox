@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -311,6 +312,59 @@ func TestCheckpointClientRoutesAndIdempotency(t *testing.T) {
 	}
 	if result, err := c.CloneInstance(context.Background(), "instance-1", CloneInstanceRequest{Name: "cloned", OwnerPublicKey: "ssh-ed25519 owner"}, "clone-key"); err != nil || result.StorageEfficiency != "not_supported" {
 		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
+func TestArtifactClientRoutes(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/instances/instance-1/artifacts":
+			if r.Method != http.MethodGet || r.URL.Query().Get("prefix") != "results/" {
+				t.Fatalf("list request method=%s query=%q", r.Method, r.URL.RawQuery)
+			}
+			_, _ = fmt.Fprint(w, `{"items":[{"id":"artifact-1","instance_id":"instance-1","path":"results/out.txt","size_bytes":2,"content_type":"text/plain","sha256":"abc"}]}`)
+		case "/v1/instances/instance-1/artifacts/results/out.txt":
+			if r.Method == http.MethodPut {
+				if r.Header.Get("Content-Type") != "text/plain" || r.Header.Get("Idempotency-Key") != "artifact-key" {
+					t.Fatalf("upload headers=%v", r.Header)
+				}
+				_, _ = fmt.Fprint(w, `{"id":"artifact-1","instance_id":"instance-1","path":"results/out.txt","size_bytes":2,"content_type":"text/plain","sha256":"abc"}`)
+				return
+			}
+			if r.Method == http.MethodDelete {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			t.Fatalf("unexpected artifact method %s", r.Method)
+		case "/v1/instances/instance-1/artifacts/results/out.txt/content":
+			w.Header().Set("Content-Type", "text/plain")
+			w.Header().Set("ETag", `"abc"`)
+			_, _ = fmt.Fprint(w, "ok")
+		default:
+			t.Fatalf("unexpected route %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	c := newTestClient(t, server.URL)
+	if _, err := c.PutArtifact(context.Background(), "instance-1", "results/out.txt", strings.NewReader("ok"), 2, "text/plain", "artifact-key"); err != nil {
+		t.Fatal(err)
+	}
+	items, err := c.ListArtifacts(context.Background(), "instance-1", "results/")
+	if err != nil || len(items) != 1 || items[0].Path != "results/out.txt" {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+	download, err := c.GetArtifact(context.Background(), "instance-1", "results/out.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, readErr := io.ReadAll(download.Body)
+	_ = download.Body.Close()
+	if readErr != nil || string(body) != "ok" || download.SHA256 != "abc" {
+		t.Fatalf("download=%+v body=%q err=%v", download, body, readErr)
+	}
+	if err := c.DeleteArtifact(context.Background(), "instance-1", "results/out.txt"); err != nil {
+		t.Fatal(err)
 	}
 }
 

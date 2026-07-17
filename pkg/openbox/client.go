@@ -197,6 +197,104 @@ func (c *Client) ListSnapshots(ctx context.Context, instanceID string) ([]Snapsh
 	return response.Items, nil
 }
 
+func (c *Client) PutArtifact(ctx context.Context, instanceID, artifactPath string, body io.Reader, sizeBytes int64, contentType, idempotencyKey string) (Artifact, error) {
+	if sizeBytes < 0 {
+		return Artifact{}, errors.New("artifact size must be non-negative")
+	}
+	request, err := c.artifactRequest(ctx, http.MethodPut, instanceID, artifactPath, "", body)
+	if err != nil {
+		return Artifact{}, err
+	}
+	request.ContentLength = sizeBytes
+	request.Header.Set("Content-Length", fmt.Sprintf("%d", sizeBytes))
+	if contentType != "" {
+		request.Header.Set("Content-Type", contentType)
+	} else {
+		request.Header.Set("Content-Type", "application/octet-stream")
+	}
+	if idempotencyKey != "" {
+		request.Header.Set("Idempotency-Key", idempotencyKey)
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return Artifact{}, fmt.Errorf("OpenBox artifact upload: %w", err)
+	}
+	if response.StatusCode != http.StatusCreated && response.StatusCode != http.StatusOK {
+		return Artifact{}, decodeAPIError(response)
+	}
+	defer response.Body.Close()
+	var artifact Artifact
+	if err := json.NewDecoder(response.Body).Decode(&artifact); err != nil {
+		return Artifact{}, fmt.Errorf("decode OpenBox artifact response: %w", err)
+	}
+	return artifact, nil
+}
+
+func (c *Client) ListArtifacts(ctx context.Context, instanceID, prefix string) ([]Artifact, error) {
+	request, err := c.artifactRequest(ctx, http.MethodGet, instanceID, "", "", nil)
+	if err != nil {
+		return nil, err
+	}
+	if prefix != "" {
+		query := request.URL.Query()
+		query.Set("prefix", prefix)
+		request.URL.RawQuery = query.Encode()
+	}
+	var envelope struct {
+		Items []Artifact `json:"items"`
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, decodeAPIError(response)
+	}
+	defer response.Body.Close()
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		return nil, fmt.Errorf("decode OpenBox artifact response: %w", err)
+	}
+	if envelope.Items == nil {
+		return []Artifact{}, nil
+	}
+	return envelope.Items, nil
+}
+
+func (c *Client) GetArtifact(ctx context.Context, instanceID, artifactPath string) (ArtifactDownload, error) {
+	request, err := c.artifactRequest(ctx, http.MethodGet, instanceID, artifactPath, "content", nil)
+	if err != nil {
+		return ArtifactDownload{}, err
+	}
+	response, err := c.streamHTTP.Do(request)
+	if err != nil {
+		return ArtifactDownload{}, fmt.Errorf("OpenBox artifact download: %w", err)
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return ArtifactDownload{}, decodeAPIError(response)
+	}
+	return ArtifactDownload{
+		ContentType: response.Header.Get("Content-Type"),
+		SizeBytes:   response.ContentLength,
+		SHA256:      strings.Trim(response.Header.Get("ETag"), `"`),
+		Body:        response.Body,
+	}, nil
+}
+
+func (c *Client) DeleteArtifact(ctx context.Context, instanceID, artifactPath string) error {
+	request, err := c.artifactRequest(ctx, http.MethodDelete, instanceID, artifactPath, "", nil)
+	if err != nil {
+		return err
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return fmt.Errorf("OpenBox artifact delete: %w", err)
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return decodeAPIError(response)
+	}
+	return response.Body.Close()
+}
+
 func (c *Client) CreateSnapshot(ctx context.Context, instanceID, name, idempotencyKey string) (CreateSnapshotResult, error) {
 	if strings.TrimSpace(idempotencyKey) == "" {
 		return CreateSnapshotResult{}, errors.New("idempotency key is required")
@@ -376,7 +474,7 @@ func (c *Client) CreateEgressProfile(ctx context.Context, name, mode string, des
 
 func (c *Client) UpdateEgressProfile(ctx context.Context, id string, patch map[string]any) (EgressProfile, []map[string]string, error) {
 	var envelope struct {
-		Profile     EgressProfile      `json:"profile"`
+		Profile     EgressProfile       `json:"profile"`
 		ApplyErrors []map[string]string `json:"apply_errors"`
 	}
 	_, err := c.do(ctx, http.MethodPatch, resourcePath("/v1/network/egress-profiles", id), "", patch, &envelope)
@@ -526,6 +624,29 @@ func (c *Client) request(ctx context.Context, method, requestPath, idempotencyKe
 	if idempotencyKey != "" {
 		request.Header.Set("Idempotency-Key", idempotencyKey)
 	}
+	if c.userAgent != "" {
+		request.Header.Set("User-Agent", c.userAgent)
+	}
+	if c.token != "" {
+		request.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	return request, nil
+}
+
+func (c *Client) artifactRequest(ctx context.Context, method, instanceID, artifactPath, suffix string, body io.Reader) (*http.Request, error) {
+	target := *c.baseURL
+	rawBasePath := strings.TrimSuffix(c.baseURL.EscapedPath(), "/")
+	target.Path = path.Join(strings.TrimSuffix(c.baseURL.Path, "/"), "v1", "instances", instanceID, "artifacts", artifactPath, suffix)
+	target.RawPath = rawBasePath + "/v1/instances/" + url.PathEscape(instanceID) + "/artifacts/" + url.PathEscape(artifactPath)
+	if suffix != "" {
+		target.RawPath += "/" + url.PathEscape(suffix)
+	}
+	request, err := http.NewRequestWithContext(ctx, method, target.String(), body)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set(APIVersionHeader, APIVersionV1)
 	if c.userAgent != "" {
 		request.Header.Set("User-Agent", c.userAgent)
 	}

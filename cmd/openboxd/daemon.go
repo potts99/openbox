@@ -27,6 +27,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/app/metrics"
 	"github.com/openbox-dev/openbox/internal/app/recovery"
 	"github.com/openbox-dev/openbox/internal/app/sshcommands"
+	"github.com/openbox-dev/openbox/internal/artifacts"
 	"github.com/openbox-dev/openbox/internal/auth"
 	"github.com/openbox-dev/openbox/internal/dnsproxy"
 	"github.com/openbox-dev/openbox/internal/domain"
@@ -194,7 +195,14 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	networkPolicy := &egress.PolicyBridge{
 		Profiles: store, Applicator: egressApplicator, Backend: runtime,
 	}
-	service, err := instances.New(runtime, store, instances.Options{Mode: mode, InstanceGatewayPublicKey: instancePublicKey, NetworkPolicy: networkPolicy, SandboxPool: sandboxPool})
+	artifactService, err := artifacts.New(store, filepath.Join(filepath.Dir(config.DatabasePath), "artifacts"))
+	if err != nil {
+		return fail(fmt.Errorf("artifact store: %w", err))
+	}
+	service, err := instances.New(runtime, store, instances.Options{
+		Mode: mode, InstanceGatewayPublicKey: instancePublicKey, NetworkPolicy: networkPolicy, SandboxPool: sandboxPool,
+		DeleteArtifacts: artifactService.DeleteAll,
+	})
 	if err != nil {
 		return fail(err)
 	}
@@ -321,6 +329,7 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 		Snapshots:         snapshotService,
 		Clones:            cloneService,
 		AuditEvents:       store,
+		Artifacts:         artifactService,
 	})
 	if err != nil {
 		return fail(err)
