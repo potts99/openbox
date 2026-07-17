@@ -286,6 +286,9 @@ func (s *Store) CompleteOperation(ctx context.Context, ownerID domain.OwnerID, i
 		if err := appendOperationEventTx(ctx, tx, ownerID, id, "complete", domain.OperationSucceeded, "", "", "", nil, completedAt); err != nil {
 			return err
 		}
+		if err := enqueueOperationTerminalTx(ctx, tx, ownerID, id, completedAt); err != nil {
+			return err
+		}
 		return tx.Commit()
 	}
 	var status domain.OperationStatus
@@ -434,6 +437,12 @@ func (s *Store) FinalizeInstanceDeletion(ctx context.Context, ownerID domain.Own
 	if err := appendOperationEventTx(ctx, tx, ownerID, operationID, "complete", domain.OperationSucceeded, "", "", "", nil, deletedAt); err != nil {
 		return err
 	}
+	if err := enqueueOperationTerminalTx(ctx, tx, ownerID, operationID, deletedAt); err != nil {
+		return err
+	}
+	if err := enqueueInstanceDeletedTx(ctx, tx, i, deletedAt); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO instance_tombstones(instance_id,owner_id,name,operation_id,deleted_at) VALUES(?,?,?,?,?)`, id, ownerID, i.Name, operationID, formatTime(deletedAt)); err != nil {
 		return mapWriteError(err)
 	}
@@ -480,6 +489,11 @@ func (s *Store) UpdateInstanceState(ctx context.Context, ownerID domain.OwnerID,
 	}
 	if n, _ := result.RowsAffected(); n != 1 {
 		return &domain.Error{Code: domain.CodeNotFound, Field: "instance"}
+	}
+	if strings.HasPrefix(operation.IdempotencyKey, "expiry:") {
+		if err := enqueueInstanceExpiredTx(ctx, tx, current, operation.ID, updatedAt); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit state update: %w", err)

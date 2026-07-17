@@ -37,6 +37,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/software"
 	"github.com/openbox-dev/openbox/internal/terminal"
 	"github.com/openbox-dev/openbox/internal/version"
+	"github.com/openbox-dev/openbox/internal/webhooks"
 )
 
 const (
@@ -126,6 +127,10 @@ type Options struct {
 	Artifacts *artifacts.Service
 	// ImageBuilds submits durable Devbox recipe builds.
 	ImageBuilds *imagebuild.Service
+	// Webhooks serves outbound subscription CRUD.
+	Webhooks *webhooks.Service
+	// WebhookDeliveries lists durable outbound delivery attempts.
+	WebhookDeliveries WebhookDeliveries
 }
 
 type Handler struct {
@@ -154,6 +159,8 @@ type Handler struct {
 	auditEvents        AuditEvents
 	artifacts          *artifacts.Service
 	imageBuilds        *imagebuild.Service
+	webhooks           *webhooks.Service
+	webhookDeliveries  WebhookDeliveries
 }
 
 func New(service Service, options Options) (*Handler, error) {
@@ -204,6 +211,8 @@ func New(service Service, options Options) (*Handler, error) {
 		auditEvents:        options.AuditEvents,
 		artifacts:          options.Artifacts,
 		imageBuilds:        options.ImageBuilds,
+		webhooks:           options.Webhooks,
+		webhookDeliveries:  options.WebhookDeliveries,
 	}, nil
 }
 
@@ -337,6 +346,15 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 	case "audit-events":
 		if len(segments) == 2 && h.requireMethod(response, request, requestID, http.MethodGet) {
 			h.listAuditEvents(response, request, requestID)
+			return
+		}
+	case "webhook-subscriptions":
+		if h.routeWebhooks(response, request, requestID, segments[2:]) {
+			return
+		}
+	case "webhook-deliveries":
+		if len(segments) == 2 && h.requireMethod(response, request, requestID, http.MethodGet) {
+			h.listWebhookDeliveries(response, request, requestID)
 			return
 		}
 	}

@@ -516,6 +516,71 @@ func (c *Client) ListAuditEvents(ctx context.Context, limit int) ([]AuditEvent, 
 	return response.Items, nil
 }
 
+func (c *Client) ListWebhookSubscriptions(ctx context.Context) ([]WebhookSubscription, error) {
+	var response struct {
+		Items []WebhookSubscription `json:"items"`
+	}
+	if _, err := c.do(ctx, http.MethodGet, "/v1/webhook-subscriptions", "", nil, &response); err != nil {
+		return nil, err
+	}
+	if response.Items == nil {
+		return []WebhookSubscription{}, nil
+	}
+	return response.Items, nil
+}
+
+func (c *Client) GetWebhookSubscription(ctx context.Context, id string) (WebhookSubscription, error) {
+	var subscription WebhookSubscription
+	_, err := c.do(ctx, http.MethodGet, resourcePath("/v1/webhook-subscriptions", id), "", nil, &subscription)
+	return subscription, err
+}
+
+// CreateWebhookSubscription returns the signing secret exactly once.
+func (c *Client) CreateWebhookSubscription(ctx context.Context, request CreateWebhookSubscriptionRequest) (CreatedWebhookSubscription, error) {
+	var subscription CreatedWebhookSubscription
+	_, err := c.do(ctx, http.MethodPost, "/v1/webhook-subscriptions", "", request, &subscription)
+	return subscription, err
+}
+
+// UpdateWebhookSubscription returns a secret only when RotateSecret is true.
+func (c *Client) UpdateWebhookSubscription(ctx context.Context, id string, request UpdateWebhookSubscriptionRequest) (CreatedWebhookSubscription, error) {
+	var subscription CreatedWebhookSubscription
+	_, err := c.do(ctx, http.MethodPatch, resourcePath("/v1/webhook-subscriptions", id), "", request, &subscription)
+	return subscription, err
+}
+
+func (c *Client) DeleteWebhookSubscription(ctx context.Context, id string) error {
+	_, err := c.do(ctx, http.MethodDelete, resourcePath("/v1/webhook-subscriptions", id), "", nil, nil)
+	return err
+}
+
+func (c *Client) ListWebhookDeliveries(ctx context.Context, options ListWebhookDeliveriesOptions) ([]WebhookDelivery, error) {
+	endpoint := "/v1/webhook-deliveries"
+	query := url.Values{}
+	if options.Status != "" {
+		query.Set("status", options.Status)
+	}
+	if options.SubscriptionID != "" {
+		query.Set("subscription_id", options.SubscriptionID)
+	}
+	if options.Limit > 0 {
+		query.Set("limit", fmt.Sprintf("%d", options.Limit))
+	}
+	if len(query) > 0 {
+		endpoint += "?" + query.Encode()
+	}
+	var response struct {
+		Items []WebhookDelivery `json:"items"`
+	}
+	if _, err := c.do(ctx, http.MethodGet, endpoint, "", nil, &response); err != nil {
+		return nil, err
+	}
+	if response.Items == nil {
+		return []WebhookDelivery{}, nil
+	}
+	return response.Items, nil
+}
+
 func (c *Client) AttachEgressProfile(ctx context.Context, instanceID, profileID string) (Instance, error) {
 	var instance Instance
 	_, err := c.do(ctx, http.MethodPut, resourcePath("/v1/instances", instanceID, "network", "egress-profile"), "", map[string]any{

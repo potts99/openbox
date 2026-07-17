@@ -45,6 +45,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/snapshots"
 	"github.com/openbox-dev/openbox/internal/sshgateway"
 	sshproxy "github.com/openbox-dev/openbox/internal/sshgateway/proxy"
+	"github.com/openbox-dev/openbox/internal/webhooks"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -106,6 +107,7 @@ type metricsRunner interface{ RunOnce(context.Context) error }
 
 type daemonComponents struct {
 	operations  operationRunner
+	webhooks    operationRunner
 	reconciler  reconciliationRunner
 	metrics     metricsRunner
 	sandboxPool *sandboxpool.Manager
@@ -232,6 +234,14 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
+	webhookService, err := webhooks.New(store)
+	if err != nil {
+		return fail(fmt.Errorf("webhook service: %w", err))
+	}
+	webhookWorker, err := webhooks.NewWorker(store, nil)
+	if err != nil {
+		return fail(fmt.Errorf("webhook worker: %w", err))
+	}
 	piProfiles, err := piprofile.New(store, piprofile.Options{})
 	if err != nil {
 		return fail(err)
@@ -336,6 +346,8 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 		AuditEvents:       store,
 		Artifacts:         artifactService,
 		ImageBuilds:       imageBuildService,
+		Webhooks:          webhookService,
+		WebhookDeliveries: store,
 	})
 	if err != nil {
 		return fail(err)
@@ -359,6 +371,7 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	}
 	return daemonComponents{
 		operations:  worker,
+		webhooks:    webhookWorker,
 		reconciler:  expiryThenReconcile{expiry: expiry, egress: egressService, inner: reconciler},
 		metrics:     metricsSampler,
 		sandboxPool: sandboxPool,
@@ -455,6 +468,9 @@ func runDaemon(ctx context.Context, config daemonConfig, factory componentFactor
 	}
 	var wg sync.WaitGroup
 	periodicCount := 2
+	if components.webhooks != nil {
+		periodicCount++
+	}
 	if components.metrics != nil {
 		periodicCount++
 	}
@@ -465,6 +481,11 @@ func runDaemon(ctx context.Context, config daemonConfig, factory componentFactor
 	go periodic(runCtx, &wg, config.OperationInterval, false, "operation recovery", func(ctx context.Context) error {
 		return components.operations.RunOnce(ctx)
 	})
+	if components.webhooks != nil {
+		go periodic(runCtx, &wg, config.OperationInterval, false, "webhook delivery", func(ctx context.Context) error {
+			return components.webhooks.RunOnce(ctx)
+		})
+	}
 	go periodic(runCtx, &wg, config.ReconcileInterval, true, "reconciliation", func(ctx context.Context) error {
 		_, err := components.reconciler.RunOnce(ctx)
 		return err

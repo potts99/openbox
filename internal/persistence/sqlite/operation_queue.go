@@ -167,6 +167,9 @@ func (s *Store) CompleteClaim(ctx context.Context, ownerID domain.OwnerID, id do
 	if err := appendOperationEventTx(ctx, tx, ownerID, id, "complete", domain.OperationSucceeded, "", "", "", metadata, now); err != nil {
 		return false, err
 	}
+	if err := enqueueOperationTerminalTx(ctx, tx, ownerID, id, now); err != nil {
+		return false, err
+	}
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
@@ -197,6 +200,11 @@ func (s *Store) finishAttempt(ctx context.Context, ownerID domain.OwnerID, id do
 	}
 	if err := appendOperationEventTx(ctx, tx, ownerID, id, stage, status, class, code, message, nil, now); err != nil {
 		return err
+	}
+	if status == domain.OperationFailed {
+		if err := enqueueOperationTerminalTx(ctx, tx, ownerID, id, now); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -309,6 +317,9 @@ func (s *Store) CancelPendingOperation(ctx context.Context, ownerID domain.Owner
 		return domain.Operation{}, &domain.Error{Code: domain.CodeCancellationUnsafe, Field: "operation.stage"}
 	}
 	if err := appendOperationEventTx(ctx, tx, ownerID, id, "canceled", domain.OperationFailed, "correctable", domain.CodeOperationCanceled, "operation canceled before runtime mutation", nil, now); err != nil {
+		return domain.Operation{}, err
+	}
+	if err := enqueueOperationTerminalTx(ctx, tx, ownerID, id, now); err != nil {
 		return domain.Operation{}, err
 	}
 	if err := tx.Commit(); err != nil {

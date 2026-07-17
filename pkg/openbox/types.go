@@ -113,6 +113,55 @@ type AuditEvent struct {
 	CreatedAt  time.Time         `json:"created_at"`
 }
 
+type WebhookSubscription struct {
+	ID          string    `json:"id"`
+	URL         string    `json:"url"`
+	Description string    `json:"description"`
+	Events      []string  `json:"events"`
+	Enabled     bool      `json:"enabled"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type CreatedWebhookSubscription struct {
+	WebhookSubscription
+	Secret string `json:"secret"`
+}
+
+type CreateWebhookSubscriptionRequest struct {
+	URL         string   `json:"url"`
+	Description string   `json:"description,omitempty"`
+	Events      []string `json:"events"`
+	Enabled     *bool    `json:"enabled,omitempty"`
+}
+
+type UpdateWebhookSubscriptionRequest struct {
+	URL          *string   `json:"url,omitempty"`
+	Description  *string   `json:"description,omitempty"`
+	Events       *[]string `json:"events,omitempty"`
+	Enabled      *bool     `json:"enabled,omitempty"`
+	RotateSecret bool      `json:"rotate_secret,omitempty"`
+}
+
+type WebhookDelivery struct {
+	ID             string     `json:"id"`
+	EventID        string     `json:"event_id"`
+	SubscriptionID string     `json:"subscription_id"`
+	Status         string     `json:"status"`
+	Attempt        int        `json:"attempt"`
+	HTTPStatus     int        `json:"http_status,omitempty"`
+	ErrorClass     string     `json:"error_class,omitempty"`
+	NextAttemptAt  *time.Time `json:"next_attempt_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+type ListWebhookDeliveriesOptions struct {
+	Status         string
+	SubscriptionID string
+	Limit          int
+}
+
 type Instance struct {
 	ID                    string              `json:"id"`
 	Name                  string              `json:"name"`

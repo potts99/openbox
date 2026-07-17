@@ -45,9 +45,11 @@ Commands:
   clone INSTANCE NAME      Clone a live instance
   artifact put|get|list|rm Manage instance-attached artifacts
   image build            Build the embedded Devbox image
+  webhook list|create|delete|deliveries  Manage outbound webhooks
   route                  Manage HTTPS routes
   network                Manage egress profiles and attach policy
   audit list             List policy and security audit events
+  backup create|verify   Create or verify a control-plane backup
   forward INSTANCE PORT  SSH-tunnel an instance port to localhost
   operation watch ID     Stream operation progress
   ssh-config print       Print optional OpenSSH aliases
@@ -91,6 +93,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if commandArgs[0] == "forward" {
 		return runForward(commandArgs[1:], stdout, stderr, exec.LookPath, func(cmd *exec.Cmd) error { return cmd.Run() })
+	}
+	if commandArgs[0] == "backup" {
+		return runBackup(commandArgs[1:], options.json, stdout, stderr)
 	}
 	httpClient := &http.Client{Timeout: options.timeout}
 	api, err := openbox.New(openbox.Options{BaseURL: options.server, HTTPClient: httpClient, UserAgent: "openbox-cli/" + version.Version, Token: options.token})
@@ -136,6 +141,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runArtifact(ctx, api, rest, options.json, stdout, stderr)
 	case "image":
 		return runImage(ctx, api, rest, options.json, stdout, stderr)
+	case "webhook":
+		return runWebhook(ctx, api, rest, options.json, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", command, usage)
 		return 2
