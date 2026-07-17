@@ -4,22 +4,22 @@ PNPM ?= pnpm
 
 build:
 	go build ./cmd/openbox ./cmd/openboxd
-	$(PNPM) --dir web build
+	$(PNPM) --filter @openbox/web build
 
 format:
 	gofmt -w cmd internal pkg
-	$(PNPM) --dir web exec prettier --write .
+	$(PNPM) --filter @openbox/web exec prettier --write .
 
 format-check:
 	test -z "$$(gofmt -l cmd internal pkg)"
 
 lint:
 	go vet ./...
-	$(PNPM) --dir web lint
+	$(PNPM) --filter @openbox/web lint
 
 test:
 	go test ./...
-	$(PNPM) --dir web test
+	$(PNPM) --filter @openbox/web test
 
 license-check:
 	./scripts/check-license-headers.sh

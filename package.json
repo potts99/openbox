@@ -1,0 +1,11 @@
+{
+  "name": "openbox",
+  "private": true,
+  "packageManager": "pnpm@10.13.1",
+  "scripts": {
+    "lint": "pnpm --filter @openbox/web lint",
+    "test": "pnpm --filter @openbox/web test",
+    "build": "pnpm --filter @openbox/web build",
+    "generate": "pnpm --filter @openbox/web generate"
+  }
+}

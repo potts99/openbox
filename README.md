@@ -4,6 +4,16 @@ OpenBox is a self-hosted platform for persistent VPS instances, disposable AI-ag
 
 The project is under active development. Before v0.1, commands, APIs, configuration, data formats, and upgrade paths may change without compatibility guarantees.
 
+## Monorepo layout
+
+| Path | Purpose |
+|------|---------|
+| `cmd/`, `internal/`, `pkg/` | Go control plane, CLI, SDK |
+| `apps/web` | Owner console SPA (embedded into `openboxd`) |
+| `apps/marketing` | Public marketing site (Cloudflare Pages — not self-host) |
+| `deploy/` | Self-host install kit (systemd, Caddy for the console) |
+| `examples/` | Agent workflow recipes |
+
 ## Development
 
 Install Go 1.24 or newer, Node.js 22, pnpm 10, and GNU Make. Then run:

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const source = resolve(webRoot, "dist");
-const target = resolve(webRoot, "../internal/assets/static");
+const target = resolve(webRoot, "../../internal/assets/static");
 
 const entries = await readdir(resolve(source, "assets"));
 if (entries.length === 0 || entries.some((name) => !/-[A-Za-z0-9_-]{8,}\.[^.]+$/.test(name))) {

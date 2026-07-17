@@ -38,9 +38,9 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --dir web lint
-      - run: pnpm --dir web test
-      - run: pnpm --dir web build
+      - run: pnpm --filter @openbox/web lint
+      - run: pnpm --filter @openbox/web test
+      - run: pnpm --filter @openbox/web build
 
   license-headers:
     runs-on: ubuntu-latest

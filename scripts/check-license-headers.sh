@@ -9,6 +9,6 @@ while IFS= read -r file; do
     echo "missing AGPL SPDX header: $file" >&2
     status=1
   fi
-done < <(find cmd internal pkg web/src web/tests -type f \( -name '*.go' -o -name '*.ts' -o -name '*.tsx' \) -print | sort)
+done < <(find cmd internal pkg apps/web/src apps/web/tests -type f \( -name '*.go' -o -name '*.ts' -o -name '*.tsx' \) -print | sort)
 
 exit "$status"

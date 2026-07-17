@@ -13,7 +13,7 @@ git diff --binary -- . ':!docs' >"$before_diff"
 git ls-files --others --exclude-standard -- ':!docs' | sort >"$before_untracked"
 
 go generate ./...
-${PNPM:-pnpm} --dir web generate >/dev/null
+${PNPM:-pnpm} --filter @openbox/web generate >/dev/null
 
 git diff --binary -- . ':!docs' >"$after_diff"
 git ls-files --others --exclude-standard -- ':!docs' | sort >"$after_untracked"
