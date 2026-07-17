@@ -5,6 +5,7 @@ package fake
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
@@ -12,8 +13,8 @@ import (
 	"sync"
 
 	"github.com/openbox-dev/openbox/internal/domain"
-	sandboxpool "github.com/openbox-dev/openbox/internal/sandbox/pool"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
+	sandboxpool "github.com/openbox-dev/openbox/internal/sandbox/pool"
 )
 
 type Runtime struct {
@@ -597,6 +598,48 @@ func (r *Runtime) CopyInstance(ctx context.Context, request runtimeapi.CopyReque
 	}
 	r.instances[target.Ref] = target
 	return cloneInstance(target), nil
+}
+
+func (r *Runtime) ExportInstance(ctx context.Context, ref string, destination io.Writer) error {
+	if err := r.begin(ctx, "instance.export"); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	instance, exists := r.instances[ref]
+	if !exists {
+		return runtimeapi.ErrNotFound
+	}
+	if err := json.NewEncoder(destination).Encode(cloneInstance(instance)); err != nil {
+		return fmt.Errorf("write instance backup: %w", err)
+	}
+	return nil
+}
+
+func (r *Runtime) ImportInstance(ctx context.Context, backup runtimeapi.InstanceBackup) (runtimeapi.Instance, error) {
+	if err := r.begin(ctx, "instance.import"); err != nil {
+		return runtimeapi.Instance{}, err
+	}
+	if backup.Body == nil {
+		return runtimeapi.Instance{}, fmt.Errorf("instance backup body is required")
+	}
+	var instance runtimeapi.Instance
+	if err := json.NewDecoder(backup.Body).Decode(&instance); err != nil {
+		return runtimeapi.Instance{}, fmt.Errorf("read instance backup: %w", err)
+	}
+	if instance.Ref == "" {
+		return runtimeapi.Instance{}, fmt.Errorf("instance backup ref is required")
+	}
+	if backup.Ref != "" && backup.Ref != instance.Ref {
+		return runtimeapi.Instance{}, fmt.Errorf("instance backup ref %q does not match requested ref %q", instance.Ref, backup.Ref)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.instances[instance.Ref]; exists {
+		return runtimeapi.Instance{}, runtimeapi.ErrAlreadyExists
+	}
+	r.instances[instance.Ref] = cloneInstance(instance)
+	return cloneInstance(instance), nil
 }
 
 func (r *Runtime) DeleteInstance(ctx context.Context, ref string) error {

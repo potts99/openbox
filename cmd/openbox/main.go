@@ -49,7 +49,7 @@ Commands:
   route                  Manage HTTPS routes
   network                Manage egress profiles and attach policy
   audit list             List policy and security audit events
-  backup create|verify   Create or verify a control-plane backup
+  backup create|verify|restore  Create, verify, or restore a backup
   forward INSTANCE PORT  SSH-tunnel an instance port to localhost
   operation watch ID     Stream operation progress
   ssh-config print       Print optional OpenSSH aliases

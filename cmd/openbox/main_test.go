@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
+	"github.com/openbox-dev/openbox/internal/runtime/fake"
 )
 
 func TestDoctorHumanAndJSON(t *testing.T) {
@@ -270,6 +274,52 @@ func TestBackupCreateAndVerify(t *testing.T) {
 	if code != 0 || !strings.Contains(stdout.String(), "backup verified") || stderr.Len() != 0 {
 		t.Fatalf("verify exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
+	if err := os.WriteFile(databasePath, []byte("not a database"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "state", "ssh", "gateway_host"), []byte("replacement key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "state", "caddy", "routes.caddyfile"), []byte("replacement route"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("OPENBOX_STORAGE_POOL=replacement\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{
+		"backup", "restore", backupPath,
+		"--database", databasePath,
+		"--state-dir", filepath.Join(root, "state"),
+		"--config", configPath,
+	}, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), "backup restored") || stderr.Len() != 0 {
+		t.Fatalf("restore exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	database, err = sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored string
+	if err := database.QueryRow("SELECT value FROM fixture").Scan(&restored); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if restored != "preserved" {
+		t.Fatalf("restored database value=%q", restored)
+	}
+	if contents, err := os.ReadFile(filepath.Join(root, "state", "ssh", "gateway_host")); err != nil || string(contents) != "gateway private key" {
+		t.Fatalf("restored SSH state=%q err=%v", contents, err)
+	}
+	if contents, err := os.ReadFile(filepath.Join(root, "state", "caddy", "routes.caddyfile")); err != nil || !strings.Contains(string(contents), "route.example") {
+		t.Fatalf("restored Caddy routes=%q err=%v", contents, err)
+	}
+	if contents, err := os.ReadFile(configPath); err != nil || string(contents) != "OPENBOX_STORAGE_POOL=openbox\n" {
+		t.Fatalf("restored config=%q err=%v", contents, err)
+	}
 	if err := os.WriteFile(filepath.Join(backupPath, "ssh", "gateway_host"), []byte("changed"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -278,6 +328,63 @@ func TestBackupCreateAndVerify(t *testing.T) {
 	code = run([]string{"backup", "verify", backupPath}, &stdout, &stderr)
 	if code != 1 || !strings.Contains(stderr.String(), "integrity check failed") {
 		t.Fatalf("corrupt verify exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestBackupInstanceExportAndImport(t *testing.T) {
+	root := t.TempDir()
+	stateDir := filepath.Join(root, "state")
+	if err := os.MkdirAll(filepath.Join(stateDir, "ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, contents := range map[string]string{"gateway_host": "host key", "instance_client": "client key"} {
+		if err := os.WriteFile(filepath.Join(stateDir, "ssh", name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	databasePath := filepath.Join(stateDir, "openbox.db")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TABLE instances (id TEXT, runtime_ref TEXT, deleted_at TEXT);
+		INSERT INTO instances VALUES ('instance-live', 'obx-live', NULL);
+		INSERT INTO instances VALUES ('instance-deleted', 'obx-deleted', '2026-07-17T00:00:00Z');`,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	runtime := fake.New(runtimeapi.Capabilities{})
+	runtime.AddImage(runtimeapi.Image{Fingerprint: "sha256:base"})
+	if _, err := runtime.CreateInstance(context.Background(), runtimeapi.CreateRequest{
+		Ref: "obx-live", Image: "sha256:base", Unprivileged: true,
+		Metadata: map[string]string{"user.openbox.instance_id": "instance-live"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	backupPath := filepath.Join(root, "backup")
+	manifest, err := createBackupWithRuntime(backupPath, databasePath, stateDir, "", runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.FormatVersion != backupFormatVersion || len(manifest.Instances) != 1 || manifest.Instances[0].RuntimeRef != "obx-live" {
+		t.Fatalf("manifest=%#v", manifest)
+	}
+	if _, err := os.Stat(filepath.Join(backupPath, "instances", "instance-live.tar")); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.DeleteInstance(context.Background(), "obx-live"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restoreBackup(backupPath, databasePath, stateDir, "", runtime); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := runtime.InspectInstance(context.Background(), "obx-live")
+	if err != nil || restored.Metadata["user.openbox.instance_id"] != "instance-live" || restored.State != runtimeapi.StateStopped {
+		t.Fatalf("restored instance=%#v err=%v", restored, err)
 	}
 }
 

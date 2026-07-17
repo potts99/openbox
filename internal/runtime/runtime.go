@@ -120,6 +120,14 @@ type CopyRequest struct {
 	Metadata                       map[string]string
 }
 
+// InstanceBackup is a portable runtime backup stream. Its encoding is owned by
+// the runtime implementation and is intended only for ExportInstance /
+// ImportInstance round trips on a compatible runtime.
+type InstanceBackup struct {
+	Ref  string
+	Body io.Reader
+}
+
 // ConsoleRequest opens an interactive PTY inside a managed instance.
 // Ref must be a runtime instance identity (never the OpenBox host).
 type ConsoleRequest struct {
@@ -179,6 +187,8 @@ type Runtime interface {
 	CreateSnapshot(context.Context, string, string) error
 	DeleteSnapshot(context.Context, string, string) error
 	CopyInstance(context.Context, CopyRequest) (Instance, error)
+	ExportInstance(context.Context, string, io.Writer) error
+	ImportInstance(context.Context, InstanceBackup) (Instance, error)
 	DeleteInstance(context.Context, string) error
 }
 

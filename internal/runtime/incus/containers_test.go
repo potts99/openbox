@@ -3,9 +3,11 @@
 package incus
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -15,6 +17,59 @@ import (
 
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 )
+
+func TestInstanceBackupExportAndImportUseIncusNativeStream(t *testing.T) {
+	var imported []byte
+	socket := serveUnixHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("project") != "openbox" {
+			writeError(w, http.StatusBadRequest, "wrong project")
+			return
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/1.0/instances/obx-ref/backup":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write([]byte("incus-native-backup"))
+		case r.Method == http.MethodPost && r.URL.Path == "/1.0/instances":
+			if r.Header.Get("Content-Type") != "application/octet-stream" {
+				writeError(w, http.StatusBadRequest, "wrong content type")
+				return
+			}
+			var err error
+			imported, err = io.ReadAll(r.Body)
+			if err != nil {
+				t.Error(err)
+			}
+			writeSync(w, nil)
+		case r.Method == http.MethodGet && r.URL.Path == "/1.0/instances/obx-ref":
+			writeSync(w, instanceRecord{
+				Name: "obx-ref", Type: "container", Status: "Stopped",
+				Config: map[string]string{"user.openbox.instance_id": "instance-1"},
+			})
+		default:
+			writeError(w, http.StatusNotFound, "not found")
+		}
+	}))
+	adapter, err := New(Options{SocketPath: socket, Project: "openbox"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var exported bytes.Buffer
+	if err := adapter.ExportInstance(context.Background(), "obx-ref", &exported); err != nil {
+		t.Fatal(err)
+	}
+	if exported.String() != "incus-native-backup" {
+		t.Fatalf("export=%q", exported.String())
+	}
+	importedInstance, err := adapter.ImportInstance(context.Background(), runtimeapi.InstanceBackup{
+		Ref: "obx-ref", Body: bytes.NewReader(exported.Bytes()),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(imported) != "incus-native-backup" || importedInstance.Ref != "obx-ref" {
+		t.Fatalf("imported=%q instance=%#v", imported, importedInstance)
+	}
+}
 
 func TestContainerHTTPLifecycleUsesStructuredIncusAPI(t *testing.T) {
 	api := &containerAPI{}
