@@ -10,6 +10,7 @@ import (
 
 	"github.com/openbox-dev/openbox/internal/app/instances"
 	"github.com/openbox-dev/openbox/internal/domain"
+	imagebuild "github.com/openbox-dev/openbox/internal/images/build"
 	"github.com/openbox-dev/openbox/internal/operations"
 )
 
@@ -29,6 +30,7 @@ type Executor struct {
 	Instances InstanceRecoverer
 	Snapshots SnapshotRecoverer
 	Clones    CloneRecoverer
+	Images    *imagebuild.Service
 }
 
 func (e Executor) Execute(ctx context.Context, operation domain.Operation) error {
@@ -44,6 +46,11 @@ func (e Executor) Execute(ctx context.Context, operation domain.Operation) error
 			return &domain.Error{Code: domain.CodeInvalidArgument, Field: "operation.type"}
 		}
 		err = e.Clones.RecoverOperation(ctx, operation)
+	case operation.Type == "image.build":
+		if e.Images == nil {
+			return &domain.Error{Code: domain.CodeInvalidArgument, Field: "operation.type"}
+		}
+		err = e.Images.RecoverOperation(ctx, operation)
 	default:
 		if e.Instances == nil {
 			return &domain.Error{Code: domain.CodeInvalidArgument, Field: "operation.type"}

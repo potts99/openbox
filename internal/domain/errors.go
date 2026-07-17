@@ -26,6 +26,7 @@ const (
 	CodeBusy                  ErrorCode = "busy"
 	CodeRateLimited           ErrorCode = "rate_limited"
 	CodeQuotaExceeded         ErrorCode = "quota_exceeded"
+	CodeRuntimeError          ErrorCode = "runtime_error"
 )
 
 // Error carries a code and field without coupling the domain to UI wording.

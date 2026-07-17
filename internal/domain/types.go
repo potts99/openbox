@@ -145,6 +145,19 @@ type Image struct {
 	CreatedAt, UpdatedAt                               time.Time
 }
 
+// ImageBuild is the durable target of an image.build operation.
+type ImageBuild struct {
+	ID           string
+	OwnerID      OwnerID
+	Architecture string
+	Runtime      string
+	Alias        string
+	BuilderRef   string
+	Digest       string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
 type Snapshot struct {
 	ID               SnapshotID
 	OwnerID          OwnerID

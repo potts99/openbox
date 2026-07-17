@@ -121,6 +121,19 @@ func (c *Client) ListImages(ctx context.Context) ([]Image, error) {
 	return envelope.Items, nil
 }
 
+// BuildImage submits the checked-in Devbox recipe as a durable operation.
+func (c *Client) BuildImage(ctx context.Context, request BuildImageRequest, idempotencyKey string) (Operation, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return Operation{}, errors.New("idempotency key is required")
+	}
+	var operation Operation
+	_, err := c.do(ctx, http.MethodPost, "/v1/images/build", idempotencyKey, request, &operation)
+	if err == nil {
+		err = operation.validate()
+	}
+	return operation, err
+}
+
 func (c *Client) ListInstances(ctx context.Context) ([]Instance, error) {
 	var envelope struct {
 		Instances []Instance `json:"items"`

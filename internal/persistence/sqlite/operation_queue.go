@@ -132,8 +132,8 @@ func (s *Store) CompleteClaim(ctx context.Context, ownerID domain.OwnerID, id do
 	}
 	defer tx.Rollback()
 	var status domain.OperationStatus
-	var claimedBy, claimToken string
-	if err := tx.QueryRowContext(ctx, `SELECT status,claimed_by,claim_token FROM operations WHERE owner_id=? AND id=?`, ownerID, id).Scan(&status, &claimedBy, &claimToken); err != nil {
+	var claimedBy, claimToken, operationType, targetID string
+	if err := tx.QueryRowContext(ctx, `SELECT status,claimed_by,claim_token,type,target_id FROM operations WHERE owner_id=? AND id=?`, ownerID, id).Scan(&status, &claimedBy, &claimToken, &operationType, &targetID); err != nil {
 		return false, err
 	}
 	if status == domain.OperationSucceeded {
@@ -149,7 +149,22 @@ func (s *Store) CompleteClaim(ctx context.Context, ownerID domain.OwnerID, id do
 	if count, _ := result.RowsAffected(); count != 1 {
 		return false, &domain.Error{Code: domain.CodeConflict, Field: "operation.claim"}
 	}
-	if err := appendOperationEventTx(ctx, tx, ownerID, id, "complete", domain.OperationSucceeded, "", "", "", nil, now); err != nil {
+	var metadata []byte
+	if operationType == "image.build" {
+		var alias, digest, architecture, runtime string
+		if err := tx.QueryRowContext(ctx, `SELECT alias,digest,architecture,runtime FROM image_builds WHERE owner_id=? AND id=?`, ownerID, targetID).
+			Scan(&alias, &digest, &architecture, &runtime); err != nil {
+			return false, err
+		}
+		if digest == "" {
+			return false, &domain.Error{Code: domain.CodeConflict, Field: "image_build.digest"}
+		}
+		metadata, err = json.Marshal(map[string]string{"alias": alias, "digest": digest, "architecture": architecture, "runtime": runtime})
+		if err != nil {
+			return false, err
+		}
+	}
+	if err := appendOperationEventTx(ctx, tx, ownerID, id, "complete", domain.OperationSucceeded, "", "", "", metadata, now); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -257,7 +272,10 @@ func (s *Store) CancelPendingOperation(ctx context.Context, ownerID domain.Owner
 	if newer != 0 {
 		return domain.Operation{}, &domain.Error{Code: domain.CodeCancellationUnsafe, Field: "operation.order"}
 	}
-	if op.Type == "instance.create" {
+	if op.Type == "image.build" {
+		// Image builds have no mutable target until the worker leaves runtime.
+		// The operation transition below is therefore the complete rollback.
+	} else if op.Type == "instance.create" {
 		result, deleteErr := tx.ExecContext(ctx, `DELETE FROM instances WHERE owner_id=? AND id=? AND observed_state=?`, ownerID, op.TargetID, domain.ObservedPending)
 		if deleteErr != nil {
 			return domain.Operation{}, mapWriteError(deleteErr)

@@ -44,6 +44,7 @@ Commands:
   restore SNAPSHOT NAME    Restore a checkpoint as a new instance
   clone INSTANCE NAME      Clone a live instance
   artifact put|get|list|rm Manage instance-attached artifacts
+  image build            Build the embedded Devbox image
   route                  Manage HTTPS routes
   network                Manage egress profiles and attach policy
   audit list             List policy and security audit events
@@ -133,6 +134,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runClone(ctx, api, rest, options.json, stdout, stderr)
 	case "artifact":
 		return runArtifact(ctx, api, rest, options.json, stdout, stderr)
+	case "image":
+		return runImage(ctx, api, rest, options.json, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", command, usage)
 		return 2
