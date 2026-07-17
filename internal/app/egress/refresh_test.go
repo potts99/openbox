@@ -117,4 +117,17 @@ func TestRefreshHostnameAllowlistsSucceedsWithResolver(t *testing.T) {
 	if len(runtime.applied) != 1 {
 		t.Fatalf("applied=%v", runtime.applied)
 	}
+
+	// Second pass with the same resolved destinations must not reprogram ACLs
+	// or count as refreshed (avoids reconcile-tick audit/Incus churn).
+	report, err = service.RefreshHostnameAllowlists(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Refreshed != 0 || report.Skipped != 1 || len(report.Errors) != 0 {
+		t.Fatalf("unchanged refresh report=%#v", report)
+	}
+	if len(runtime.applied) != 1 {
+		t.Fatalf("applied after unchanged refresh=%v", runtime.applied)
+	}
 }

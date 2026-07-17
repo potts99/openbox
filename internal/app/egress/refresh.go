@@ -48,7 +48,8 @@ func (s *Service) RefreshHostnameAllowlists(ctx context.Context) (RefreshReport,
 			instance.EgressProfileID = profile.ID
 			// Refresh failures must not mark the instance error: the previous ACL
 			// may still be correct. Record audit + apply_errors only.
-			if err := s.applicator.apply(ctx, instance, profile, false); err != nil {
+			changed, err := s.applicator.apply(ctx, instance, profile, false)
+			if err != nil {
 				if s.auditor != nil {
 					_ = s.auditor.RecordPolicyEvent(ctx, PolicyAuditEvent{
 						OwnerID: instance.OwnerID, Actor: "openboxd",
@@ -58,6 +59,10 @@ func (s *Service) RefreshHostnameAllowlists(ctx context.Context) (RefreshReport,
 					})
 				}
 				report.Errors = append(report.Errors, ApplyError{InstanceID: instance.ID, Message: err.Error()})
+				continue
+			}
+			if !changed {
+				report.Skipped++
 				continue
 			}
 			if s.auditor != nil {

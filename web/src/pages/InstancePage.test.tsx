@@ -180,10 +180,12 @@ describe("InstancePage", () => {
     expect(logsSection).not.toBeNull();
     expect(await within(logsSection!).findByRole("button", { name: /Create instance/i })).toHaveAttribute("aria-current", "true");
     expect(within(logsSection!).queryByRole("button", { name: /Start/i })).toBeNull();
-    expect(subscribeOperationEvents).toHaveBeenCalledWith(
-      "op-create",
-      expect.objectContaining({ onEvent: expect.any(Function) }),
-      expect.any(Object),
+    await waitFor(() =>
+      expect(subscribeOperationEvents).toHaveBeenCalledWith(
+        "op-create",
+        expect.objectContaining({ onEvent: expect.any(Function) }),
+        expect.any(Object),
+      ),
     );
   });
 
