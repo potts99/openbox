@@ -5,13 +5,12 @@ import { createHttpApi } from "./api/client";
 import type { BootstrapStatus, OpenBoxApi, Session } from "./api/client";
 import { AuthScreen } from "./auth/AuthScreen";
 import { ConsolePage } from "./pages/ConsolePage";
-import { LandingPage } from "./pages/LandingPage";
 
 const defaultApi = createHttpApi();
 
 type EntryState =
   | { status: "loading" }
-  | { status: "ready"; bootstrap: BootstrapStatus; session: Session; showAuth?: boolean }
+  | { status: "ready"; bootstrap: BootstrapStatus; session: Session }
   | { status: "error"; message: string };
 
 function messageFrom(error: unknown): string {
@@ -48,26 +47,14 @@ export function App({ api = defaultApi }: { api?: OpenBoxApi }) {
   }
 
   if (entry.bootstrap.required || !entry.session.authenticated) {
-    if (entry.bootstrap.required || entry.showAuth) {
-      return (
-        <AuthScreen
-          mode={entry.bootstrap.required ? "setup" : "login"}
-          api={api}
-          onAuthenticated={(session) => setEntry({
-            status: "ready",
-            bootstrap: { required: false },
-            session,
-          })}
-        />
-      );
-    }
     return (
-      <LandingPage
-        onSignIn={() => setEntry({
+      <AuthScreen
+        mode={entry.bootstrap.required ? "setup" : "login"}
+        api={api}
+        onAuthenticated={(session) => setEntry({
           status: "ready",
-          bootstrap: entry.bootstrap,
-          session: entry.session,
-          showAuth: true,
+          bootstrap: { required: false },
+          session,
         })}
       />
     );

@@ -1171,88 +1171,6 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .terminal-reveal[hidden] { display: none; }
 body.terminal-open { overflow: hidden; }
 
-/* Marketing landing — minimal, same type system as the console */
-.landing {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background:
-    radial-gradient(1200px 480px at 12% -10%, #e7e7e1 0%, transparent 55%),
-    linear-gradient(180deg, #f7f7f4 0%, var(--bg) 42%);
-}
-.landing-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 1.1rem 1.5rem;
-  border-bottom: 1px solid var(--line);
-}
-.landing-hero {
-  width: min(40rem, calc(100% - 2.5rem));
-  margin: 0 auto;
-  padding: clamp(3.5rem, 12vh, 7rem) 0 3rem;
-  flex: 1;
-}
-.landing-brand {
-  margin: 0 0 .75rem;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: .8rem;
-  font-weight: 600;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-.landing-hero h1 {
-  margin: 0 0 1rem;
-  max-width: 18ch;
-  font-size: clamp(2rem, 5vw, 2.75rem);
-  line-height: 1.1;
-  font-weight: 500;
-  letter-spacing: -0.02em;
-}
-.landing-lede {
-  margin: 0 0 1.75rem;
-  max-width: 36rem;
-  color: var(--muted);
-  font-size: 1.05rem;
-}
-.landing-cta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: .85rem 1.25rem;
-  margin-bottom: 2.5rem;
-}
-.landing-link {
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: .75rem;
-  text-underline-offset: 2px;
-}
-.landing-points {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: .65rem;
-  max-width: 34rem;
-  color: var(--ink);
-  font-size: .95rem;
-}
-.landing-points li {
-  padding-left: 1rem;
-  border-left: 2px solid var(--ink);
-}
-.landing-footer {
-  display: flex;
-  flex-wrap: wrap;
-  gap: .75rem 1.25rem;
-  padding: 1rem 1.5rem 1.4rem;
-  border-top: 1px solid var(--line);
-  color: var(--muted);
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: .7rem;
-}
-
 @media (max-width: 720px) {
   .console-header { flex-wrap: wrap; padding: .65rem 1rem; gap: .5rem 1rem; }
   .console-header nav {
@@ -1295,11 +1213,6 @@ body.terminal-open { overflow: hidden; }
   .policy-create-row { flex-direction: column; align-items: stretch; }
   .policy-create-row .btn { width: 100%; min-height: 2.75rem; }
   .console-workspace main { padding: 1.75rem 1rem 2rem; }
-  .landing-top { padding: .85rem 1rem; }
-  .landing-hero { width: calc(100% - 2rem); padding-top: 2.5rem; }
-  .landing-footer { padding: .85rem 1rem 1.2rem; }
-  .landing-cta .primary-action,
-  .landing-top .nav-button { min-height: 2.75rem; }
   .auth-form-wrap .primary-action { min-height: 2.75rem; }
   .system-message .btn { min-height: 2.75rem; }
   .btn, .primary-action, .choice-button { min-height: 2.75rem; }
