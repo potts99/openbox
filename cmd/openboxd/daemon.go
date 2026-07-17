@@ -32,6 +32,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/dnsproxy"
 	"github.com/openbox-dev/openbox/internal/domain"
 	"github.com/openbox-dev/openbox/internal/httpapi"
+	imagebuild "github.com/openbox-dev/openbox/internal/images/build"
 	"github.com/openbox-dev/openbox/internal/operations"
 	"github.com/openbox-dev/openbox/internal/persistence/sqlite"
 	piprofile "github.com/openbox-dev/openbox/internal/profiles/pi"
@@ -227,6 +228,10 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
+	imageBuildService, err := imagebuild.New(runtime, store, imagebuild.Options{})
+	if err != nil {
+		return fail(err)
+	}
 	piProfiles, err := piprofile.New(store, piprofile.Options{})
 	if err != nil {
 		return fail(err)
@@ -263,7 +268,7 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 		})
 	}
 	piApplier := piprofile.NewApplier(piProfiles, piprofile.NewFileGuestWriter(guestWrite, guestExec, piprofile.DefaultGuestHome))
-	worker, err := operations.NewWorker(store, recovery.Executor{Instances: service, Snapshots: snapshotService, Clones: cloneService}, operations.Config{WorkerID: "openboxd-local", Concurrency: config.WorkerConcurrency, Lease: config.Lease, Mode: mode})
+	worker, err := operations.NewWorker(store, recovery.Executor{Instances: service, Snapshots: snapshotService, Clones: cloneService, Images: imageBuildService}, operations.Config{WorkerID: "openboxd-local", Concurrency: config.WorkerConcurrency, Lease: config.Lease, Mode: mode})
 	if err != nil {
 		return fail(err)
 	}
@@ -330,6 +335,7 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 		Clones:            cloneService,
 		AuditEvents:       store,
 		Artifacts:         artifactService,
+		ImageBuilds:       imageBuildService,
 	})
 	if err != nil {
 		return fail(err)

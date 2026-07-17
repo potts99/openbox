@@ -184,6 +184,26 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ListImagesResponse" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/images/build:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { $ref: "#/components/parameters/IdempotencyKey" }
+    post:
+      operationId: buildImage
+      summary: Build the embedded Devbox image recipe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BuildImageRequest" }
+      responses:
+        "202":
+          description: Image build accepted.
+          headers: { X-OpenBox-API-Version: { $ref: "#/components/headers/APIVersion" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Operation" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/software:
     parameters:
       - { $ref: "#/components/parameters/APIVersion" }
@@ -1494,6 +1514,12 @@ components:
         next_attempt_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    BuildImageRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        architecture: { type: string, enum: [x86_64, aarch64] }
+        runtime: { type: string, enum: [container, virtual_machine] }
     PiProfile:
       type: object
       required: [id, name, version, settings_json, updated_at]

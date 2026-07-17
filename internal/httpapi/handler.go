@@ -28,6 +28,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/domain"
 	"github.com/openbox-dev/openbox/internal/httpapi/generated"
 	"github.com/openbox-dev/openbox/internal/images"
+	imagebuild "github.com/openbox-dev/openbox/internal/images/build"
 	pi "github.com/openbox-dev/openbox/internal/profiles/pi"
 	"github.com/openbox-dev/openbox/internal/routes"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
@@ -123,6 +124,8 @@ type Options struct {
 	// Artifacts serves owner-scoped instance artifact transfer. When nil, those
 	// routes return not_implemented.
 	Artifacts *artifacts.Service
+	// ImageBuilds submits durable Devbox recipe builds.
+	ImageBuilds *imagebuild.Service
 }
 
 type Handler struct {
@@ -150,6 +153,7 @@ type Handler struct {
 	clones             *clones.Service
 	auditEvents        AuditEvents
 	artifacts          *artifacts.Service
+	imageBuilds        *imagebuild.Service
 }
 
 func New(service Service, options Options) (*Handler, error) {
@@ -199,6 +203,7 @@ func New(service Service, options Options) (*Handler, error) {
 		clones:             options.Clones,
 		auditEvents:        options.AuditEvents,
 		artifacts:          options.Artifacts,
+		imageBuilds:        options.ImageBuilds,
 	}, nil
 }
 
@@ -282,6 +287,10 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 			return
 		}
 	case "images":
+		if len(segments) == 3 && segments[2] == "build" && h.requireMethod(response, request, requestID, http.MethodPost) {
+			h.buildImage(response, request, requestID)
+			return
+		}
 		if len(segments) == 2 && h.requireMethod(response, request, requestID, http.MethodGet) {
 			h.listImages(response, request, requestID)
 			return
@@ -512,6 +521,41 @@ func (h *Handler) listImages(response http.ResponseWriter, request *http.Request
 		items = append(items, mapImage(value))
 	}
 	h.writeJSON(response, http.StatusOK, generated.ListImagesResponse{Items: items})
+}
+
+func (h *Handler) buildImage(response http.ResponseWriter, request *http.Request, requestID string) {
+	if h.imageBuilds == nil {
+		h.writeError(response, requestID, http.StatusNotImplemented, string(domain.CodeNotImplemented), "images.build")
+		return
+	}
+	key := request.Header.Get(HeaderIdempotencyKey)
+	if key == "" || len(key) > 255 {
+		h.writeError(response, requestID, http.StatusBadRequest, string(domain.CodeInvalidArgument), HeaderIdempotencyKey)
+		return
+	}
+	var input generated.BuildImageRequest
+	if err := h.decodeJSON(response, request, &input); err != nil {
+		h.writeError(response, requestID, http.StatusBadRequest, string(domain.CodeInvalidArgument), "body")
+		return
+	}
+	architecture, runtime := "", ""
+	if input.Architecture != nil {
+		architecture = string(*input.Architecture)
+	}
+	if input.Runtime != nil {
+		runtime = string(*input.Runtime)
+		if runtime == "virtual_machine" {
+			runtime = "virtual-machine"
+		}
+	}
+	operation, err := h.imageBuilds.Submit(request.Context(), imagebuild.Input{
+		OwnerID: h.requestOwner(request), Architecture: architecture, Runtime: runtime, IdempotencyKey: key,
+	})
+	if err != nil {
+		h.writeServiceError(response, requestID, err)
+		return
+	}
+	h.writeJSON(response, http.StatusAccepted, mapOperation(operation))
 }
 
 func (h *Handler) listInstances(response http.ResponseWriter, request *http.Request, requestID string) {

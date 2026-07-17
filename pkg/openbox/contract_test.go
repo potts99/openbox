@@ -16,6 +16,7 @@ var supportedSDKMethods = map[string]string{
 	"Health":              "getHealth",
 	"Capabilities":        "getCapabilities",
 	"ListImages":          "listImages",
+	"BuildImage":          "buildImage",
 	"ListInstances":       "listInstances",
 	"GetInstance":         "getInstance",
 	"CreateInstance":      "createInstance",

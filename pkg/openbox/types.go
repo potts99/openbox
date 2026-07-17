@@ -167,6 +167,13 @@ type CreateInstanceRequest struct {
 	EgressProfileID    string    `json:"egress_profile_id,omitempty"`
 }
 
+// BuildImageRequest selects the only supported v1 image build: the embedded
+// Devbox recipe. Empty fields use the host's container architecture defaults.
+type BuildImageRequest struct {
+	Architecture string `json:"architecture,omitempty"`
+	Runtime      string `json:"runtime,omitempty"`
+}
+
 type Snapshot struct {
 	ID         string    `json:"id"`
 	InstanceID string    `json:"instance_id"`

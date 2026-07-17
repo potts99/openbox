@@ -22,6 +22,18 @@ const (
 	AllowlistResolutionStateResolved AllowlistResolutionState = "resolved"
 )
 
+// Defines values for BuildImageRequestArchitecture.
+const (
+	Aarch64 BuildImageRequestArchitecture = "aarch64"
+	X8664   BuildImageRequestArchitecture = "x86_64"
+)
+
+// Defines values for BuildImageRequestRuntime.
+const (
+	BuildImageRequestRuntimeContainer      BuildImageRequestRuntime = "container"
+	BuildImageRequestRuntimeVirtualMachine BuildImageRequestRuntime = "virtual_machine"
+)
+
 // Defines values for CreateEgressProfileRequestMode.
 const (
 	CreateEgressProfileRequestModeRestricted CreateEgressProfileRequestMode = "restricted"
@@ -52,9 +64,9 @@ const (
 
 // Defines values for DeriveInstanceResultStorageEfficiency.
 const (
-	Confirmed    DeriveInstanceResultStorageEfficiency = "confirmed"
-	NotSupported DeriveInstanceResultStorageEfficiency = "not_supported"
-	Unknown      DeriveInstanceResultStorageEfficiency = "unknown"
+	DeriveInstanceResultStorageEfficiencyConfirmed    DeriveInstanceResultStorageEfficiency = "confirmed"
+	DeriveInstanceResultStorageEfficiencyNotSupported DeriveInstanceResultStorageEfficiency = "not_supported"
+	DeriveInstanceResultStorageEfficiencyUnknown      DeriveInstanceResultStorageEfficiency = "unknown"
 )
 
 // Defines values for EgressProfileDnsPolicy.
@@ -220,6 +232,18 @@ type BootstrapStatus struct {
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	Required  bool       `json:"required"`
 }
+
+// BuildImageRequest defines model for BuildImageRequest.
+type BuildImageRequest struct {
+	Architecture *BuildImageRequestArchitecture `json:"architecture,omitempty"`
+	Runtime      *BuildImageRequestRuntime      `json:"runtime,omitempty"`
+}
+
+// BuildImageRequestArchitecture defines model for BuildImageRequest.Architecture.
+type BuildImageRequestArchitecture string
+
+// BuildImageRequestRuntime defines model for BuildImageRequest.Runtime.
+type BuildImageRequestRuntime string
 
 // Capabilities defines model for Capabilities.
 type Capabilities struct {
@@ -847,6 +871,13 @@ type ListImagesParams struct {
 	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
 }
 
+// BuildImageParams defines parameters for BuildImage.
+type BuildImageParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion    `json:"X-OpenBox-API-Version,omitempty"`
+	IdempotencyKey     IdempotencyKey `json:"Idempotency-Key"`
+}
+
 // ListInstancesParams defines parameters for ListInstances.
 type ListInstancesParams struct {
 	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
@@ -1279,6 +1310,9 @@ type RevokeTokenParams struct {
 
 // ConsumeBootstrapJSONRequestBody defines body for ConsumeBootstrap for application/json ContentType.
 type ConsumeBootstrapJSONRequestBody = BootstrapRequest
+
+// BuildImageJSONRequestBody defines body for BuildImage for application/json ContentType.
+type BuildImageJSONRequestBody = BuildImageRequest
 
 // CreateInstanceJSONRequestBody defines body for CreateInstance for application/json ContentType.
 type CreateInstanceJSONRequestBody = CreateInstanceRequest
