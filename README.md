@@ -35,7 +35,7 @@ openbox doctor
 openbox doctor --json
 ```
 
-Missing KVM is reported as unavailable rather than fatal because OpenBox supports container-only hosts. The daemon owns Incus socket configuration; the CLI never accesses Incus or SQLite directly. See [the runtime preflight guide](docs/runtime-preflight.md) for socket overrides, bootstrap safety, and integration testing.
+Missing KVM is reported as unavailable rather than fatal because OpenBox supports container-only hosts. The daemon owns Incus socket configuration; the CLI never accesses Incus or SQLite directly. See [the runtime preflight guide](docs/runtime-preflight.md) for socket overrides, bootstrap safety, and integration testing. New hosts should follow the [install guide](docs/operators/install.md) and [host matrix](docs/operators/host-matrix.md).
 
 See [the strong-isolation operator guide](docs/operators/strong-isolation.md) for VM selection, image requirements, readiness, and the opt-in KVM test. Sandbox create, exec, TTL, and expiry are covered in [the sandbox operator guide](docs/operators/sandbox.md) and [sandbox lifecycle](docs/api/sandbox-lifecycle.md).
 
