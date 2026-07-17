@@ -57,6 +57,11 @@ const (
 	Unknown      DeriveInstanceResultStorageEfficiency = "unknown"
 )
 
+// Defines values for EgressProfileDnsPolicy.
+const (
+	HostResolve EgressProfileDnsPolicy = "host_resolve"
+)
+
 // Defines values for EgressProfileMode.
 const (
 	EgressProfileModeRestricted EgressProfileMode = "restricted"
@@ -177,6 +182,19 @@ type AllowlistResolutionState string
 // AttachEgressProfileRequest defines model for AttachEgressProfileRequest.
 type AttachEgressProfileRequest struct {
 	EgressProfileId string `json:"egress_profile_id"`
+}
+
+// AuditEvent Immutable security audit record without payloads or secrets.
+type AuditEvent struct {
+	// Action Stable action vocabulary includes policy.apply, policy.apply_failed, policy.refresh, policy.refresh_failed, ssh.session, and terminal.session.
+	Action     string            `json:"action"`
+	Actor      string            `json:"actor"`
+	CreatedAt  time.Time         `json:"created_at"`
+	Id         string            `json:"id"`
+	Metadata   map[string]string `json:"metadata"`
+	Outcome    string            `json:"outcome"`
+	TargetId   string            `json:"target_id"`
+	TargetType string            `json:"target_type"`
 }
 
 // BootstrapRequest defines model for BootstrapRequest.
@@ -334,15 +352,21 @@ type EgressApplyError struct {
 
 // EgressProfile defines model for EgressProfile.
 type EgressProfile struct {
-	AllowedDestinations   []string          `json:"allowed_destinations"`
-	AttachedInstanceCount *int              `json:"attached_instance_count,omitempty"`
-	CreatedAt             time.Time         `json:"created_at"`
-	Id                    string            `json:"id"`
-	Mode                  EgressProfileMode `json:"mode"`
-	Name                  string            `json:"name"`
-	System                bool              `json:"system"`
-	UpdatedAt             time.Time         `json:"updated_at"`
+	AllowedDestinations   []string  `json:"allowed_destinations"`
+	AttachedInstanceCount *int      `json:"attached_instance_count,omitempty"`
+	CreatedAt             time.Time `json:"created_at"`
+
+	// DnsPolicy Host-side allowlist hostname resolution policy.
+	DnsPolicy EgressProfileDnsPolicy `json:"dns_policy"`
+	Id        string                 `json:"id"`
+	Mode      EgressProfileMode      `json:"mode"`
+	Name      string                 `json:"name"`
+	System    bool                   `json:"system"`
+	UpdatedAt time.Time              `json:"updated_at"`
 }
+
+// EgressProfileDnsPolicy Host-side allowlist hostname resolution policy.
+type EgressProfileDnsPolicy string
 
 // EgressProfileMode defines model for EgressProfile.Mode.
 type EgressProfileMode string
@@ -478,6 +502,11 @@ type InstanceSoftware struct {
 
 // InstanceSoftwareStatus defines model for InstanceSoftware.Status.
 type InstanceSoftwareStatus string
+
+// ListAuditEventsResponse defines model for ListAuditEventsResponse.
+type ListAuditEventsResponse struct {
+	Items []AuditEvent `json:"items"`
+}
 
 // ListEgressProfilesResponse defines model for ListEgressProfilesResponse.
 type ListEgressProfilesResponse struct {
@@ -734,6 +763,15 @@ type SnapshotID = string
 
 // Error defines model for Error.
 type Error = ErrorEnvelope
+
+// ListAuditEventsParams defines parameters for ListAuditEvents.
+type ListAuditEventsParams struct {
+	// Limit Maximum number of newest audit events to return.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
 
 // GetBootstrapStatusParams defines parameters for GetBootstrapStatus.
 type GetBootstrapStatusParams struct {

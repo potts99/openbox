@@ -75,8 +75,8 @@ func runNetworkProfiles(ctx context.Context, api *openbox.Client, args []string,
 		if jsonOutput {
 			return encodeJSON(stdout, stderr, profile)
 		}
-		fmt.Fprintf(stdout, "ID: %s\nName: %s\nMode: %s\nSystem: %v\nDestinations: %s\nAttached: %d\n",
-			profile.ID, profile.Name, profile.Mode, profile.System, strings.Join(profile.AllowedDestinations, ", "), profile.AttachedInstanceCount)
+		fmt.Fprintf(stdout, "ID: %s\nName: %s\nMode: %s\nDNS policy: %s\nSystem: %v\nDestinations: %s\nAttached: %d\n",
+			profile.ID, profile.Name, profile.Mode, profile.DNSPolicy, profile.System, strings.Join(profile.AllowedDestinations, ", "), profile.AttachedInstanceCount)
 		return 0
 	case "create":
 		return runNetworkProfileCreate(ctx, api, args[1:], jsonOutput, stdout, stderr)

@@ -67,6 +67,7 @@ function createApi(overrides: Partial<OpenBoxApi> = {}): OpenBoxApi {
     updateEgressProfile: vi.fn(),
     deleteEgressProfile: vi.fn(),
     attachEgressProfile: vi.fn(),
+    listAuditEvents: vi.fn().mockResolvedValue([]),
     setup: vi.fn(),
     login: vi.fn(),
     logout: vi.fn(),

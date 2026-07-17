@@ -91,6 +91,12 @@ func Evaluate(mode domain.EgressMode, dest DestinationClass) Decision {
 	}
 }
 
+// AllowsPublicInternet reports whether mode may attach a public-egress ACL.
+// Runtime NIC stacks must agree with Evaluate(mode, DestinationInternet).
+func AllowsPublicInternet(mode domain.EgressMode) bool {
+	return Evaluate(mode, DestinationInternet) == Allow
+}
+
 // ParseAllowedDestinations parses administrator allowlist entries into their
 // canonical IP address or masked CIDR forms. Hostname resolution is performed
 // outside the guest in a later task.

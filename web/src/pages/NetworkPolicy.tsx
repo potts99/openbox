@@ -323,12 +323,13 @@ export function NetworkPolicyPage({ api, onBack }: NetworkPolicyPageProps) {
                         rows={10}
                         value={destinationsText}
                         onChange={(event) => setDestinationsText(event.target.value)}
-                        placeholder={"api.example.com\n203.0.113.10\n10.0.0.0/8"}
+                        placeholder={"api.example.com\n203.0.113.10\n1.1.1.1/32"}
                         spellCheck={false}
                       />
                     </label>
                     <p className="policy-hint">
-                      One IP, CIDR, or exact hostname per line. Empty restricted profiles still block
+                      One public IP, public CIDR, or exact hostname per line. Restricted profiles reject
+                      private, bridge, and 0.0.0.0/0 destinations. Empty restricted profiles still block
                       arbitrary internet and peer traffic.
                     </p>
 

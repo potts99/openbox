@@ -47,6 +47,7 @@ type Service struct {
 	store      ProfileStore
 	applicator *Applicator
 	marker     InstanceMarker
+	auditor    PolicyAuditor
 	now        func() time.Time
 	newID      func() string
 }
@@ -69,6 +70,14 @@ func New(store ProfileStore, applicator *Applicator, options Options) (*Service,
 // SetInstanceMarker optionally records apply failures on instances during fan-out.
 func (s *Service) SetInstanceMarker(marker InstanceMarker) {
 	s.marker = marker
+}
+
+// SetAuditor optionally records redacted policy audit events for refresh paths.
+func (s *Service) SetAuditor(auditor PolicyAuditor) {
+	s.auditor = auditor
+	if s.applicator != nil {
+		s.applicator.SetAuditor(auditor)
+	}
 }
 
 func (s *Service) EnsureSeeds(ctx context.Context) error {

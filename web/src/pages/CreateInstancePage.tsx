@@ -6,6 +6,7 @@ import type {
   Capabilities,
   ConnectionInfo,
   CreateInstanceResult,
+  EgressProfile,
   ImageSummary,
   InstanceKind,
   IsolationRequest,
@@ -24,7 +25,14 @@ interface CreateInstancePageProps {
 type PageData =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; images: ImageSummary[]; keys: SSHKeySummary[]; catalog: SoftwarePackage[]; capabilities: Capabilities }
+  | {
+    status: "ready";
+    images: ImageSummary[];
+    keys: SSHKeySummary[];
+    catalog: SoftwarePackage[];
+    capabilities: Capabilities;
+    egressProfiles: EgressProfile[];
+  }
   | { status: "created"; result: CreateInstanceResult; connection: ConnectionInfo };
 
 interface KindDefaults {
@@ -112,6 +120,7 @@ export function CreateInstancePage({ api, onBack, onCreated }: CreateInstancePag
   const [memoryGib, setMemoryGib] = useState(8);
   const [diskGib, setDiskGib] = useState(20);
   const [lifetimeHours, setLifetimeHours] = useState(1);
+  const [egressProfileId, setEgressProfileId] = useState("");
   const [packages, setPackages] = useState<string[]>([]);
   const [keyChoice, setKeyChoice] = useState("");
   const [pastedKey, setPastedKey] = useState("");
@@ -120,14 +129,23 @@ export function CreateInstancePage({ api, onBack, onCreated }: CreateInstancePag
 
   useEffect(() => {
     let active = true;
-    void Promise.all([api.listImages(), api.listSSHKeys(), api.listSoftwareCatalog(), api.getCapabilities()])
-      .then(([images, keys, catalog, capabilities]) => {
+    void Promise.all([
+      api.listImages(),
+      api.listSSHKeys(),
+      api.listSoftwareCatalog(),
+      api.getCapabilities(),
+      api.listEgressProfiles(),
+    ])
+      .then(([images, keys, catalog, capabilities, egressProfiles]) => {
         if (!active) return;
-        setData({ status: "ready", images, keys, catalog, capabilities });
+        setData({ status: "ready", images, keys, catalog, capabilities, egressProfiles });
         const defaults = defaultsForKind("vps", capabilities);
         setIsolation(defaults.isolation);
         setImage(pickImage(images, defaults.preferredImage));
         setKeyChoice(keys[0]?.id ?? PASTE_KEY);
+        const defaultProfile = egressProfiles.find((profile) => profile.id === "egress-standard")
+          ?? egressProfiles[0];
+        setEgressProfileId(defaultProfile?.id ?? "");
       })
       .catch((reason: unknown) => {
         if (active) {
@@ -157,6 +175,10 @@ export function CreateInstancePage({ api, onBack, onCreated }: CreateInstancePag
     }
     if (data.status === "ready") {
       setImage(pickImage(data.images, defaults.preferredImage));
+      const preferredId = next === "sandbox" ? "egress-restricted" : "egress-standard";
+      const preferred = data.egressProfiles.find((profile) => profile.id === preferredId)
+        ?? data.egressProfiles[0];
+      setEgressProfileId(preferred?.id ?? "");
     } else {
       setImage(defaults.preferredImage);
     }
@@ -207,6 +229,7 @@ export function CreateInstancePage({ api, onBack, onCreated }: CreateInstancePag
         ownerPublicKey,
         packages,
         ...(kind === "sandbox" ? { lifetimeSeconds: Math.round(lifetimeHours * 3600) } : {}),
+        ...(egressProfileId ? { egressProfileId } : {}),
       });
       let connection: ConnectionInfo = { ssh: null };
       try {
@@ -351,6 +374,21 @@ export function CreateInstancePage({ api, onBack, onCreated }: CreateInstancePag
                 >
                   <option value="strong">strong (VM)</option>
                   <option value="container">container</option>
+                </select>
+              </label>
+
+              <label>
+                <span>Egress profile</span>
+                <select
+                  name="egress-profile"
+                  value={egressProfileId}
+                  onChange={(event) => setEgressProfileId(event.target.value)}
+                >
+                  {data.egressProfiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.name} ({profile.mode})
+                    </option>
+                  ))}
                 </select>
               </label>
 

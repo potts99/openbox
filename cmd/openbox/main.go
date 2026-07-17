@@ -45,6 +45,7 @@ Commands:
   clone INSTANCE NAME      Clone a live instance
   route                  Manage HTTPS routes
   network                Manage egress profiles and attach policy
+  audit list             List policy and security audit events
   forward INSTANCE PORT  SSH-tunnel an instance port to localhost
   operation watch ID     Stream operation progress
   ssh-config print       Print optional OpenSSH aliases
@@ -119,6 +120,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runRoute(ctx, api, rest, options.json, stdout, stderr)
 	case "network":
 		return runNetwork(ctx, api, rest, options.json, stdout, stderr)
+	case "audit":
+		return runAudit(ctx, api, rest, options.json, stdout, stderr)
 	case "sandbox":
 		return runSandbox(ctx, api, rest, options.json, stdout, stderr)
 	case "snapshot":

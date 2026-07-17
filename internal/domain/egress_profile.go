@@ -18,6 +18,11 @@ const (
 	DNSPolicyHostResolve = "host_resolve"
 )
 
+var (
+	allowlistCGNATPrefix  = netip.MustParsePrefix("100.64.0.0/10")
+	allowlistBridgePrefix = netip.MustParsePrefix("10.42.0.0/24")
+)
+
 // DefaultEgressProfileID returns the seeded system profile for a kind.
 func DefaultEgressProfileID(kind InstanceKind) EgressProfileID {
 	if kind == KindSandbox {
@@ -42,10 +47,65 @@ func (p EgressProfile) Validate() error {
 	if p.DNSPolicy != DNSPolicyHostResolve {
 		return newError(CodeInvalidArgument, "dns_policy")
 	}
-	if _, _, err := ParseAllowlistEntries(p.AllowedDestinationsJSON); err != nil {
+	literals, _, err := ParseAllowlistEntries(p.AllowedDestinationsJSON)
+	if err != nil {
 		return newError(CodeInvalidArgument, "allowed_destinations")
 	}
+	if p.Mode == EgressRestricted {
+		for _, literal := range literals {
+			if !SafeRestrictedAllowlistLiteral(literal) {
+				return newError(CodeInvalidArgument, "allowed_destinations")
+			}
+		}
+	}
 	return nil
+}
+
+// SafeRestrictedAllowlistLiteral reports whether an IP/CIDR may appear on a
+// restricted allowlist. Public internet and private/bridge bypasses are rejected.
+func SafeRestrictedAllowlistLiteral(literal string) bool {
+	if address, err := netip.ParseAddr(literal); err == nil {
+		return !unsafeAllowlistAddr(address)
+	}
+	prefix, err := netip.ParsePrefix(literal)
+	if err != nil {
+		return false
+	}
+	if prefix.Bits() == 0 {
+		return false
+	}
+	if unsafeAllowlistAddr(prefix.Addr()) {
+		return false
+	}
+	for _, blocked := range []netip.Prefix{allowlistCGNATPrefix, allowlistBridgePrefix} {
+		if prefix.Overlaps(blocked) {
+			return false
+		}
+	}
+	// Reject any prefix that overlaps RFC1918 / loopback / link-local by
+	// testing containment of common private networks.
+	for _, privateNet := range []string{
+		"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+		"127.0.0.0/8", "169.254.0.0/16", "::1/128", "fc00::/7", "fe80::/10",
+	} {
+		if prefix.Overlaps(netip.MustParsePrefix(privateNet)) {
+			return false
+		}
+	}
+	return true
+}
+
+func unsafeAllowlistAddr(address netip.Addr) bool {
+	address = address.Unmap()
+	if !address.IsValid() || address.IsLoopback() || address.IsPrivate() ||
+		address.IsLinkLocalUnicast() || address.IsMulticast() || address.IsUnspecified() {
+		return true
+	}
+	if address.Is4() && (allowlistCGNATPrefix.Contains(address) || allowlistBridgePrefix.Contains(address) ||
+		address == netip.MustParseAddr("255.255.255.255")) {
+		return true
+	}
+	return false
 }
 
 // ParseAllowlistEntries splits a JSON array into IP/CIDR literals and exact hostnames.

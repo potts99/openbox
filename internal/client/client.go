@@ -361,6 +361,23 @@ func (c *Client) DeleteEgressProfile(ctx context.Context, id string) error {
 	return err
 }
 
+func (c *Client) ListAuditEvents(ctx context.Context, limit int) ([]AuditEvent, error) {
+	path := "/v1/audit-events"
+	if limit > 0 {
+		path = fmt.Sprintf("/v1/audit-events?limit=%d", limit)
+	}
+	var response struct {
+		Items []AuditEvent `json:"items"`
+	}
+	if _, err := c.do(ctx, http.MethodGet, path, "", nil, &response); err != nil {
+		return nil, err
+	}
+	if response.Items == nil {
+		return []AuditEvent{}, nil
+	}
+	return response.Items, nil
+}
+
 func (c *Client) AttachEgressProfile(ctx context.Context, instanceID, profileID string) (Instance, error) {
 	var instance Instance
 	_, err := c.do(ctx, http.MethodPut, resourcePath("/v1/instances", instanceID, "network", "egress-profile"), "", map[string]any{

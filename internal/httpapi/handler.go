@@ -116,6 +116,9 @@ type Options struct {
 	Snapshots *snapshots.Service
 	// Clones serves live-instance clone. When nil, clone returns not_implemented.
 	Clones *clones.Service
+	// AuditEvents serves owner-scoped immutable audit listings. When nil,
+	// GET /v1/audit-events returns not_implemented.
+	AuditEvents AuditEvents
 }
 
 type Handler struct {
@@ -141,6 +144,7 @@ type Handler struct {
 	sshPublicPort      int
 	snapshots          *snapshots.Service
 	clones             *clones.Service
+	auditEvents        AuditEvents
 }
 
 func New(service Service, options Options) (*Handler, error) {
@@ -188,6 +192,7 @@ func New(service Service, options Options) (*Handler, error) {
 		sshPublicPort:      options.SSHPublicPort,
 		snapshots:          options.Snapshots,
 		clones:             options.Clones,
+		auditEvents:        options.AuditEvents,
 	}, nil
 }
 
@@ -312,6 +317,11 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		}
 	case "snapshots":
 		if h.routeSnapshots(response, request, requestID, segments[2:]) {
+			return
+		}
+	case "audit-events":
+		if len(segments) == 2 && h.requireMethod(response, request, requestID, http.MethodGet) {
+			h.listAuditEvents(response, request, requestID)
 			return
 		}
 	}
