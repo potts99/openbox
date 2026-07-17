@@ -1026,6 +1026,59 @@ paths:
             text/event-stream:
               schema: { type: string }
         default: { $ref: "#/components/responses/Error" }
+  /v1/webhook-subscriptions:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+    get:
+      operationId: listWebhookSubscriptions
+      responses:
+        "200": { description: Owner webhook subscriptions without signing secrets., content: { application/json: { schema: { $ref: "#/components/schemas/ListWebhookSubscriptionsResponse" } } } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createWebhookSubscription
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CreateWebhookSubscriptionRequest" } } }
+      responses:
+        "201": { description: Subscription and signing secret returned once., content: { application/json: { schema: { $ref: "#/components/schemas/CreatedWebhookSubscription" } } } }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/webhook-subscriptions/{subscription_id}:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+      - { name: subscription_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+    get:
+      operationId: getWebhookSubscription
+      responses:
+        "200": { description: Subscription metadata without signing secret., content: { application/json: { schema: { $ref: "#/components/schemas/WebhookSubscription" } } } }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateWebhookSubscription
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/UpdateWebhookSubscriptionRequest" } } }
+      responses:
+        "200": { description: Updated subscription; a rotated secret is returned once., content: { application/json: { schema: { $ref: "#/components/schemas/CreatedWebhookSubscription" } } } }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteWebhookSubscription
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Subscription deleted and pending deliveries canceled. }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/webhook-deliveries:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+    get:
+      operationId: listWebhookDeliveries
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [pending, delivered, failed, dead, canceled] } }
+        - { name: subscription_id, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 100 } }
+      responses:
+        "200": { description: Owner webhook delivery attempts, newest first., content: { application/json: { schema: { $ref: "#/components/schemas/ListWebhookDeliveriesResponse" } } } }
+        default: { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     cookieAuth:
@@ -1312,6 +1365,75 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/AuditEvent" }
+    WebhookSubscription:
+      type: object
+      required: [id, url, description, events, enabled, created_at, updated_at]
+      properties:
+        id: { type: string }
+        url: { type: string, format: uri, maxLength: 2048 }
+        description: { type: string, maxLength: 200 }
+        events:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [operation.terminal, instance.expired, instance.deleted] }
+        enabled: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreatedWebhookSubscription:
+      allOf:
+        - { $ref: "#/components/schemas/WebhookSubscription" }
+        - type: object
+          required: [secret]
+          properties:
+            secret: { type: string, readOnly: true }
+    CreateWebhookSubscriptionRequest:
+      type: object
+      additionalProperties: false
+      required: [url, events]
+      properties:
+        url: { type: string, format: uri, maxLength: 2048 }
+        description: { type: string, maxLength: 200 }
+        events:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [operation.terminal, instance.expired, instance.deleted] }
+        enabled: { type: boolean, default: true }
+    UpdateWebhookSubscriptionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        url: { type: string, format: uri, maxLength: 2048 }
+        description: { type: string, maxLength: 200 }
+        events:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [operation.terminal, instance.expired, instance.deleted] }
+        enabled: { type: boolean }
+        rotate_secret: { type: boolean }
+    ListWebhookSubscriptionsResponse:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/WebhookSubscription" } }
+    WebhookDelivery:
+      type: object
+      required: [id, event_id, subscription_id, status, attempt, created_at, updated_at]
+      properties:
+        id: { type: string }
+        event_id: { type: string }
+        subscription_id: { type: string }
+        status: { type: string, enum: [pending, delivered, failed, dead, canceled] }
+        attempt: { type: integer, minimum: 1 }
+        http_status: { type: integer }
+        error_class: { type: string, enum: [timeout, connection, http_error] }
+        next_attempt_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ListWebhookDeliveriesResponse:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/WebhookDelivery" } }
     ListEgressProfilesResponse:
       type: object
       required: [items]

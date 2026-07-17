@@ -4,10 +4,13 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -212,6 +215,69 @@ func TestAPIErrorIsActionable(t *testing.T) {
 	_, stderr, code := runCLI(t, server.URL, "inspect", "missing")
 	if code != 1 || !strings.Contains(stderr, "instance not found") || !strings.Contains(stderr, "req-1") {
 		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+}
+
+func TestBackupCreateAndVerify(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "state", "openbox.db")
+	if err := os.MkdirAll(filepath.Join(root, "state", "ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "state", "caddy"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec("CREATE TABLE fixture (value TEXT); INSERT INTO fixture VALUES ('preserved')"); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for name, contents := range map[string]string{
+		"gateway_host":    "gateway private key",
+		"instance_client": "instance private key",
+		"known_instances": "instance.example ssh-ed25519 key",
+	} {
+		if err := os.WriteFile(filepath.Join(root, "state", "ssh", name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "state", "caddy", "routes.caddyfile"), []byte("route.example { reverse_proxy 127.0.0.1:8080 }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(root, "openboxd.env")
+	if err := os.WriteFile(configPath, []byte("OPENBOX_STORAGE_POOL=openbox\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backupPath := filepath.Join(root, "backup")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"backup", "create", backupPath,
+		"--database", databasePath,
+		"--state-dir", filepath.Join(root, "state"),
+		"--config", configPath,
+	}, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), "files: 6") || stderr.Len() != 0 {
+		t.Fatalf("create exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{"backup", "verify", backupPath}, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), "backup verified") || stderr.Len() != 0 {
+		t.Fatalf("verify exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if err := os.WriteFile(filepath.Join(backupPath, "ssh", "gateway_host"), []byte("changed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{"backup", "verify", backupPath}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "integrity check failed") {
+		t.Fatalf("corrupt verify exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
 

@@ -57,9 +57,23 @@ const (
 	CreateTokenRequestScopesOwner CreateTokenRequestScopes = "owner"
 )
 
+// Defines values for CreateWebhookSubscriptionRequestEvents.
+const (
+	CreateWebhookSubscriptionRequestEventsInstanceDeleted   CreateWebhookSubscriptionRequestEvents = "instance.deleted"
+	CreateWebhookSubscriptionRequestEventsInstanceExpired   CreateWebhookSubscriptionRequestEvents = "instance.expired"
+	CreateWebhookSubscriptionRequestEventsOperationTerminal CreateWebhookSubscriptionRequestEvents = "operation.terminal"
+)
+
 // Defines values for CreatedTokenScopes.
 const (
 	CreatedTokenScopesOwner CreatedTokenScopes = "owner"
+)
+
+// Defines values for CreatedWebhookSubscriptionEvents.
+const (
+	CreatedWebhookSubscriptionEventsInstanceDeleted   CreatedWebhookSubscriptionEvents = "instance.deleted"
+	CreatedWebhookSubscriptionEventsInstanceExpired   CreatedWebhookSubscriptionEvents = "instance.expired"
+	CreatedWebhookSubscriptionEventsOperationTerminal CreatedWebhookSubscriptionEvents = "operation.terminal"
 )
 
 // Defines values for DeriveInstanceResultStorageEfficiency.
@@ -175,9 +189,48 @@ const (
 	UpdateEgressProfileRequestModeStandard   UpdateEgressProfileRequestMode = "standard"
 )
 
+// Defines values for UpdateWebhookSubscriptionRequestEvents.
+const (
+	UpdateWebhookSubscriptionRequestEventsInstanceDeleted   UpdateWebhookSubscriptionRequestEvents = "instance.deleted"
+	UpdateWebhookSubscriptionRequestEventsInstanceExpired   UpdateWebhookSubscriptionRequestEvents = "instance.expired"
+	UpdateWebhookSubscriptionRequestEventsOperationTerminal UpdateWebhookSubscriptionRequestEvents = "operation.terminal"
+)
+
+// Defines values for WebhookDeliveryErrorClass.
+const (
+	WebhookDeliveryErrorClassConnection WebhookDeliveryErrorClass = "connection"
+	WebhookDeliveryErrorClassHttpError  WebhookDeliveryErrorClass = "http_error"
+	WebhookDeliveryErrorClassTimeout    WebhookDeliveryErrorClass = "timeout"
+)
+
+// Defines values for WebhookDeliveryStatus.
+const (
+	WebhookDeliveryStatusCanceled  WebhookDeliveryStatus = "canceled"
+	WebhookDeliveryStatusDead      WebhookDeliveryStatus = "dead"
+	WebhookDeliveryStatusDelivered WebhookDeliveryStatus = "delivered"
+	WebhookDeliveryStatusFailed    WebhookDeliveryStatus = "failed"
+	WebhookDeliveryStatusPending   WebhookDeliveryStatus = "pending"
+)
+
+// Defines values for WebhookSubscriptionEvents.
+const (
+	WebhookSubscriptionEventsInstanceDeleted   WebhookSubscriptionEvents = "instance.deleted"
+	WebhookSubscriptionEventsInstanceExpired   WebhookSubscriptionEvents = "instance.expired"
+	WebhookSubscriptionEventsOperationTerminal WebhookSubscriptionEvents = "operation.terminal"
+)
+
 // Defines values for APIVersion.
 const (
 	APIVersionV1 APIVersion = "v1"
+)
+
+// Defines values for ListWebhookDeliveriesParamsStatus.
+const (
+	ListWebhookDeliveriesParamsStatusCanceled  ListWebhookDeliveriesParamsStatus = "canceled"
+	ListWebhookDeliveriesParamsStatusDead      ListWebhookDeliveriesParamsStatus = "dead"
+	ListWebhookDeliveriesParamsStatusDelivered ListWebhookDeliveriesParamsStatus = "delivered"
+	ListWebhookDeliveriesParamsStatusFailed    ListWebhookDeliveriesParamsStatus = "failed"
+	ListWebhookDeliveriesParamsStatusPending   ListWebhookDeliveriesParamsStatus = "pending"
 )
 
 // AllowlistResolution Hostname resolution state. Resolved DNS addresses are not exposed.
@@ -350,6 +403,17 @@ type CreateTokenRequest struct {
 // CreateTokenRequestScopes defines model for CreateTokenRequest.Scopes.
 type CreateTokenRequestScopes string
 
+// CreateWebhookSubscriptionRequest defines model for CreateWebhookSubscriptionRequest.
+type CreateWebhookSubscriptionRequest struct {
+	Description *string                                  `json:"description,omitempty"`
+	Enabled     *bool                                    `json:"enabled,omitempty"`
+	Events      []CreateWebhookSubscriptionRequestEvents `json:"events"`
+	Url         string                                   `json:"url"`
+}
+
+// CreateWebhookSubscriptionRequestEvents defines model for CreateWebhookSubscriptionRequest.Events.
+type CreateWebhookSubscriptionRequestEvents string
+
 // CreatedToken defines model for CreatedToken.
 type CreatedToken struct {
 	CreatedAt  time.Time            `json:"created_at"`
@@ -364,6 +428,21 @@ type CreatedToken struct {
 
 // CreatedTokenScopes defines model for CreatedToken.Scopes.
 type CreatedTokenScopes string
+
+// CreatedWebhookSubscription defines model for CreatedWebhookSubscription.
+type CreatedWebhookSubscription struct {
+	CreatedAt   time.Time                          `json:"created_at"`
+	Description string                             `json:"description"`
+	Enabled     bool                               `json:"enabled"`
+	Events      []CreatedWebhookSubscriptionEvents `json:"events"`
+	Id          string                             `json:"id"`
+	Secret      *string                            `json:"secret,omitempty"`
+	UpdatedAt   time.Time                          `json:"updated_at"`
+	Url         string                             `json:"url"`
+}
+
+// CreatedWebhookSubscriptionEvents defines model for CreatedWebhookSubscription.Events.
+type CreatedWebhookSubscriptionEvents string
 
 // DeriveInstanceResult defines model for DeriveInstanceResult.
 type DeriveInstanceResult struct {
@@ -594,6 +673,16 @@ type ListTokensResponse struct {
 	Items []TokenMetadata `json:"items"`
 }
 
+// ListWebhookDeliveriesResponse defines model for ListWebhookDeliveriesResponse.
+type ListWebhookDeliveriesResponse struct {
+	Items []WebhookDelivery `json:"items"`
+}
+
+// ListWebhookSubscriptionsResponse defines model for ListWebhookSubscriptionsResponse.
+type ListWebhookSubscriptionsResponse struct {
+	Items []WebhookSubscription `json:"items"`
+}
+
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
 	Password *string `json:"password,omitempty"`
@@ -780,6 +869,52 @@ type UpdateRouteRequest struct {
 type UpdateSSHKeyRequest struct {
 	Label string `json:"label"`
 }
+
+// UpdateWebhookSubscriptionRequest defines model for UpdateWebhookSubscriptionRequest.
+type UpdateWebhookSubscriptionRequest struct {
+	Description  *string                                   `json:"description,omitempty"`
+	Enabled      *bool                                     `json:"enabled,omitempty"`
+	Events       *[]UpdateWebhookSubscriptionRequestEvents `json:"events,omitempty"`
+	RotateSecret *bool                                     `json:"rotate_secret,omitempty"`
+	Url          *string                                   `json:"url,omitempty"`
+}
+
+// UpdateWebhookSubscriptionRequestEvents defines model for UpdateWebhookSubscriptionRequest.Events.
+type UpdateWebhookSubscriptionRequestEvents string
+
+// WebhookDelivery defines model for WebhookDelivery.
+type WebhookDelivery struct {
+	Attempt        int                        `json:"attempt"`
+	CreatedAt      time.Time                  `json:"created_at"`
+	ErrorClass     *WebhookDeliveryErrorClass `json:"error_class,omitempty"`
+	EventId        string                     `json:"event_id"`
+	HttpStatus     *int                       `json:"http_status,omitempty"`
+	Id             string                     `json:"id"`
+	NextAttemptAt  *time.Time                 `json:"next_attempt_at"`
+	Status         WebhookDeliveryStatus      `json:"status"`
+	SubscriptionId string                     `json:"subscription_id"`
+	UpdatedAt      time.Time                  `json:"updated_at"`
+}
+
+// WebhookDeliveryErrorClass defines model for WebhookDelivery.ErrorClass.
+type WebhookDeliveryErrorClass string
+
+// WebhookDeliveryStatus defines model for WebhookDelivery.Status.
+type WebhookDeliveryStatus string
+
+// WebhookSubscription defines model for WebhookSubscription.
+type WebhookSubscription struct {
+	CreatedAt   time.Time                   `json:"created_at"`
+	Description string                      `json:"description"`
+	Enabled     bool                        `json:"enabled"`
+	Events      []WebhookSubscriptionEvents `json:"events"`
+	Id          string                      `json:"id"`
+	UpdatedAt   time.Time                   `json:"updated_at"`
+	Url         string                      `json:"url"`
+}
+
+// WebhookSubscriptionEvents defines model for WebhookSubscription.Events.
+type WebhookSubscriptionEvents string
 
 // APIVersion defines model for APIVersion.
 type APIVersion string
@@ -1308,6 +1443,58 @@ type RevokeTokenParams struct {
 	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
 }
 
+// ListWebhookDeliveriesParams defines parameters for ListWebhookDeliveries.
+type ListWebhookDeliveriesParams struct {
+	Status         *ListWebhookDeliveriesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	SubscriptionId *string                            `form:"subscription_id,omitempty" json:"subscription_id,omitempty"`
+	Limit          *int                               `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// ListWebhookDeliveriesParamsStatus defines parameters for ListWebhookDeliveries.
+type ListWebhookDeliveriesParamsStatus string
+
+// ListWebhookSubscriptionsParams defines parameters for ListWebhookSubscriptions.
+type ListWebhookSubscriptionsParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// CreateWebhookSubscriptionParams defines parameters for CreateWebhookSubscription.
+type CreateWebhookSubscriptionParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// DeleteWebhookSubscriptionParams defines parameters for DeleteWebhookSubscription.
+type DeleteWebhookSubscriptionParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// GetWebhookSubscriptionParams defines parameters for GetWebhookSubscription.
+type GetWebhookSubscriptionParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// UpdateWebhookSubscriptionParams defines parameters for UpdateWebhookSubscription.
+type UpdateWebhookSubscriptionParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
 // ConsumeBootstrapJSONRequestBody defines body for ConsumeBootstrap for application/json ContentType.
 type ConsumeBootstrapJSONRequestBody = BootstrapRequest
 
@@ -1364,3 +1551,9 @@ type UpdateSSHKeyJSONRequestBody = UpdateSSHKeyRequest
 
 // CreateTokenJSONRequestBody defines body for CreateToken for application/json ContentType.
 type CreateTokenJSONRequestBody = CreateTokenRequest
+
+// CreateWebhookSubscriptionJSONRequestBody defines body for CreateWebhookSubscription for application/json ContentType.
+type CreateWebhookSubscriptionJSONRequestBody = CreateWebhookSubscriptionRequest
+
+// UpdateWebhookSubscriptionJSONRequestBody defines body for UpdateWebhookSubscription for application/json ContentType.
+type UpdateWebhookSubscriptionJSONRequestBody = UpdateWebhookSubscriptionRequest

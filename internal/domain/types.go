@@ -6,18 +6,20 @@ package domain
 import "time"
 
 type (
-	OwnerID             string
-	SSHKeyID            string
-	InstanceID          string
-	ImageID             string
-	SnapshotID          string
-	RouteID             string
-	PiProfileID         string
-	CredentialProfileID string
-	GatewayGrantID      string
-	EgressProfileID     string
-	OperationID         string
-	AuditEventID        string
+	OwnerID               string
+	SSHKeyID              string
+	InstanceID            string
+	ImageID               string
+	SnapshotID            string
+	RouteID               string
+	PiProfileID           string
+	CredentialProfileID   string
+	GatewayGrantID        string
+	EgressProfileID       string
+	OperationID           string
+	AuditEventID          string
+	WebhookSubscriptionID string
+	WebhookDeliveryID     string
 )
 
 type Owner struct {
@@ -299,4 +301,45 @@ type AuditEvent struct {
 	Actor, Action, TargetType, TargetID, Outcome string
 	MetadataJSON                                 []byte
 	CreatedAt                                    time.Time
+}
+
+// WebhookSubscription is an owner-scoped outbound event target. Secret is
+// retained only inside the daemon and is never returned after creation.
+type WebhookSubscription struct {
+	ID          WebhookSubscriptionID
+	OwnerID     OwnerID
+	URL         string
+	Description string
+	Secret      string
+	Events      []string
+	Enabled     bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// WebhookDelivery tracks one signed HTTP delivery attempt.
+type WebhookDelivery struct {
+	ID             WebhookDeliveryID
+	EventID        string
+	SubscriptionID WebhookSubscriptionID
+	Status         string
+	Attempt        int
+	HTTPStatus     int
+	ErrorClass     string
+	NextAttemptAt  *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+// WebhookDispatch contains the persisted event and active subscription signing
+// material required by the daemon-only delivery worker.
+type WebhookDispatch struct {
+	Delivery       WebhookDelivery
+	EventID        string
+	SubscriptionID WebhookSubscriptionID
+	Attempt        int
+	URL            string
+	Secret         string
+	Enabled        bool
+	Payload        []byte
 }
