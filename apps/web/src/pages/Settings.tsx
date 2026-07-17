@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { CreatedToken, OpenBoxApi, Session, TokenSummary } from "../api/client";
 
@@ -16,7 +16,7 @@ type TokenData =
   | { status: "ready"; tokens: TokenSummary[] };
 
 function formatWhen(value?: string): string {
-  if (!value) return "—";
+  if (!value) return "Never";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString(undefined, {
@@ -28,6 +28,21 @@ function formatWhen(value?: string): string {
   });
 }
 
+function relativeWhen(value?: string): string {
+  if (!value) return "Never used";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const deltaMs = Date.now() - date.getTime();
+  if (deltaMs < 60_000) return "Just now";
+  const minutes = Math.floor(deltaMs / 60_000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return formatWhen(value);
+}
+
 function activeTokens(tokens: TokenSummary[]): TokenSummary[] {
   return tokens.filter((token) => !token.revokedAt);
 }
@@ -37,9 +52,12 @@ export function SettingsPage({ api, session, onBack }: SettingsPageProps) {
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [listError, setListError] = useState("");
   const [created, setCreated] = useState<CreatedToken | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [revokingId, setRevokingId] = useState("");
+  const secretRef = useRef<HTMLInputElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
 
   async function loadTokens() {
     const tokens = await api.listTokens();
@@ -63,14 +81,22 @@ export function SettingsPage({ api, session, onBack }: SettingsPageProps) {
     return () => { active = false; };
   }, [api]);
 
+  useEffect(() => {
+    if (!created) return;
+    secretRef.current?.focus();
+    secretRef.current?.select();
+  }, [created]);
+
   async function createToken(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) {
       setCreateError("Give this token a name.");
+      nameRef.current?.focus();
       return;
     }
     setCreateError("");
+    setListError("");
     setCreating(true);
     setCopyState("idle");
     try {
@@ -92,22 +118,31 @@ export function SettingsPage({ api, session, onBack }: SettingsPageProps) {
       setCopyState("copied");
     } catch {
       setCopyState("failed");
+      secretRef.current?.select();
     }
   }
 
-  async function revokeToken(id: string) {
+  async function revokeToken(id: string, tokenName: string) {
+    if (!window.confirm(`Revoke “${tokenName}”? CLI clients using it will stop working.`)) {
+      return;
+    }
     setRevokingId(id);
-    setCreateError("");
+    setListError("");
     try {
       await api.revokeToken(id);
-      if (created?.id === id) setCreated(null);
+      if (created?.id === id) {
+        setCreated(null);
+        setCopyState("idle");
+      }
       await loadTokens();
     } catch (reason) {
-      setCreateError(reason instanceof Error ? reason.message : "Could not revoke token");
+      setListError(reason instanceof Error ? reason.message : "Could not revoke token");
     } finally {
       setRevokingId("");
     }
   }
+
+  const tokens = data.status === "ready" ? data.tokens : [];
 
   return (
     <div className="console-layout">
@@ -127,103 +162,131 @@ export function SettingsPage({ api, session, onBack }: SettingsPageProps) {
                 ← Instances
               </button>
               <h1>Settings</h1>
-              <p className="data-message">
-                Signed in as <strong>{session.username}</strong>
-                {session.role === "admin" ? " (admin)" : ""}.
-              </p>
             </div>
           </div>
+
+          <section className="settings-account" aria-label="Account">
+            <div>
+              <span className="settings-kicker">Signed in</span>
+              <p className="settings-account-name">{session.username}</p>
+            </div>
+            <span className="settings-role">{session.role === "admin" ? "Admin" : "Member"}</span>
+          </section>
 
           <section className="settings-section" aria-labelledby="api-tokens-heading">
             <div className="ledger-header">
               <h2 id="api-tokens-heading">API tokens</h2>
+              {data.status === "ready" ? <span>{tokens.length}</span> : null}
             </div>
             <div className="settings-body">
-              <p className="data-message">
-                Tokens let the <code>openbox</code> CLI talk to this host. Create one, copy it once,
-                then export <code>OPENBOX_TOKEN</code>.
+              <p className="settings-lede">
+                For the <code>openbox</code> CLI on your machine. Create a token, copy it once,
+                then run <code>export OPENBOX_TOKEN=…</code> before <code>openbox doctor</code>.
               </p>
-
-              <form className="create-instance-form settings-token-form" onSubmit={(event) => { void createToken(event); }}>
-                <label>
-                  Token name
-                  <input
-                    name="name"
-                    type="text"
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    placeholder="laptop"
-                    maxLength={100}
-                    autoComplete="off"
-                    spellCheck={false}
-                    required
-                  />
-                </label>
-                <div className="create-actions">
-                  <button className="primary-action" type="submit" disabled={creating}>
-                    {creating ? "Creating…" : "Create token"}
-                  </button>
-                </div>
-              </form>
-
-              {createError ? <p className="form-error" role="alert">{createError}</p> : null}
 
               {created ? (
                 <div className="token-secret-panel" role="status">
-                  <h3>Copy this token now</h3>
-                  <p>It will not be shown again.</p>
-                  <code className="token-secret">{created.secret}</code>
+                  <div className="token-secret-header">
+                    <div>
+                      <h3>Token ready — copy it now</h3>
+                      <p>
+                        <strong>{created.name}</strong> · shown only once
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="nav-button"
+                      onClick={() => {
+                        setCreated(null);
+                        setCopyState("idle");
+                      }}
+                    >
+                      Done
+                    </button>
+                  </div>
+                  <label className="token-secret-field">
+                    <span className="sr-only">Token secret</span>
+                    <input
+                      ref={secretRef}
+                      className="token-secret"
+                      type="text"
+                      readOnly
+                      value={created.secret}
+                      onFocus={(event) => event.currentTarget.select()}
+                    />
+                  </label>
                   <div className="token-secret-actions">
                     <button className="primary-action" type="button" onClick={() => { void copySecret(); }}>
                       {copyState === "copied" ? "Copied" : "Copy token"}
                     </button>
                     {copyState === "failed" ? (
-                      <span className="data-message is-error">Copy failed — select the token and copy manually.</span>
-                    ) : null}
+                      <span className="data-message is-error">Copy failed — select the field and copy manually.</span>
+                    ) : (
+                      <span className="token-secret-hint">Paste into your shell as <code>OPENBOX_TOKEN</code>.</span>
+                    )}
                   </div>
-                  <pre className="token-export-hint">{`export OPENBOX_TOKEN='${created.secret}'\nopenbox doctor`}</pre>
                 </div>
-              ) : null}
+              ) : (
+                <form
+                  className="settings-token-form"
+                  onSubmit={(event) => { void createToken(event); }}
+                >
+                  <label className="settings-token-name">
+                    <span>Name</span>
+                    <input
+                      ref={nameRef}
+                      name="name"
+                      type="text"
+                      value={name}
+                      onChange={(event) => setName(event.target.value)}
+                      placeholder="e.g. laptop"
+                      maxLength={100}
+                      autoComplete="off"
+                      spellCheck={false}
+                      required
+                    />
+                  </label>
+                  <button className="primary-action" type="submit" disabled={creating}>
+                    {creating ? "Creating…" : "Create token"}
+                  </button>
+                </form>
+              )}
+
+              {createError ? <p className="form-error" role="alert">{createError}</p> : null}
+              {listError ? <p className="form-error" role="alert">{listError}</p> : null}
 
               {data.status === "loading" ? <p className="data-message" role="status">Loading…</p> : null}
               {data.status === "error" ? <p className="data-message is-error" role="alert">{data.message}</p> : null}
 
               {data.status === "ready" ? (
-                data.tokens.length === 0 ? (
-                  <p className="data-message">No active tokens yet.</p>
-                ) : (
-                  <div className="table-wrap">
-                    <table>
-                      <caption className="sr-only">API tokens</caption>
-                      <thead>
-                        <tr>
-                          <th scope="col">Name</th>
-                          <th scope="col">Created</th>
-                          <th scope="col">Last used</th>
-                          <th scope="col"><span className="sr-only">Actions</span></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {data.tokens.map((token) => (
-                          <tr key={token.id}>
-                            <th scope="row">{token.name}</th>
-                            <td>{formatWhen(token.createdAt)}</td>
-                            <td>{formatWhen(token.lastUsedAt)}</td>
-                            <td>
-                              <button
-                                className="nav-button"
-                                type="button"
-                                disabled={revokingId === token.id}
-                                onClick={() => { void revokeToken(token.id); }}
-                              >
-                                {revokingId === token.id ? "Revoking…" : "Revoke"}
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                tokens.length === 0 ? (
+                  <div className="settings-empty">
+                    <p>No tokens yet. Create one to use the CLI.</p>
                   </div>
+                ) : (
+                  <ul className="token-list">
+                    {tokens.map((token) => (
+                      <li key={token.id} className="token-row">
+                        <div className="token-row-main">
+                          <strong>{token.name}</strong>
+                          <span title={formatWhen(token.createdAt)}>
+                            Created {formatWhen(token.createdAt)}
+                          </span>
+                          <span title={formatWhen(token.lastUsedAt)}>
+                            {relativeWhen(token.lastUsedAt)}
+                          </span>
+                        </div>
+                        <button
+                          className="link-button token-revoke"
+                          type="button"
+                          disabled={revokingId === token.id}
+                          onClick={() => { void revokeToken(token.id, token.name); }}
+                        >
+                          {revokingId === token.id ? "Revoking…" : "Revoke"}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
                 )
               ) : null}
             </div>

@@ -47,19 +47,21 @@ describe("SettingsPage", () => {
     render(<SettingsPage api={api} session={session} onBack={() => undefined} />);
 
     expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
-    expect(screen.getByText(/Signed in as/)).toHaveTextContent("potts");
+    expect(screen.getByText("potts")).toBeInTheDocument();
+    expect(screen.getByText("Admin")).toBeInTheDocument();
 
-    await user.type(screen.getByLabelText("Token name"), "laptop");
+    await user.type(screen.getByLabelText("Name"), "laptop");
     await user.click(screen.getByRole("button", { name: "Create token" }));
 
     await waitFor(() => expect(createToken).toHaveBeenCalledWith({ name: "laptop" }));
-    expect(await screen.findByText("Copy this token now")).toBeInTheDocument();
-    expect(screen.getByText("obx_secret-value")).toBeInTheDocument();
-    expect(screen.getByText("laptop")).toBeInTheDocument();
+    expect(await screen.findByText("Token ready — copy it now")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("obx_secret-value")).toBeInTheDocument();
+    expect(screen.getAllByText("laptop").length).toBeGreaterThan(0);
   });
 
-  it("revokes a listed token", async () => {
+  it("revokes a listed token after confirm", async () => {
     const user = userEvent.setup();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
     const revokeToken = vi.fn().mockResolvedValue(undefined);
     const listTokens = vi.fn()
       .mockResolvedValueOnce([{
@@ -77,6 +79,6 @@ describe("SettingsPage", () => {
     await user.click(screen.getByRole("button", { name: "Revoke" }));
 
     await waitFor(() => expect(revokeToken).toHaveBeenCalledWith("tok_1"));
-    expect(await screen.findByText("No active tokens yet.")).toBeInTheDocument();
+    expect(await screen.findByText("No tokens yet. Create one to use the CLI.")).toBeInTheDocument();
   });
 });
