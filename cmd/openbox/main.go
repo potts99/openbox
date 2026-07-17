@@ -20,7 +20,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	openbox "github.com/openbox-dev/openbox/internal/client"
+	openbox "github.com/openbox-dev/openbox/pkg/openbox"
 	"github.com/openbox-dev/openbox/internal/version"
 )
 

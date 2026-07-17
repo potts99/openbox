@@ -7,11 +7,11 @@ build:
 	$(PNPM) --dir web build
 
 format:
-	gofmt -w cmd internal
+	gofmt -w cmd internal pkg
 	$(PNPM) --dir web exec prettier --write .
 
 format-check:
-	test -z "$$(gofmt -l cmd internal)"
+	test -z "$$(gofmt -l cmd internal pkg)"
 
 lint:
 	go vet ./...

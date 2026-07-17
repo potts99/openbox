@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"text/tabwriter"
 
-	openbox "github.com/openbox-dev/openbox/internal/client"
+	openbox "github.com/openbox-dev/openbox/pkg/openbox"
 )
 
 const auditUsage = `usage: openbox audit list [--limit N]

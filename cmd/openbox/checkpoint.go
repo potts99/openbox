@@ -9,7 +9,7 @@ import (
 	"io"
 	"text/tabwriter"
 
-	openbox "github.com/openbox-dev/openbox/internal/client"
+	openbox "github.com/openbox-dev/openbox/pkg/openbox"
 )
 
 func runSnapshot(ctx context.Context, api *openbox.Client, args []string, jsonOutput bool, stdout, stderr io.Writer) int {

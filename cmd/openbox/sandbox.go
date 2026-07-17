@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	openbox "github.com/openbox-dev/openbox/internal/client"
+	openbox "github.com/openbox-dev/openbox/pkg/openbox"
 	"github.com/openbox-dev/openbox/internal/domain"
 	"github.com/openbox-dev/openbox/internal/execstream"
 	"github.com/openbox-dev/openbox/internal/sandbox"
