@@ -33,6 +33,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/routes"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 	"github.com/openbox-dev/openbox/internal/sandbox"
+	sandboxpool "github.com/openbox-dev/openbox/internal/sandbox/pool"
 	"github.com/openbox-dev/openbox/internal/snapshots"
 	"github.com/openbox-dev/openbox/internal/software"
 	"github.com/openbox-dev/openbox/internal/terminal"
@@ -77,6 +78,22 @@ type Service interface {
 	ListSoftware(context.Context, domain.OwnerID, domain.InstanceID) ([]domain.InstanceSoftware, error)
 	InstallSoftware(context.Context, domain.OwnerID, domain.InstanceID, string) (domain.InstanceSoftware, error)
 	AttachEgressProfile(context.Context, domain.OwnerID, domain.InstanceID, domain.EgressProfileID) (domain.Instance, error)
+}
+
+// DegradedMode reports whether transient control-plane work has degraded.
+type DegradedMode interface {
+	Degraded() bool
+}
+
+// OperationCounter reports global durable-operation counts for operator health.
+type OperationCounter interface {
+	OperationCounts(context.Context) (pending, failed int, err error)
+}
+
+// PoolStatusSource reports the optional sandbox warm-pool state.
+type PoolStatusSource interface {
+	Enabled() bool
+	Stats(context.Context) (sandboxpool.Stats, error)
 }
 
 type Options struct {
@@ -131,6 +148,12 @@ type Options struct {
 	Webhooks *webhooks.Service
 	// WebhookDeliveries lists durable outbound delivery attempts.
 	WebhookDeliveries WebhookDeliveries
+	// Mode exposes the operation/reconciliation degraded signal on health.
+	Mode DegradedMode
+	// Operations supplies durable operation counts for operator health.
+	Operations OperationCounter
+	// SandboxPool supplies an optional warm-pool summary for operator health.
+	SandboxPool PoolStatusSource
 }
 
 type Handler struct {
@@ -161,6 +184,9 @@ type Handler struct {
 	imageBuilds        *imagebuild.Service
 	webhooks           *webhooks.Service
 	webhookDeliveries  WebhookDeliveries
+	mode               DegradedMode
+	operations         OperationCounter
+	sandboxPool        PoolStatusSource
 }
 
 func New(service Service, options Options) (*Handler, error) {
@@ -213,6 +239,9 @@ func New(service Service, options Options) (*Handler, error) {
 		imageBuilds:        options.ImageBuilds,
 		webhooks:           options.Webhooks,
 		webhookDeliveries:  options.WebhookDeliveries,
+		mode:               options.Mode,
+		operations:         options.Operations,
+		sandboxPool:        options.SandboxPool,
 	}, nil
 }
 
@@ -255,6 +284,10 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 				status, code = http.StatusForbidden, "forbidden"
 			}
 			h.writeError(response, requestID, status, code, "authorization")
+			return
+		}
+		if err := h.authorizeScope(request, segments); err != nil {
+			h.writeError(response, requestID, http.StatusForbidden, "forbidden", "authorization")
 			return
 		}
 	}
@@ -502,7 +535,28 @@ func (h *Handler) health(response http.ResponseWriter, request *http.Request, re
 		h.writeError(response, requestID, http.StatusServiceUnavailable, "unavailable", "")
 		return
 	}
-	h.writeJSON(response, http.StatusOK, generated.Health{Status: generated.Ok, ApiVersion: generated.HealthApiVersionV1, ServerVersion: version.Version})
+	result := generated.Health{Status: generated.Ok, ApiVersion: generated.HealthApiVersionV1, ServerVersion: version.Version}
+	if h.mode != nil {
+		result.Degraded = pointer(h.mode.Degraded())
+	}
+	if capabilities, err := h.service.Capabilities(request.Context()); err == nil {
+		result.Kvm = pointer(capabilities.KVM)
+	}
+	if h.operations != nil {
+		if pending, failed, err := h.operations.OperationCounts(request.Context()); err == nil {
+			result.Operations = &generated.HealthOperationSummary{Pending: pending, Failed: failed}
+		}
+	}
+	if h.sandboxPool != nil {
+		if stats, err := h.sandboxPool.Stats(request.Context()); err == nil {
+			result.Pool = &generated.HealthPoolSummary{
+				Enabled: h.sandboxPool.Enabled(), GoldenReady: stats.GoldenReady,
+				Stopped: stats.Stopped, Running: stats.Running, Claiming: stats.Claiming,
+				CowStorage: stats.CoWStorage, Substrate: string(stats.Substrate),
+			}
+		}
+	}
+	h.writeJSON(response, http.StatusOK, result)
 }
 
 func (h *Handler) capabilities(response http.ResponseWriter, request *http.Request, requestID string) {

@@ -16,9 +16,30 @@ const (
 )
 
 type Health struct {
-	Status        string `json:"status"`
-	APIVersion    string `json:"api_version"`
-	ServerVersion string `json:"server_version"`
+	Status        string                  `json:"status"`
+	APIVersion    string                  `json:"api_version"`
+	ServerVersion string                  `json:"server_version"`
+	Degraded      *bool                   `json:"degraded,omitempty"`
+	KVM           *bool                   `json:"kvm,omitempty"`
+	Operations    *HealthOperationSummary `json:"operations,omitempty"`
+	Pool          *HealthPoolSummary      `json:"pool,omitempty"`
+}
+
+// HealthOperationSummary reports durable operations requiring operator attention.
+type HealthOperationSummary struct {
+	Pending int `json:"pending"`
+	Failed  int `json:"failed"`
+}
+
+// HealthPoolSummary reports the optional sandbox warm-pool state.
+type HealthPoolSummary struct {
+	Enabled     bool   `json:"enabled"`
+	GoldenReady bool   `json:"golden_ready"`
+	Stopped     int    `json:"stopped"`
+	Running     int    `json:"running"`
+	Claiming    int    `json:"claiming"`
+	CoWStorage  bool   `json:"cow_storage"`
+	Substrate   string `json:"substrate"`
 }
 
 func (h Health) validate() error {

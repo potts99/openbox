@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+
 # Runtime preflight and managed bootstrap
 
 OpenBox talks directly to the local Incus REST API over a Unix socket. It never invokes the `incus` command-line client and does not accept a remote URL for this connection.
@@ -12,7 +14,7 @@ openbox doctor --json
 OPENBOX_SERVER=https://openbox.example OPENBOX_TOKEN="$OPENBOX_TOKEN" openbox doctor
 ```
 
-Doctor checks the daemon version and architecture, required Linux namespaces, cgroups, supported storage drivers, host networking tools, accessible `/dev/kvm`, and Incus virtual-machine support. A host without KVM remains usable for standard container isolation; strong isolation is clearly reported as unavailable.
+Doctor checks the daemon version and architecture, required Linux namespaces, cgroups, supported storage drivers, host networking tools, accessible `/dev/kvm`, and Incus virtual-machine support. A host without KVM remains usable for standard container isolation; strong isolation is clearly reported as unavailable. Use the [host matrix and capacity guide](operators/host-matrix.md) to choose a supported host and size its warm-pool budget.
 
 Fatal results prevent safe container operation. Warnings identify optional or repairable host tooling. JSON output uses stable status strings for automation.
 

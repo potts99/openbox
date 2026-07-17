@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Linux release artifacts
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+      - name: Build Linux binaries
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            for command in openbox openboxd; do
+              GOOS=linux GOARCH="${arch}" CGO_ENABLED=0 go build -trimpath \
+                -ldflags="-s -w -X github.com/openbox-dev/openbox/internal/version.Version=${VERSION}" \
+                -o "dist/${command}_${VERSION}_linux_${arch}" "./cmd/${command}"
+            done
+          done
+          (
+            cd dist
+            sha256sum openbox_* openboxd_* > SHA256SUMS
+          )
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${VERSION}" --title "${VERSION}" --generate-notes dist/*

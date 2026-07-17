@@ -689,7 +689,11 @@ func (c *Client) do(ctx context.Context, method, requestPath, idempotencyKey str
 
 func (c *Client) request(ctx context.Context, method, requestPath, idempotencyKey string, body []byte) (*http.Request, error) {
 	target := *c.baseURL
-	target.Path = path.Join(strings.TrimSuffix(c.baseURL.Path, "/"), requestPath)
+	pathOnly, query, _ := strings.Cut(requestPath, "?")
+	target.Path = path.Join(strings.TrimSuffix(c.baseURL.Path, "/"), pathOnly)
+	if query != "" {
+		target.RawQuery = query
+	}
 	request, err := http.NewRequestWithContext(ctx, method, target.String(), bytes.NewReader(body))
 	if err != nil {
 		return nil, err

@@ -57,7 +57,7 @@ Commands:
 
 Global options:
   --server URL            OpenBox API URL (default http://127.0.0.1:8443)
-  --token TOKEN           Owner API token (or OPENBOX_TOKEN)
+  --token TOKEN           API token, including scoped tokens (or OPENBOX_TOKEN)
   --timeout DURATION      Request timeout (default 30s)
   --json                  Machine-readable output
   --version               Print the CLI version

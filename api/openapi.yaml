@@ -1090,6 +1090,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: OpenBox token
+      description: Bearer tokens are revocable and may be limited to one or more documented token scopes. The legacy owner scope is a self-hosted compatibility super-scope.
   headers:
     APIVersion:
       description: API contract version used for this response.
@@ -1200,7 +1201,9 @@ components:
       properties:
         id: { type: string }
         name: { type: string }
-        scopes: { type: array, items: { type: string, enum: [owner] } }
+        scopes:
+          type: array
+          items: { $ref: "#/components/schemas/TokenScope" }
         created_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
         revoked_at: { type: string, format: date-time }
@@ -1217,8 +1220,27 @@ components:
       required: [name]
       properties:
         name: { type: string, minLength: 1, maxLength: 100 }
-        scopes: { type: array, items: { type: string, enum: [owner] } }
+        scopes:
+          type: array
+          items: { $ref: "#/components/schemas/TokenScope" }
         expires_at: { type: string, format: date-time }
+    TokenScope:
+      type: string
+      enum:
+        - owner
+        - instances:read
+        - instances:write
+        - operations:read
+        - audit:read
+        - webhooks:read
+        - webhooks:write
+        - routes:read
+        - routes:write
+        - profiles:read
+        - profiles:write
+        - artifacts:read
+        - artifacts:write
+      description: The owner scope preserves full self-hosted owner access. Instances covers instance lifecycle, images, snapshots, terminal and exec; operations is read-only; profiles covers Pi and egress profiles. Non-owner scopes are least-privilege bearer capabilities and do not grant token, SSH-key, or session management.
     ListTokensResponse:
       type: object
       required: [items]
@@ -1255,6 +1277,39 @@ components:
         status: { type: string, enum: [ok] }
         api_version: { type: string, enum: [v1] }
         server_version: { type: string }
+        degraded:
+          type: boolean
+          description: True when a transient operation or reconciliation failure has degraded the control plane.
+        kvm:
+          type: boolean
+          description: Whether the daemon can use KVM-backed virtual machines.
+        operations:
+          $ref: "#/components/schemas/HealthOperationSummary"
+        pool:
+          $ref: "#/components/schemas/HealthPoolSummary"
+    HealthOperationSummary:
+      type: object
+      required: [pending, failed]
+      properties:
+        pending:
+          type: integer
+          minimum: 0
+          description: Durable operations currently in the pending state.
+        failed:
+          type: integer
+          minimum: 0
+          description: Durable operations in the failed state.
+    HealthPoolSummary:
+      type: object
+      required: [enabled, golden_ready, stopped, running, claiming, cow_storage, substrate]
+      properties:
+        enabled: { type: boolean }
+        golden_ready: { type: boolean }
+        stopped: { type: integer, minimum: 0 }
+        running: { type: integer, minimum: 0 }
+        claiming: { type: integer, minimum: 0 }
+        cow_storage: { type: boolean }
+        substrate: { type: string }
     SSHEndpoint:
       type: object
       required: [host, port]

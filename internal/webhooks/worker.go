@@ -37,7 +37,10 @@ func NewWorker(repo DeliveryRepository, httpClient *http.Client) (*Worker, error
 		return nil, errors.New("webhook delivery repository is required")
 	}
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 10 * time.Second}
+		httpClient = &http.Client{
+			Timeout:       10 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		}
 	}
 	return &Worker{repo: repo, httpClient: httpClient, workerID: "openboxd-webhooks", now: time.Now}, nil
 }
