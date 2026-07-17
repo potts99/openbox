@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package client provides the versioned OpenBox HTTP API client used by the CLI.
-package client
+// Package openbox provides the versioned OpenBox HTTP API client used by the CLI.
+package openbox
 
 import (
 	"encoding/json"
@@ -56,6 +56,17 @@ func (c Capabilities) validate() error {
 		return fmt.Errorf("capabilities: unknown vm_availability %q", c.VMAvailability)
 	}
 	return nil
+}
+
+type Image struct {
+	ID            string    `json:"id"`
+	Alias         string    `json:"alias"`
+	Source        string    `json:"source"`
+	Digest        string    `json:"digest"`
+	Architecture  string    `json:"architecture"`
+	Compatibility string    `json:"compatibility"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type Resources struct {

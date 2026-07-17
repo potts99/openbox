@@ -9,7 +9,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	openbox "github.com/openbox-dev/openbox/internal/client"
+	openbox "github.com/openbox-dev/openbox/pkg/openbox"
 )
 
 const networkUsage = `usage: openbox network COMMAND

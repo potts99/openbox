@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	openbox "github.com/openbox-dev/openbox/internal/client"
+	openbox "github.com/openbox-dev/openbox/pkg/openbox"
 )
 
 func TestNetworkProfilesListJSON(t *testing.T) {

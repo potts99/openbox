@@ -10,7 +10,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	openbox "github.com/openbox-dev/openbox/internal/client"
+	openbox "github.com/openbox-dev/openbox/pkg/openbox"
 )
 
 const routeUsage = `usage: openbox route COMMAND

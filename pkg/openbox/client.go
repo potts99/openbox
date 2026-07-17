@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package client
+package openbox
 
 import (
 	"bytes"
@@ -108,6 +108,17 @@ func (c *Client) Capabilities(ctx context.Context) (Capabilities, error) {
 		err = result.validate()
 	}
 	return result, err
+}
+
+func (c *Client) ListImages(ctx context.Context) ([]Image, error) {
+	var envelope struct {
+		Items []Image `json:"items"`
+	}
+	_, err := c.do(ctx, http.MethodGet, "/v1/images", "", nil, &envelope)
+	if err != nil {
+		return nil, err
+	}
+	return envelope.Items, nil
 }
 
 func (c *Client) ListInstances(ctx context.Context) ([]Instance, error) {
@@ -260,6 +271,22 @@ func (c *Client) ExecInstance(ctx context.Context, id string, request ExecInstan
 		return nil, decodeAPIError(response)
 	}
 	return response.Body, nil
+}
+
+func (c *Client) ListOperations(ctx context.Context) ([]Operation, error) {
+	var envelope struct {
+		Items []Operation `json:"items"`
+	}
+	_, err := c.do(ctx, http.MethodGet, "/v1/operations", "", nil, &envelope)
+	if err != nil {
+		return nil, err
+	}
+	for _, operation := range envelope.Items {
+		if err := operation.validate(); err != nil {
+			return nil, err
+		}
+	}
+	return envelope.Items, nil
 }
 
 func (c *Client) CancelOperation(ctx context.Context, id string) (Operation, error) {

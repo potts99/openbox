@@ -14,7 +14,7 @@ import (
 
 	"github.com/openbox-dev/openbox/internal/app/instances"
 	"github.com/openbox-dev/openbox/internal/app/recovery"
-	openboxclient "github.com/openbox-dev/openbox/internal/client"
+	openboxclient "github.com/openbox-dev/openbox/pkg/openbox"
 	"github.com/openbox-dev/openbox/internal/domain"
 	"github.com/openbox-dev/openbox/internal/httpapi"
 	"github.com/openbox-dev/openbox/internal/operations"

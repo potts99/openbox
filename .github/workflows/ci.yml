@@ -23,7 +23,7 @@ jobs:
           cache: true
       - run: go test ./...
       - run: go vet ./...
-      - run: test -z "$(gofmt -l cmd internal)"
+      - run: test -z "$(gofmt -l cmd internal pkg)"
       - run: go build ./cmd/openbox ./cmd/openboxd
 
   frontend:
