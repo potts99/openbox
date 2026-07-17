@@ -238,6 +238,70 @@ func TestLoginFailuresAreGenericRateLimitedAndRecover(t *testing.T) {
 	}
 }
 
+func TestAdminCreatesMemberWhoseLoginKeepsOrganizationOwnerID(t *testing.T) {
+	h, manager, bootstrap := newAuthHandler(t)
+	admin, cookie, err := manager.Bootstrap(context.Background(), "loopback", bootstrap, "a sufficiently long password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := httptest.NewRequest(http.MethodPost, "/v1/users", strings.NewReader(`{"username":"alice","display_name":"Alice","password":"another sufficiently long password"}`))
+	create.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: cookie})
+	create.Header.Set(auth.CSRFHeader, admin.CSRFToken)
+	created := httptest.NewRecorder()
+	h.ServeHTTP(created, create)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create user status=%d body=%s", created.Code, created.Body.String())
+	}
+	var user auth.User
+	if err := json.Unmarshal(created.Body.Bytes(), &user); err != nil {
+		t.Fatal(err)
+	}
+	if user.Username != "alice" || user.Role != "member" {
+		t.Fatalf("created user=%+v", user)
+	}
+
+	list := httptest.NewRequest(http.MethodGet, "/v1/users", nil)
+	list.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: cookie})
+	listed := httptest.NewRecorder()
+	h.ServeHTTP(listed, list)
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"username":"alice"`) {
+		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body.String())
+	}
+
+	login := httptest.NewRequest(http.MethodPost, "/v1/sessions", strings.NewReader(`{"username":"alice","password":"another sufficiently long password"}`))
+	login.RemoteAddr = "127.0.0.1:4000"
+	loggedIn := httptest.NewRecorder()
+	h.ServeHTTP(loggedIn, login)
+	if loggedIn.Code != http.StatusCreated {
+		t.Fatalf("member login status=%d body=%s", loggedIn.Code, loggedIn.Body.String())
+	}
+	var session auth.Session
+	if err := json.Unmarshal(loggedIn.Body.Bytes(), &session); err != nil {
+		t.Fatal(err)
+	}
+	if session.OwnerID != admin.OwnerID || session.UserID != user.ID || session.Role != "member" {
+		t.Fatalf("member session=%+v admin=%+v user=%+v", session, admin, user)
+	}
+
+	memberCookie := loggedIn.Result().Cookies()[0].Value
+	memberCreate := httptest.NewRequest(http.MethodPost, "/v1/users", strings.NewReader(`{"username":"mallory","password":"yet another long password"}`))
+	memberCreate.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: memberCookie})
+	memberCreate.Header.Set(auth.CSRFHeader, session.CSRFToken)
+	forbidden := httptest.NewRecorder()
+	h.ServeHTTP(forbidden, memberCreate)
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("member create status=%d body=%s", forbidden.Code, forbidden.Body.String())
+	}
+	memberToken := httptest.NewRequest(http.MethodPost, "/v1/tokens", strings.NewReader(`{"name":"escalation"}`))
+	memberToken.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: memberCookie})
+	memberToken.Header.Set(auth.CSRFHeader, session.CSRFToken)
+	forbidden = httptest.NewRecorder()
+	h.ServeHTTP(forbidden, memberToken)
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("member token creation status=%d body=%s", forbidden.Code, forbidden.Body.String())
+	}
+}
+
 func newAuthHandler(t *testing.T) (*Handler, *auth.Manager, string) {
 	now := time.Now().UTC()
 	return newAuthHandlerWithClock(t, &now)

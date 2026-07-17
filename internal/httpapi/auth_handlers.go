@@ -18,6 +18,8 @@ type principalKey struct{}
 
 type requestPrincipal struct {
 	ownerID domain.OwnerID
+	userID  string
+	role    string
 	scopes  map[string]struct{}
 	bearer  bool
 }
@@ -51,7 +53,7 @@ func (h *Handler) authenticate(r *http.Request) (*http.Request, error) {
 		for _, scope := range principal.Scopes {
 			scopes[scope] = struct{}{}
 		}
-		return r.WithContext(context.WithValue(r.Context(), principalKey{}, requestPrincipal{ownerID: principal.OwnerID, scopes: scopes, bearer: true})), nil
+		return r.WithContext(context.WithValue(r.Context(), principalKey{}, requestPrincipal{ownerID: principal.OwnerID, userID: principal.UserID, role: principal.Role, scopes: scopes, bearer: true})), nil
 	}
 	cookie, err := r.Cookie(auth.SessionCookie)
 	if err != nil {
@@ -60,11 +62,11 @@ func (h *Handler) authenticate(r *http.Request) (*http.Request, error) {
 	// Cookie-authenticated WebSocket handshakes are state-changing: require CSRF
 	// even though the handshake uses GET.
 	mutation := (r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions) || isWebSocketHandshake(r)
-	owner, err := h.auth.AuthenticateSession(r.Context(), cookie.Value, sessionCSRFToken(r), mutation)
+	principal, err := h.auth.AuthenticateSessionPrincipal(r.Context(), cookie.Value, sessionCSRFToken(r), mutation)
 	if err != nil {
 		return r, err
 	}
-	return r.WithContext(context.WithValue(r.Context(), principalKey{}, requestPrincipal{ownerID: owner})), nil
+	return r.WithContext(context.WithValue(r.Context(), principalKey{}, requestPrincipal{ownerID: principal.OwnerID, userID: principal.UserID, role: principal.Role})), nil
 }
 
 func (h *Handler) requestOwner(r *http.Request) domain.OwnerID {
@@ -136,7 +138,7 @@ func requiredScope(segments []string, method string) string {
 		return readWrite(auth.ScopeWebhooksRead, auth.ScopeWebhooksWrite)
 	case "webhook-deliveries":
 		return auth.ScopeWebhooksRead
-	case "tokens", "ssh-keys", "session":
+	case "tokens", "ssh-keys", "session", "users":
 		return ""
 	default:
 		return ""
@@ -193,13 +195,14 @@ func (h *Handler) routeSessions(w http.ResponseWriter, r *http.Request, requestI
 		return true
 	}
 	var input struct {
+		Username string `json:"username"`
 		Password string `json:"password"`
 	}
 	if h.decodeJSON(w, r, &input) != nil {
 		h.writeError(w, requestID, http.StatusBadRequest, string(domain.CodeInvalidArgument), "body")
 		return true
 	}
-	session, secret, err := h.auth.Login(r.Context(), h.clientAddress(r), input.Password)
+	session, secret, err := h.auth.Login(r.Context(), h.clientAddress(r), input.Username, input.Password)
 	if err != nil {
 		h.writeAuthError(w, requestID, err)
 		return true
@@ -244,6 +247,10 @@ func (h *Handler) routeTokens(w http.ResponseWriter, r *http.Request, requestID 
 	if h.auth == nil {
 		return false
 	}
+	if !h.canAdministerOrganization(r) {
+		h.writeError(w, requestID, http.StatusForbidden, "forbidden", "authorization")
+		return true
+	}
 	owner := h.requestOwner(r)
 	if len(rest) == 0 {
 		switch r.Method {
@@ -284,6 +291,55 @@ func (h *Handler) routeTokens(w http.ResponseWriter, r *http.Request, requestID 
 		return true
 	}
 	return false
+}
+func (h *Handler) routeUsers(w http.ResponseWriter, r *http.Request, requestID string, rest []string) bool {
+	if h.auth == nil || len(rest) != 0 {
+		return false
+	}
+	if !h.canAdministerOrganization(r) {
+		h.writeError(w, requestID, http.StatusForbidden, "forbidden", "authorization")
+		return true
+	}
+	switch r.Method {
+	case http.MethodGet:
+		users, err := h.auth.ListUsers(r.Context(), h.requestOwner(r))
+		if err != nil {
+			h.writeServiceError(w, requestID, err)
+			return true
+		}
+		h.writeJSON(w, http.StatusOK, map[string]any{"items": users})
+	case http.MethodPost:
+		var input struct {
+			Username    string `json:"username"`
+			DisplayName string `json:"display_name"`
+			Password    string `json:"password"`
+		}
+		if h.decodeJSON(w, r, &input) != nil {
+			h.writeError(w, requestID, http.StatusBadRequest, string(domain.CodeInvalidArgument), "body")
+			return true
+		}
+		user, err := h.auth.AddUser(r.Context(), h.requestOwner(r), input.Username, input.DisplayName, input.Password)
+		if err != nil {
+			h.writeError(w, requestID, http.StatusBadRequest, string(domain.CodeInvalidArgument), "user")
+			return true
+		}
+		h.writeJSON(w, http.StatusCreated, user)
+	default:
+		h.methodNotAllowed(w, requestID, http.MethodGet, http.MethodPost)
+	}
+	return true
+}
+
+func (h *Handler) canAdministerOrganization(r *http.Request) bool {
+	principal, ok := r.Context().Value(principalKey{}).(requestPrincipal)
+	if !ok {
+		return false
+	}
+	if principal.bearer {
+		_, owner := principal.scopes[auth.ScopeOwner]
+		return owner
+	}
+	return principal.role == "admin"
 }
 func (h *Handler) routeSSHKeys(w http.ResponseWriter, r *http.Request, requestID string, rest []string) bool {
 	if h.auth == nil {

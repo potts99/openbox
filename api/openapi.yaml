@@ -81,6 +81,23 @@ paths:
       responses:
         "204": { description: Session revoked. }
         default: { $ref: "#/components/responses/Error" }
+  /v1/users:
+    parameters:
+      - { $ref: "#/components/parameters/APIVersion" }
+    get:
+      operationId: listUsers
+      responses:
+        "200": { description: Users with a membership in the current organization., content: { application/json: { schema: { $ref: "#/components/schemas/ListUsersResponse" } } } }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createUser
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CreateUserRequest" } } }
+      responses:
+        "201": { description: Member user created in the current organization., content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        default: { $ref: "#/components/responses/Error" }
   /v1/tokens:
     parameters:
       - { $ref: "#/components/parameters/APIVersion" }
@@ -1187,14 +1204,39 @@ components:
       additionalProperties: false
       required: [password]
       properties:
+        username: { type: string, minLength: 1, maxLength: 100 }
         password: { type: string, minLength: 1, maxLength: 1024, writeOnly: true }
     Session:
       type: object
-      required: [owner_id, expires_at, csrf_token]
+      required: [owner_id, user_id, username, role, expires_at, csrf_token]
       properties:
         owner_id: { type: string }
+        user_id: { type: string }
+        username: { type: string }
+        role: { type: string, enum: [admin, member] }
         expires_at: { type: string, format: date-time }
         csrf_token: { type: string, readOnly: true }
+    User:
+      type: object
+      required: [id, username, display_name, role, created_at]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        display_name: { type: string }
+        role: { type: string, enum: [admin, member] }
+        created_at: { type: string, format: date-time }
+    CreateUserRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 1, maxLength: 100 }
+        display_name: { type: string, maxLength: 100 }
+        password: { type: string, minLength: 12, maxLength: 1024, writeOnly: true }
+    ListUsersResponse:
+      type: object
+      required: [items]
+      properties: { items: { type: array, items: { $ref: "#/components/schemas/User" } } }
     TokenMetadata:
       type: object
       required: [id, name, scopes, created_at]

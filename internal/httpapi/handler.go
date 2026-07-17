@@ -310,6 +310,10 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		if h.routeSession(response, request, requestID, segments[2:]) {
 			return
 		}
+	case "users":
+		if h.routeUsers(response, request, requestID, segments[2:]) {
+			return
+		}
 	case "tokens":
 		if h.routeTokens(response, request, requestID, segments[2:]) {
 			return

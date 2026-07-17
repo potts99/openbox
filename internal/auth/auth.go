@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package auth implements OpenBox's single-owner authentication boundary.
+// Package auth implements OpenBox's organization-scoped authentication boundary.
 package auth
 
 import (
@@ -59,8 +59,22 @@ type BootstrapStatus struct {
 }
 type Session struct {
 	OwnerID   domain.OwnerID `json:"owner_id"`
+	UserID    string         `json:"user_id"`
+	Username  string         `json:"username"`
+	Role      string         `json:"role"`
 	ExpiresAt time.Time      `json:"expires_at"`
 	CSRFToken string         `json:"csrf_token,omitempty"`
+}
+type User struct {
+	ID          string    `json:"id"`
+	Username    string    `json:"username"`
+	DisplayName string    `json:"display_name"`
+	Role        string    `json:"role"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+type Membership struct {
+	OwnerID domain.OwnerID
+	User    User
 }
 type Token struct {
 	ID         string     `json:"id"`
@@ -78,6 +92,8 @@ type Token struct {
 // calling application services.
 type Principal struct {
 	OwnerID domain.OwnerID
+	UserID  string
+	Role    string
 	Scopes  []string
 }
 type SSHKey struct {
@@ -92,14 +108,16 @@ type Store interface {
 	EnsureBootstrap(context.Context, []byte, time.Time, time.Time) (bool, error)
 	BootstrapStatus(context.Context, time.Time) (BootstrapStatus, error)
 	MatchBootstrap(context.Context, []byte, time.Time) error
-	ConsumeBootstrap(context.Context, []byte, string, time.Time) (domain.OwnerID, error)
-	OwnerCredential(context.Context) (domain.OwnerID, string, error)
-	UpdateCredential(context.Context, domain.OwnerID, string, time.Time) error
-	CreateSession(context.Context, []byte, domain.OwnerID, []byte, time.Time, time.Time) error
-	RotateSession(context.Context, []byte, []byte, domain.OwnerID, []byte, time.Time, time.Time) error
+	ConsumeBootstrap(context.Context, []byte, string, time.Time) (Membership, error)
+	UserCredential(context.Context, string) (Membership, string, error)
+	UpdateCredential(context.Context, string, string, time.Time) error
+	CreateSession(context.Context, []byte, Membership, []byte, time.Time, time.Time) error
+	RotateSession(context.Context, []byte, []byte, Membership, []byte, time.Time, time.Time) error
 	UpdateSessionCSRF(context.Context, []byte, []byte, time.Time) error
-	Session(context.Context, []byte, time.Time) (domain.OwnerID, []byte, time.Time, error)
+	Session(context.Context, []byte, time.Time) (Membership, []byte, time.Time, error)
 	RevokeSession(context.Context, []byte, time.Time) error
+	CreateUser(context.Context, domain.OwnerID, User, string, time.Time) error
+	ListUsers(context.Context, domain.OwnerID) ([]User, error)
 	CreateToken(context.Context, Token, domain.OwnerID, []byte) error
 	ListTokens(context.Context, domain.OwnerID) ([]Token, error)
 	TokenOwner(context.Context, []byte, time.Time) (domain.OwnerID, []string, error)
@@ -164,18 +182,18 @@ func (m *Manager) Bootstrap(ctx context.Context, key, secret, password string) (
 	if err != nil {
 		return Session{}, "", err
 	}
-	owner, err := m.store.ConsumeBootstrap(ctx, digest(raw), hash, m.now())
+	membership, err := m.store.ConsumeBootstrap(ctx, digest(raw), hash, m.now())
 	if err != nil {
 		return Session{}, "", err
 	}
 	m.limiter.Reset(key)
-	return m.issueSession(ctx, owner)
+	return m.issueSession(ctx, membership)
 }
-func (m *Manager) Login(ctx context.Context, key, password string) (Session, string, error) {
+func (m *Manager) Login(ctx context.Context, key, username, password string) (Session, string, error) {
 	if !m.limiter.Allow(key, m.now()) {
 		return Session{}, "", ErrRateLimited
 	}
-	owner, encoded, err := m.store.OwnerCredential(ctx)
+	membership, encoded, err := m.store.UserCredential(ctx, username)
 	if err != nil {
 		return Session{}, "", ErrUnauthenticated
 	}
@@ -186,12 +204,12 @@ func (m *Manager) Login(ctx context.Context, key, password string) (Session, str
 	m.limiter.Reset(key)
 	if rehash {
 		if upgraded, hashErr := HashPassword(password, DefaultPasswordParams); hashErr == nil {
-			_ = m.store.UpdateCredential(ctx, owner, upgraded, m.now())
+			_ = m.store.UpdateCredential(ctx, membership.User.ID, upgraded, m.now())
 		}
 	}
-	return m.issueSession(ctx, owner)
+	return m.issueSession(ctx, membership)
 }
-func (m *Manager) issueSession(ctx context.Context, owner domain.OwnerID) (Session, string, error) {
+func (m *Manager) issueSession(ctx context.Context, membership Membership) (Session, string, error) {
 	secret, raw, err := randomSecret(32)
 	if err != nil {
 		return Session{}, "", err
@@ -201,35 +219,42 @@ func (m *Manager) issueSession(ctx context.Context, owner domain.OwnerID) (Sessi
 		return Session{}, "", err
 	}
 	now, expires := m.now(), m.now().Add(DefaultSessionTTL)
-	if err := m.store.CreateSession(ctx, digest(raw), owner, digest(csrfRaw), now, expires); err != nil {
+	if err := m.store.CreateSession(ctx, digest(raw), membership, digest(csrfRaw), now, expires); err != nil {
 		return Session{}, "", err
 	}
-	return Session{OwnerID: owner, ExpiresAt: expires, CSRFToken: csrf}, secret, nil
+	return sessionFromMembership(membership, expires, csrf), secret, nil
 }
 func (m *Manager) AuthenticateSession(ctx context.Context, secret, csrf string, mutation bool) (domain.OwnerID, error) {
+	principal, err := m.AuthenticateSessionPrincipal(ctx, secret, csrf, mutation)
+	if err != nil {
+		return "", err
+	}
+	return principal.OwnerID, nil
+}
+func (m *Manager) AuthenticateSessionPrincipal(ctx context.Context, secret, csrf string, mutation bool) (Principal, error) {
 	raw, err := decodeSecret(secret)
 	if err != nil {
-		return "", ErrUnauthenticated
+		return Principal{}, ErrUnauthenticated
 	}
-	owner, csrfHash, _, err := m.store.Session(ctx, digest(raw), m.now())
+	membership, csrfHash, _, err := m.store.Session(ctx, digest(raw), m.now())
 	if err != nil {
-		return "", ErrUnauthenticated
+		return Principal{}, ErrUnauthenticated
 	}
 	if mutation {
 		c, err := decodeSecret(csrf)
 		if err != nil || !equalDigest(csrfHash, digest(c)) {
-			return "", ErrForbidden
+			return Principal{}, ErrForbidden
 		}
 	}
-	return owner, nil
+	return Principal{OwnerID: membership.OwnerID, UserID: membership.User.ID, Role: membership.User.Role}, nil
 }
 func (m *Manager) RotateSession(ctx context.Context, oldSecret string, owner domain.OwnerID) (Session, string, error) {
 	oldRaw, err := decodeSecret(oldSecret)
 	if err != nil {
 		return Session{}, "", ErrUnauthenticated
 	}
-	storedOwner, _, expires, err := m.store.Session(ctx, digest(oldRaw), m.now())
-	if err != nil || storedOwner != owner {
+	membership, _, expires, err := m.store.Session(ctx, digest(oldRaw), m.now())
+	if err != nil || membership.OwnerID != owner {
 		return Session{}, "", ErrUnauthenticated
 	}
 	secret, raw, err := randomSecret(32)
@@ -241,17 +266,17 @@ func (m *Manager) RotateSession(ctx context.Context, oldSecret string, owner dom
 		return Session{}, "", err
 	}
 	now := m.now()
-	if err := m.store.RotateSession(ctx, digest(oldRaw), digest(raw), owner, digest(csrfRaw), now, expires); err != nil {
+	if err := m.store.RotateSession(ctx, digest(oldRaw), digest(raw), membership, digest(csrfRaw), now, expires); err != nil {
 		return Session{}, "", ErrUnauthenticated
 	}
-	return Session{OwnerID: owner, ExpiresAt: expires, CSRFToken: csrf}, secret, nil
+	return sessionFromMembership(membership, expires, csrf), secret, nil
 }
 func (m *Manager) RefreshCSRF(ctx context.Context, secret string) (Session, error) {
 	raw, err := decodeSecret(secret)
 	if err != nil {
 		return Session{}, ErrUnauthenticated
 	}
-	owner, _, expires, err := m.store.Session(ctx, digest(raw), m.now())
+	membership, _, expires, err := m.store.Session(ctx, digest(raw), m.now())
 	if err != nil {
 		return Session{}, ErrUnauthenticated
 	}
@@ -262,7 +287,7 @@ func (m *Manager) RefreshCSRF(ctx context.Context, secret string) (Session, erro
 	if err := m.store.UpdateSessionCSRF(ctx, digest(raw), digest(csrfRaw), m.now()); err != nil {
 		return Session{}, ErrUnauthenticated
 	}
-	return Session{OwnerID: owner, ExpiresAt: expires, CSRFToken: csrf}, nil
+	return sessionFromMembership(membership, expires, csrf), nil
 }
 func (m *Manager) CookieMaxAge(expires time.Time) int {
 	seconds := int(math.Ceil(expires.Sub(m.now()).Seconds()))
@@ -338,6 +363,35 @@ func (m *Manager) ListTokens(ctx context.Context, owner domain.OwnerID) ([]Token
 func (m *Manager) RevokeToken(ctx context.Context, owner domain.OwnerID, id string) error {
 	return m.store.RevokeToken(ctx, owner, id, m.now())
 }
+func (m *Manager) AddUser(ctx context.Context, owner domain.OwnerID, username, displayName, password string) (User, error) {
+	username = strings.TrimSpace(username)
+	displayName = strings.TrimSpace(displayName)
+	if !validUsername(username) {
+		return User{}, errors.New("invalid username")
+	}
+	if displayName == "" {
+		displayName = username
+	}
+	if len(displayName) > 100 {
+		return User{}, errors.New("invalid display name")
+	}
+	hash, err := m.hashPassword(password, DefaultPasswordParams)
+	if err != nil {
+		return User{}, err
+	}
+	id, _, err := randomSecret(12)
+	if err != nil {
+		return User{}, err
+	}
+	user := User{ID: "usr_" + id, Username: username, DisplayName: displayName, Role: "member", CreatedAt: m.now()}
+	if err := m.store.CreateUser(ctx, owner, user, hash, m.now()); err != nil {
+		return User{}, err
+	}
+	return user, nil
+}
+func (m *Manager) ListUsers(ctx context.Context, owner domain.OwnerID) ([]User, error) {
+	return m.store.ListUsers(ctx, owner)
+}
 func (m *Manager) AddSSHKey(ctx context.Context, owner domain.OwnerID, label, value string) (SSHKey, error) {
 	label = strings.TrimSpace(label)
 	if label == "" || len(label) > 100 || len(value) > 16*1024 {
@@ -392,6 +446,25 @@ func normalizeScopes(scopes []string) ([]string, error) {
 	}
 	sort.Strings(normalized)
 	return normalized, nil
+}
+
+func sessionFromMembership(membership Membership, expires time.Time, csrf string) Session {
+	return Session{
+		OwnerID: membership.OwnerID, UserID: membership.User.ID, Username: membership.User.Username,
+		Role: membership.User.Role, ExpiresAt: expires, CSRFToken: csrf,
+	}
+}
+
+func validUsername(value string) bool {
+	if len(value) < 1 || len(value) > 100 || strings.ContainsAny(value, " \t\r\n") {
+		return false
+	}
+	for _, r := range value {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("._-@+", r)) {
+			return false
+		}
+	}
+	return true
 }
 
 var supportedScopes = map[string]struct{}{

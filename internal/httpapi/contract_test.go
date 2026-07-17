@@ -65,6 +65,7 @@ func TestOpenAPIContainsEveryHTTPRoute(t *testing.T) {
 		"/v1/operations/{operation_id}:",
 		"/v1/operations/{operation_id}/cancel:",
 		"/v1/operations/{operation_id}/events:",
+		"/v1/users:",
 	} {
 		if !strings.Contains(contents, "  "+path) {
 			t.Errorf("OpenAPI schema missing %s", path)

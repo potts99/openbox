@@ -26,7 +26,7 @@ func (s *Store) EnsureBootstrap(ctx context.Context, secretHash []byte, now, exp
 	}
 	defer tx.Rollback()
 	var credentials int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM owner_credentials`).Scan(&credentials); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_credentials`).Scan(&credentials); err != nil {
 		return false, err
 	}
 	if credentials != 0 {
@@ -54,7 +54,7 @@ func (s *Store) EnsureBootstrap(ctx context.Context, secretHash []byte, now, exp
 
 func (s *Store) BootstrapStatus(ctx context.Context, now time.Time) (auth.BootstrapStatus, error) {
 	var credentials int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM owner_credentials`).Scan(&credentials); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_credentials`).Scan(&credentials); err != nil {
 		return auth.BootstrapStatus{}, err
 	}
 	if credentials != 0 {
@@ -77,7 +77,7 @@ func (s *Store) BootstrapStatus(ctx context.Context, now time.Time) (auth.Bootst
 
 func (s *Store) MatchBootstrap(ctx context.Context, secretHash []byte, now time.Time) error {
 	var credentials int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM owner_credentials`).Scan(&credentials); err != nil || credentials != 0 {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_credentials`).Scan(&credentials); err != nil || credentials != 0 {
 		return auth.ErrBootstrapUnavailable
 	}
 	var stored []byte
@@ -88,57 +88,83 @@ func (s *Store) MatchBootstrap(ctx context.Context, secretHash []byte, now time.
 	return nil
 }
 
-func (s *Store) ConsumeBootstrap(ctx context.Context, secretHash []byte, passwordHash string, now time.Time) (domain.OwnerID, error) {
+func (s *Store) ConsumeBootstrap(ctx context.Context, secretHash []byte, passwordHash string, now time.Time) (auth.Membership, error) {
 	release, err := s.acquireWrite(ctx)
 	if err != nil {
-		return "", err
+		return auth.Membership{}, err
 	}
 	defer release()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return "", err
+		return auth.Membership{}, err
 	}
 	defer tx.Rollback()
 	var owner domain.OwnerID
 	var owners int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM owners`).Scan(&owners); err != nil || owners != 1 {
-		return "", auth.ErrBootstrapUnavailable
+		return auth.Membership{}, auth.ErrBootstrapUnavailable
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT id FROM owners LIMIT 1`).Scan(&owner); err != nil {
-		return "", auth.ErrBootstrapUnavailable
+		return auth.Membership{}, auth.ErrBootstrapUnavailable
 	}
 	var stored []byte
 	err = tx.QueryRowContext(ctx, `SELECT secret_hash FROM bootstrap_challenges WHERE consumed_at IS NULL AND expires_at>? LIMIT 1`, formatTime(now)).Scan(&stored)
 	if err != nil || !constantBytes(stored, secretHash) {
-		return "", auth.ErrBootstrapUnavailable
+		return auth.Membership{}, auth.ErrBootstrapUnavailable
 	}
 	var count int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM owner_credentials`).Scan(&count); err != nil || count != 0 {
-		return "", auth.ErrBootstrapUnavailable
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_credentials`).Scan(&count); err != nil || count != 0 {
+		return auth.Membership{}, auth.ErrBootstrapUnavailable
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE bootstrap_challenges SET consumed_at=? WHERE consumed_at IS NULL AND expires_at>?`, formatTime(now), formatTime(now))
 	if err != nil {
-		return "", err
+		return auth.Membership{}, err
 	}
 	if n, _ := result.RowsAffected(); n != 1 {
-		return "", auth.ErrBootstrapUnavailable
+		return auth.Membership{}, auth.ErrBootstrapUnavailable
+	}
+	user := auth.User{ID: "usr_" + string(owner), Username: string(owner), DisplayName: "Owner", Role: "admin", CreatedAt: now}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO users(id,username,display_name,created_at,updated_at) VALUES(?,?,?,?,?)`, user.ID, user.Username, user.DisplayName, formatTime(now), formatTime(now)); err != nil {
+		return auth.Membership{}, auth.ErrBootstrapUnavailable
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO org_memberships(owner_id,user_id,role,created_at) VALUES(?,?,?,?)`, owner, user.ID, user.Role, formatTime(now)); err != nil {
+		return auth.Membership{}, auth.ErrBootstrapUnavailable
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO user_credentials(user_id,password_hash,updated_at) VALUES(?,?,?)`, user.ID, passwordHash, formatTime(now)); err != nil {
+		return auth.Membership{}, auth.ErrBootstrapUnavailable
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO owner_credentials(owner_id,password_hash,updated_at) VALUES(?,?,?)`, owner, passwordHash, formatTime(now)); err != nil {
-		return "", auth.ErrBootstrapUnavailable
+		return auth.Membership{}, auth.ErrBootstrapUnavailable
 	}
 	if err := tx.Commit(); err != nil {
-		return "", err
+		return auth.Membership{}, err
 	}
-	return owner, nil
+	return auth.Membership{OwnerID: owner, User: user}, nil
 }
-func (s *Store) OwnerCredential(ctx context.Context) (domain.OwnerID, string, error) {
-	var o domain.OwnerID
+func (s *Store) UserCredential(ctx context.Context, username string) (auth.Membership, string, error) {
+	var membership auth.Membership
 	var h string
-	err := s.db.QueryRowContext(ctx, `SELECT owner_id,password_hash FROM owner_credentials LIMIT 1`).Scan(&o, &h)
-	return o, h, err
+	var created string
+	var err error
+	if strings.TrimSpace(username) == "" {
+		err = s.db.QueryRowContext(ctx, `SELECT m.owner_id,u.id,u.username,u.display_name,m.role,u.created_at,c.password_hash
+			FROM user_credentials c JOIN users u ON u.id=c.user_id JOIN org_memberships m ON m.user_id=u.id
+			WHERE (SELECT COUNT(*) FROM user_credentials)=1 LIMIT 1`).Scan(
+			&membership.OwnerID, &membership.User.ID, &membership.User.Username, &membership.User.DisplayName, &membership.User.Role, &created, &h)
+	} else {
+		err = s.db.QueryRowContext(ctx, `SELECT m.owner_id,u.id,u.username,u.display_name,m.role,u.created_at,c.password_hash
+			FROM user_credentials c JOIN users u ON u.id=c.user_id JOIN org_memberships m ON m.user_id=u.id
+			WHERE u.username=? LIMIT 1`, username).Scan(
+			&membership.OwnerID, &membership.User.ID, &membership.User.Username, &membership.User.DisplayName, &membership.User.Role, &created, &h)
+	}
+	if err != nil {
+		return auth.Membership{}, "", err
+	}
+	membership.User.CreatedAt, err = parseTime(created)
+	return membership, h, err
 }
-func (s *Store) UpdateCredential(ctx context.Context, o domain.OwnerID, h string, now time.Time) error {
-	r, e := s.db.ExecContext(ctx, `UPDATE owner_credentials SET password_hash=?,updated_at=? WHERE owner_id=?`, h, formatTime(now), o)
+func (s *Store) UpdateCredential(ctx context.Context, userID, h string, now time.Time) error {
+	r, e := s.db.ExecContext(ctx, `UPDATE user_credentials SET password_hash=?,updated_at=? WHERE user_id=?`, h, formatTime(now), userID)
 	if e != nil {
 		return e
 	}
@@ -148,11 +174,11 @@ func (s *Store) UpdateCredential(ctx context.Context, o domain.OwnerID, h string
 	return nil
 }
 
-func (s *Store) CreateSession(ctx context.Context, id []byte, o domain.OwnerID, csrf []byte, created, expires time.Time) error {
-	_, e := s.db.ExecContext(ctx, `INSERT INTO auth_sessions(id_hash,owner_id,csrf_hash,created_at,expires_at) VALUES(?,?,?,?,?)`, id, o, csrf, formatTime(created), formatTime(expires))
+func (s *Store) CreateSession(ctx context.Context, id []byte, membership auth.Membership, csrf []byte, created, expires time.Time) error {
+	_, e := s.db.ExecContext(ctx, `INSERT INTO auth_sessions(id_hash,owner_id,user_id,csrf_hash,created_at,expires_at) VALUES(?,?,?,?,?,?)`, id, membership.OwnerID, membership.User.ID, csrf, formatTime(created), formatTime(expires))
 	return mapWriteError(e)
 }
-func (s *Store) RotateSession(ctx context.Context, oldID, newID []byte, owner domain.OwnerID, csrf []byte, created, expires time.Time) error {
+func (s *Store) RotateSession(ctx context.Context, oldID, newID []byte, membership auth.Membership, csrf []byte, created, expires time.Time) error {
 	release, err := s.acquireWrite(ctx)
 	if err != nil {
 		return err
@@ -163,14 +189,14 @@ func (s *Store) RotateSession(ctx context.Context, oldID, newID []byte, owner do
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE auth_sessions SET revoked_at=? WHERE id_hash=? AND owner_id=? AND revoked_at IS NULL AND expires_at>?`, formatTime(created), oldID, owner, formatTime(created))
+	result, err := tx.ExecContext(ctx, `UPDATE auth_sessions SET revoked_at=? WHERE id_hash=? AND owner_id=? AND user_id=? AND revoked_at IS NULL AND expires_at>?`, formatTime(created), oldID, membership.OwnerID, membership.User.ID, formatTime(created))
 	if err != nil {
 		return err
 	}
 	if n, _ := result.RowsAffected(); n != 1 {
 		return sql.ErrNoRows
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO auth_sessions(id_hash,owner_id,csrf_hash,created_at,expires_at) VALUES(?,?,?,?,?)`, newID, owner, csrf, formatTime(created), formatTime(expires)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO auth_sessions(id_hash,owner_id,user_id,csrf_hash,created_at,expires_at) VALUES(?,?,?,?,?,?)`, newID, membership.OwnerID, membership.User.ID, csrf, formatTime(created), formatTime(expires)); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -185,20 +211,78 @@ func (s *Store) UpdateSessionCSRF(ctx context.Context, id, csrf []byte, now time
 	}
 	return nil
 }
-func (s *Store) Session(ctx context.Context, id []byte, now time.Time) (domain.OwnerID, []byte, time.Time, error) {
-	var o domain.OwnerID
+func (s *Store) Session(ctx context.Context, id []byte, now time.Time) (auth.Membership, []byte, time.Time, error) {
+	var membership auth.Membership
 	var csrf []byte
-	var raw string
-	e := s.db.QueryRowContext(ctx, `SELECT owner_id,csrf_hash,expires_at FROM auth_sessions WHERE id_hash=? AND revoked_at IS NULL AND expires_at>?`, id, formatTime(now)).Scan(&o, &csrf, &raw)
+	var raw, created string
+	e := s.db.QueryRowContext(ctx, `SELECT s.owner_id,u.id,u.username,u.display_name,m.role,u.created_at,s.csrf_hash,s.expires_at
+		FROM auth_sessions s JOIN users u ON u.id=s.user_id JOIN org_memberships m ON m.owner_id=s.owner_id AND m.user_id=s.user_id
+		WHERE s.id_hash=? AND s.revoked_at IS NULL AND s.expires_at>?`, id, formatTime(now)).Scan(
+		&membership.OwnerID, &membership.User.ID, &membership.User.Username, &membership.User.DisplayName, &membership.User.Role, &created, &csrf, &raw)
 	if e != nil {
-		return "", nil, time.Time{}, e
+		return auth.Membership{}, nil, time.Time{}, e
+	}
+	membership.User.CreatedAt, e = parseTime(created)
+	if e != nil {
+		return auth.Membership{}, nil, time.Time{}, e
 	}
 	exp, e := parseTime(raw)
-	return o, csrf, exp, e
+	return membership, csrf, exp, e
 }
 func (s *Store) RevokeSession(ctx context.Context, id []byte, now time.Time) error {
 	_, e := s.db.ExecContext(ctx, `UPDATE auth_sessions SET revoked_at=COALESCE(revoked_at,?) WHERE id_hash=?`, formatTime(now), id)
 	return e
+}
+
+func (s *Store) CreateUser(ctx context.Context, owner domain.OwnerID, user auth.User, passwordHash string, now time.Time) error {
+	release, err := s.acquireWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO users(id,username,display_name,created_at,updated_at) VALUES(?,?,?,?,?)`,
+		user.ID, user.Username, user.DisplayName, formatTime(user.CreatedAt), formatTime(now)); err != nil {
+		return mapWriteError(err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO org_memberships(owner_id,user_id,role,created_at) VALUES(?,?,?,?)`,
+		owner, user.ID, user.Role, formatTime(now)); err != nil {
+		return mapWriteError(err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO user_credentials(user_id,password_hash,updated_at) VALUES(?,?,?)`,
+		user.ID, passwordHash, formatTime(now)); err != nil {
+		return mapWriteError(err)
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListUsers(ctx context.Context, owner domain.OwnerID) ([]auth.User, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT u.id,u.username,u.display_name,m.role,u.created_at
+		FROM org_memberships m JOIN users u ON u.id=m.user_id
+		WHERE m.owner_id=? ORDER BY u.created_at,u.id`, owner)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	users := []auth.User{}
+	for rows.Next() {
+		var user auth.User
+		var created string
+		if err := rows.Scan(&user.ID, &user.Username, &user.DisplayName, &user.Role, &created); err != nil {
+			return nil, err
+		}
+		var err error
+		user.CreatedAt, err = parseTime(created)
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+	return users, rows.Err()
 }
 
 func (s *Store) CreateToken(ctx context.Context, t auth.Token, o domain.OwnerID, hash []byte) error {
@@ -287,7 +371,7 @@ func (s *Store) ListSSHKeys(ctx context.Context, o domain.OwnerID) ([]auth.SSHKe
 	return out, rows.Err()
 }
 
-// AuthorizeSSHKey resolves the single owner for an exact OpenSSH fingerprint.
+// AuthorizeSSHKey resolves the organization owner for an exact OpenSSH fingerprint.
 // It deliberately returns no public-key material to the SSH transport.
 func (s *Store) AuthorizeSSHKey(ctx context.Context, fingerprint string) (domain.OwnerID, bool, error) {
 	if fingerprint == "" {

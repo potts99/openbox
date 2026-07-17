@@ -168,6 +168,12 @@ const (
 	Public  RouteVisibility = "public"
 )
 
+// Defines values for SessionRole.
+const (
+	SessionRoleAdmin  SessionRole = "admin"
+	SessionRoleMember SessionRole = "member"
+)
+
 // Defines values for TokenScope.
 const (
 	ArtifactsRead  TokenScope = "artifacts:read"
@@ -196,6 +202,12 @@ const (
 	UpdateWebhookSubscriptionRequestEventsInstanceDeleted   UpdateWebhookSubscriptionRequestEvents = "instance.deleted"
 	UpdateWebhookSubscriptionRequestEventsInstanceExpired   UpdateWebhookSubscriptionRequestEvents = "instance.expired"
 	UpdateWebhookSubscriptionRequestEventsOperationTerminal UpdateWebhookSubscriptionRequestEvents = "operation.terminal"
+)
+
+// Defines values for UserRole.
+const (
+	UserRoleAdmin  UserRole = "admin"
+	UserRoleMember UserRole = "member"
 )
 
 // Defines values for WebhookDeliveryErrorClass.
@@ -400,6 +412,13 @@ type CreateTokenRequest struct {
 	ExpiresAt *time.Time    `json:"expires_at,omitempty"`
 	Name      string        `json:"name"`
 	Scopes    *[]TokenScope `json:"scopes,omitempty"`
+}
+
+// CreateUserRequest defines model for CreateUserRequest.
+type CreateUserRequest struct {
+	DisplayName *string `json:"display_name,omitempty"`
+	Password    *string `json:"password,omitempty"`
+	Username    string  `json:"username"`
 }
 
 // CreateWebhookSubscriptionRequest defines model for CreateWebhookSubscriptionRequest.
@@ -697,6 +716,11 @@ type ListTokensResponse struct {
 	Items []TokenMetadata `json:"items"`
 }
 
+// ListUsersResponse defines model for ListUsersResponse.
+type ListUsersResponse struct {
+	Items []User `json:"items"`
+}
+
 // ListWebhookDeliveriesResponse defines model for ListWebhookDeliveriesResponse.
 type ListWebhookDeliveriesResponse struct {
 	Items []WebhookDelivery `json:"items"`
@@ -710,6 +734,7 @@ type ListWebhookSubscriptionsResponse struct {
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
 	Password *string `json:"password,omitempty"`
+	Username *string `json:"username,omitempty"`
 }
 
 // NetworkPolicyStatus Effective host-enforced network policy metadata without packet or DNS-answer payloads.
@@ -825,10 +850,16 @@ type SSHKey struct {
 
 // Session defines model for Session.
 type Session struct {
-	CsrfToken *string   `json:"csrf_token,omitempty"`
-	ExpiresAt time.Time `json:"expires_at"`
-	OwnerId   string    `json:"owner_id"`
+	CsrfToken *string     `json:"csrf_token,omitempty"`
+	ExpiresAt time.Time   `json:"expires_at"`
+	OwnerId   string      `json:"owner_id"`
+	Role      SessionRole `json:"role"`
+	UserId    string      `json:"user_id"`
+	Username  string      `json:"username"`
 }
+
+// SessionRole defines model for Session.Role.
+type SessionRole string
 
 // Snapshot defines model for Snapshot.
 type Snapshot struct {
@@ -905,6 +936,18 @@ type UpdateWebhookSubscriptionRequest struct {
 
 // UpdateWebhookSubscriptionRequestEvents defines model for UpdateWebhookSubscriptionRequest.Events.
 type UpdateWebhookSubscriptionRequestEvents string
+
+// User defines model for User.
+type User struct {
+	CreatedAt   time.Time `json:"created_at"`
+	DisplayName string    `json:"display_name"`
+	Id          string    `json:"id"`
+	Role        UserRole  `json:"role"`
+	Username    string    `json:"username"`
+}
+
+// UserRole defines model for User.Role.
+type UserRole string
 
 // WebhookDelivery defines model for WebhookDelivery.
 type WebhookDelivery struct {
@@ -1467,6 +1510,21 @@ type RevokeTokenParams struct {
 	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
 }
 
+// ListUsersParams defines parameters for ListUsers.
+type ListUsersParams struct {
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
+// CreateUserParams defines parameters for CreateUser.
+type CreateUserParams struct {
+	// XCSRFToken Required for unsafe requests authenticated by the session cookie; ignored for bearer authentication.
+	XCSRFToken *CSRFToken `json:"X-CSRF-Token,omitempty"`
+
+	// XOpenBoxAPIVersion Optional compatibility assertion. If present, it must be v1.
+	XOpenBoxAPIVersion *APIVersion `json:"X-OpenBox-API-Version,omitempty"`
+}
+
 // ListWebhookDeliveriesParams defines parameters for ListWebhookDeliveries.
 type ListWebhookDeliveriesParams struct {
 	Status         *ListWebhookDeliveriesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
@@ -1575,6 +1633,9 @@ type UpdateSSHKeyJSONRequestBody = UpdateSSHKeyRequest
 
 // CreateTokenJSONRequestBody defines body for CreateToken for application/json ContentType.
 type CreateTokenJSONRequestBody = CreateTokenRequest
+
+// CreateUserJSONRequestBody defines body for CreateUser for application/json ContentType.
+type CreateUserJSONRequestBody = CreateUserRequest
 
 // CreateWebhookSubscriptionJSONRequestBody defines body for CreateWebhookSubscription for application/json ContentType.
 type CreateWebhookSubscriptionJSONRequestBody = CreateWebhookSubscriptionRequest
