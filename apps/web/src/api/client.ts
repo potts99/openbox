@@ -259,7 +259,7 @@ export interface OpenBoxApi {
   deleteEgressProfile(id: string): Promise<void>;
   attachEgressProfile(instanceId: string, profileId: string): Promise<InstanceDetail>;
   listAuditEvents(limit?: number): Promise<AuditEvent[]>;
-  setup(input: { secret: string; password: string }): Promise<Session>;
+  setup(input: { username: string; password: string }): Promise<Session>;
   login(input: { username?: string; password: string }): Promise<Session>;
   logout(): Promise<void>;
 }
@@ -273,7 +273,7 @@ type JsonRecord = Record<string, unknown>;
 
 const safeErrors: Record<string, string> = {
   unauthenticated: "Invalid credentials",
-  bootstrap_unavailable: "Setup is unavailable. Restart openboxd to issue a new one-time secret.",
+  bootstrap_unavailable: "Setup is unavailable. An admin already exists on this host.",
   insecure_transport: "Setup and login require a local or encrypted connection.",
   forbidden: "This session is not allowed to perform that action.",
   invalid_argument: "Check the submitted values and try again.",

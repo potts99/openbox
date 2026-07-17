@@ -7,7 +7,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,8 +19,8 @@ import (
 )
 
 func TestRemoteBootstrapIgnoresForwardingHeadersAndTLSCookieIsSecure(t *testing.T) {
-	h, m, bootstrap := newAuthHandler(t)
-	body := []byte(`{"secret":"` + bootstrap + `","password":"a sufficiently long password"}`)
+	h, m, username := newAuthHandler(t)
+	body := []byte(`{"username":"` + username + `","password":"a sufficiently long password"}`)
 	plain := httptest.NewRequest(http.MethodPost, "/v1/bootstrap", bytes.NewReader(body))
 	plain.RemoteAddr = "203.0.113.10:42000"
 	plain.Header.Set("X-Forwarded-For", "127.0.0.1")
@@ -53,10 +52,10 @@ func TestRemoteBootstrapIgnoresForwardingHeadersAndTLSCookieIsSecure(t *testing.
 	}
 }
 
-func TestBootstrapStatusRemainsRequiredAfterChallengeExpires(t *testing.T) {
+func TestBootstrapStatusRemainsRequiredUntilFirstAdmin(t *testing.T) {
 	now := time.Date(2026, 7, 15, 14, 0, 0, 0, time.UTC)
-	h, m, secret := newAuthHandlerWithClock(t, &now)
-	now = now.Add(auth.DefaultBootstrapTTL + time.Second)
+	h, m, username := newAuthHandlerWithClock(t, &now)
+	now = now.Add(24 * time.Hour)
 	request := httptest.NewRequest(http.MethodGet, "/v1/bootstrap", nil)
 	response := httptest.NewRecorder()
 	h.ServeHTTP(response, request)
@@ -67,11 +66,22 @@ func TestBootstrapStatusRemainsRequiredAfterChallengeExpires(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil {
 		t.Fatal(err)
 	}
-	if !status.Required || status.ExpiresAt != nil {
-		t.Fatalf("expired challenge status=%+v", status)
+	if !status.Required {
+		t.Fatalf("bootstrap status=%+v", status)
 	}
-	if _, _, err := m.Bootstrap(context.Background(), "loopback", secret, "a sufficiently long password"); !errors.Is(err, auth.ErrBootstrapUnavailable) {
-		t.Fatalf("expired bootstrap error=%v", err)
+	if _, _, err := m.Bootstrap(context.Background(), "loopback", username, "a sufficiently long password"); err != nil {
+		t.Fatalf("bootstrap error=%v", err)
+	}
+}
+
+func TestBootstrapRejectsInvalidUsername(t *testing.T) {
+	h, _, _ := newAuthHandler(t)
+	request := httptest.NewRequest(http.MethodPost, "/v1/bootstrap", strings.NewReader(`{"username":"not valid","password":"a sufficiently long password"}`))
+	request.RemoteAddr = "127.0.0.1:4000"
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
@@ -333,14 +343,10 @@ func newAuthHandlerWithClockAndOptions(t *testing.T, now *time.Time, options Opt
 		t.Fatal(err)
 	}
 	m.WithClock(func() time.Time { return *now })
-	secret, err := m.EnsureBootstrap(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
 	options.Auth = m
 	h, err := New(&fakeService{}, options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return h, m, secret
+	return h, m, "admin"
 }

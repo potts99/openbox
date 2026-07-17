@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { createHttpApi } from "./api/client";
 import type { BootstrapStatus, OpenBoxApi, Session } from "./api/client";
 import { AuthScreen } from "./auth/AuthScreen";
+import { markSetupChecklistPending } from "./auth/SetupChecklist";
 import { ConsolePage } from "./pages/ConsolePage";
 
 const defaultApi = createHttpApi();
@@ -47,15 +48,21 @@ export function App({ api = defaultApi }: { api?: OpenBoxApi }) {
   }
 
   if (entry.bootstrap.required || !entry.session.authenticated) {
+    const setupMode = entry.bootstrap.required;
     return (
       <AuthScreen
-        mode={entry.bootstrap.required ? "setup" : "login"}
+        mode={setupMode ? "setup" : "login"}
         api={api}
-        onAuthenticated={(session) => setEntry({
-          status: "ready",
-          bootstrap: { required: false },
-          session,
-        })}
+        onAuthenticated={(session) => {
+          if (setupMode && session.authenticated) {
+            markSetupChecklistPending(session.username);
+          }
+          setEntry({
+            status: "ready",
+            bootstrap: { required: false },
+            session,
+          });
+        }}
       />
     );
   }

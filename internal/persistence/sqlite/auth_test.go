@@ -22,7 +22,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/persistence/migrations"
 )
 
-func TestConcurrentBootstrapConsumeCreatesExactlyOneCredential(t *testing.T) {
+func TestConcurrentFirstAdminCreatesExactlyOneCredential(t *testing.T) {
 	ctx := context.Background()
 	store, err := Open(ctx, t.TempDir()+"/bootstrap-race.db")
 	if err != nil {
@@ -38,10 +38,6 @@ func TestConcurrentBootstrapConsumeCreatesExactlyOneCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager.WithClock(func() time.Time { return now })
-	secret, err := manager.EnsureBootstrap(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	const contenders = 4
 	start := make(chan struct{})
@@ -53,7 +49,7 @@ func TestConcurrentBootstrapConsumeCreatesExactlyOneCredential(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			_, _, err := manager.Bootstrap(ctx, fmt.Sprintf("contender-%d", i), secret, "a sufficiently long password")
+			_, _, err := manager.Bootstrap(ctx, fmt.Sprintf("contender-%d", i), fmt.Sprintf("admin-%d", i), "a sufficiently long password")
 			if err == nil {
 				winners.Add(1)
 				return
@@ -73,19 +69,13 @@ func TestConcurrentBootstrapConsumeCreatesExactlyOneCredential(t *testing.T) {
 		}
 	}
 	var credentialCount int
-	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM owner_credentials`).Scan(&credentialCount); err != nil {
-		t.Fatal(err)
-	}
-	if credentialCount != 1 {
-		t.Fatalf("credential count=%d, want 1", credentialCount)
-	}
 	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_credentials`).Scan(&credentialCount); err != nil {
 		t.Fatal(err)
 	}
 	if credentialCount != 1 {
 		t.Fatalf("user credential count=%d, want 1", credentialCount)
 	}
-	if _, _, err := manager.Bootstrap(ctx, "loopback", secret, "a sufficiently long password"); !errors.Is(err, auth.ErrBootstrapUnavailable) {
+	if _, _, err := manager.Bootstrap(ctx, "loopback", "another-admin", "a sufficiently long password"); !errors.Is(err, auth.ErrBootstrapUnavailable) {
 		t.Fatalf("repeat consume error=%v", err)
 	}
 }

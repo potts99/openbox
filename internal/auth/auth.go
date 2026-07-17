@@ -44,8 +44,7 @@ const (
 	ScopeArtifactsRead  = "artifacts:read"
 	ScopeArtifactsWrite = "artifacts:write"
 
-	DefaultBootstrapTTL = 20 * time.Minute
-	DefaultSessionTTL   = 12 * time.Hour
+	DefaultSessionTTL = 12 * time.Hour
 )
 
 var ErrUnauthenticated = errors.New("authentication required")
@@ -56,8 +55,7 @@ var ErrAmbiguousOrganization = errors.New("user belongs to multiple organization
 var ErrInvalidUser = errors.New("invalid user")
 
 type BootstrapStatus struct {
-	Required  bool       `json:"required"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Required bool `json:"required"`
 }
 type Session struct {
 	OwnerID   domain.OwnerID `json:"owner_id"`
@@ -107,10 +105,8 @@ type SSHKey struct {
 }
 
 type Store interface {
-	EnsureBootstrap(context.Context, []byte, time.Time, time.Time) (bool, error)
-	BootstrapStatus(context.Context, time.Time) (BootstrapStatus, error)
-	MatchBootstrap(context.Context, []byte, time.Time) error
-	ConsumeBootstrap(context.Context, []byte, string, time.Time) (Membership, error)
+	BootstrapStatus(context.Context) (BootstrapStatus, error)
+	CreateFirstAdmin(context.Context, User, string, time.Time) (Membership, error)
 	UserCredential(context.Context, string) (Membership, string, error)
 	UpdateCredential(context.Context, string, string, time.Time) error
 	CreateSession(context.Context, []byte, Membership, []byte, time.Time, time.Time) error
@@ -151,40 +147,31 @@ func (m *Manager) WithPasswordHasher(hash func(string, PasswordParams) (string, 
 	return m
 }
 
-func (m *Manager) EnsureBootstrap(ctx context.Context) (string, error) {
-	secret, raw, err := randomSecret(32)
-	if err != nil {
-		return "", err
-	}
-	now := m.now()
-	created, err := m.store.EnsureBootstrap(ctx, digest(raw), now, now.Add(DefaultBootstrapTTL))
-	if err != nil || !created {
-		return "", err
-	}
-	return secret, nil
-}
 func (m *Manager) BootstrapStatus(ctx context.Context) (BootstrapStatus, error) {
-	return m.store.BootstrapStatus(ctx, m.now())
+	return m.store.BootstrapStatus(ctx)
 }
-func (m *Manager) Bootstrap(ctx context.Context, key, secret, password string) (Session, string, error) {
+func (m *Manager) Bootstrap(ctx context.Context, key, username, password string) (Session, string, error) {
 	if !m.limiter.Allow(key, m.now()) {
 		return Session{}, "", ErrRateLimited
 	}
+	username = strings.TrimSpace(username)
+	if !validUsername(username) {
+		return Session{}, "", fmt.Errorf("%w: username", ErrInvalidUser)
+	}
 	if err := validatePassword(password); err != nil {
-		return Session{}, "", err
-	}
-	raw, err := decodeSecret(secret)
-	if err != nil {
-		return Session{}, "", ErrBootstrapUnavailable
-	}
-	if err := m.store.MatchBootstrap(ctx, digest(raw), m.now()); err != nil {
-		return Session{}, "", err
+		return Session{}, "", fmt.Errorf("%w: password", ErrInvalidUser)
 	}
 	hash, err := m.hashPassword(password, DefaultPasswordParams)
 	if err != nil {
 		return Session{}, "", err
 	}
-	membership, err := m.store.ConsumeBootstrap(ctx, digest(raw), hash, m.now())
+	id, _, err := randomSecret(12)
+	if err != nil {
+		return Session{}, "", err
+	}
+	now := m.now()
+	user := User{ID: "usr_" + id, Username: username, DisplayName: username, Role: "admin", CreatedAt: now}
+	membership, err := m.store.CreateFirstAdmin(ctx, user, hash, now)
 	if err != nil {
 		return Session{}, "", err
 	}

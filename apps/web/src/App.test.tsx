@@ -97,11 +97,11 @@ describe("App", () => {
     resolveBootstrap({ required: true });
     resolveSession({ authenticated: false });
 
-    expect(await screen.findByRole("heading", { name: "Set up" })).toBeInTheDocument();
-    expect(screen.getByLabelText("One-time setup secret")).toHaveAttribute("autocomplete", "one-time-code");
+    expect(await screen.findByRole("heading", { name: "Create admin" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Username")).toBeInTheDocument();
   });
 
-  it("shows setup for a bootstrap status without an expiry field", async () => {
+  it("shows setup when bootstrap is required", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ required: true }), {
         status: 200,
@@ -114,17 +114,17 @@ describe("App", () => {
 
     render(<App api={createHttpApi({ fetcher })} />);
 
-    expect(await screen.findByRole("heading", { name: "Set up" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Create admin" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Sign in" })).not.toBeInTheDocument();
   });
 
-  it("submits setup without storing secrets in browser storage", async () => {
+  it("submits setup without storing the password in browser storage", async () => {
     const user = userEvent.setup();
     const setup = vi.fn().mockResolvedValue({
       authenticated: true,
       owner: { displayName: "Owner" },
-      userId: "usr_owner-local",
-      username: "owner-local",
+      userId: "usr_admin",
+      username: "admin",
       role: "admin",
       csrfToken: "setup-csrf",
     });
@@ -136,22 +136,22 @@ describe("App", () => {
     const setItem = vi.spyOn(Storage.prototype, "setItem");
 
     render(<App api={api} />);
-    await user.type(await screen.findByLabelText("One-time setup secret"), "setup-secret");
-    await user.type(screen.getByLabelText("New password"), "correct horse battery staple");
+    await user.type(await screen.findByLabelText("Username"), "admin");
+    await user.type(screen.getByLabelText("Password"), "correct horse battery staple");
     await user.type(screen.getByLabelText("Confirm password"), "correct horse battery staple");
-    await user.click(screen.getByRole("button", { name: "Create owner" }));
+    await user.click(screen.getByRole("button", { name: "Create admin" }));
 
     await waitFor(() => expect(setup).toHaveBeenCalledWith({
-      secret: "setup-secret",
+      username: "admin",
       password: "correct horse battery staple",
     }));
-    expect(setItem).not.toHaveBeenCalled();
+    expect(setItem.mock.calls.every((call) => !String(call[1]).includes("correct horse"))).toBe(true);
     setItem.mockRestore();
   });
 
-  it("keeps setup open and announces how to recover from an unavailable secret", async () => {
+  it("keeps setup open when bootstrap is unavailable", async () => {
     const user = userEvent.setup();
-    const message = "Setup is unavailable. Restart openboxd to issue a new one-time secret.";
+    const message = "Setup is unavailable. An admin already exists on this host.";
     const api = createApi({
       getBootstrapStatus: vi.fn().mockResolvedValue({ required: true }),
       getSession: vi.fn().mockResolvedValue({ authenticated: false }),
@@ -159,13 +159,13 @@ describe("App", () => {
     });
 
     render(<App api={api} />);
-    await user.type(await screen.findByLabelText("One-time setup secret"), "expired-setup-secret");
-    await user.type(screen.getByLabelText("New password"), "correct horse battery staple");
+    await user.type(await screen.findByLabelText("Username"), "admin");
+    await user.type(screen.getByLabelText("Password"), "correct horse battery staple");
     await user.type(screen.getByLabelText("Confirm password"), "correct horse battery staple");
-    await user.click(screen.getByRole("button", { name: "Create owner" }));
+    await user.click(screen.getByRole("button", { name: "Create admin" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(message);
-    expect(screen.getByRole("heading", { name: "Set up" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Create admin" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Sign in" })).not.toBeInTheDocument();
   });
 

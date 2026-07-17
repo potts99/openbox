@@ -18,6 +18,7 @@ export function AuthScreen({ mode, api, onAuthenticated }: AuthScreenProps) {
     event.preventDefault();
     setError("");
     const form = new FormData(event.currentTarget);
+    const username = String(form.get("username") ?? "").trim();
     const password = String(form.get("password") ?? "");
     if (mode === "setup" && password !== String(form.get("confirmation") ?? "")) {
       setError("Passwords do not match");
@@ -26,11 +27,8 @@ export function AuthScreen({ mode, api, onAuthenticated }: AuthScreenProps) {
     setPending(true);
     try {
       const session = mode === "setup"
-        ? await api.setup({ secret: String(form.get("secret") ?? ""), password })
-        : await api.login({
-          username: String(form.get("username") ?? "").trim(),
-          password,
-        });
+        ? await api.setup({ username, password })
+        : await api.login({ username, password });
       onAuthenticated(session);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Authentication failed");
@@ -49,34 +47,27 @@ export function AuthScreen({ mode, api, onAuthenticated }: AuthScreenProps) {
       <main className="auth-main" id="main-content">
         <div className="auth-form-wrap">
           <a className="wordmark" href="/" aria-label="OpenBox home"><span>OB</span> OpenBox</a>
-          <h1>{isSetup ? "Set up" : "Sign in"}</h1>
+          <h1>{isSetup ? "Create admin" : "Sign in"}</h1>
           <p className="lede">
             {isSetup
-              ? "Use the one-time secret from the openboxd log, then choose a password."
+              ? "Choose a username and password for the first admin on this host."
               : "Sign in with your OpenBox username and password."}
           </p>
           <form onSubmit={(event) => { void submit(event); }} aria-describedby={error ? "auth-error" : undefined}>
-            {isSetup ? (
-              <label>
-                <span>One-time setup secret</span>
-                <input name="secret" type="password" autoComplete="one-time-code" required autoFocus />
-              </label>
-            ) : (
-              <label>
-                <span>Username</span>
-                <input
-                  name="username"
-                  type="text"
-                  autoComplete="username"
-                  spellCheck={false}
-                  autoCapitalize="none"
-                  required
-                  autoFocus
-                />
-              </label>
-            )}
             <label>
-              <span>{isSetup ? "New password" : "Password"}</span>
+              <span>Username</span>
+              <input
+                name="username"
+                type="text"
+                autoComplete="username"
+                spellCheck={false}
+                autoCapitalize="none"
+                required
+                autoFocus
+              />
+            </label>
+            <label>
+              <span>Password</span>
               <input
                 name="password"
                 type="password"
@@ -93,7 +84,7 @@ export function AuthScreen({ mode, api, onAuthenticated }: AuthScreenProps) {
             ) : null}
             <p className="form-error" id="auth-error" role={error ? "alert" : undefined} aria-live="assertive">{error}</p>
             <button className="primary-action" type="submit" disabled={pending}>
-              {pending ? "Working…" : isSetup ? "Create owner" : "Sign in"}
+              {pending ? "Working…" : isSetup ? "Create admin" : "Sign in"}
             </button>
           </form>
           <p className="security-note">Credentials stay on this host.</p>

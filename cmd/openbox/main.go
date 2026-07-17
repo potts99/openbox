@@ -28,6 +28,7 @@ const usage = `usage: openbox COMMAND [OPTIONS]
 
 Commands:
   doctor                 Check server and runtime capabilities
+  setup                  Create the first admin (username + password)
   new NAME               Create an instance (sandbox: --lifetime, --egress-profile)
   ls                     List instances
   inspect ID             Show an instance (TTL, isolation, cleanup errors)
@@ -96,6 +97,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if commandArgs[0] == "backup" {
 		return runBackup(commandArgs[1:], options.json, stdout, stderr)
+	}
+	if commandArgs[0] == "setup" {
+		return runSetup(commandArgs[1:], options, stdout, stderr)
 	}
 	httpClient := &http.Client{Timeout: options.timeout}
 	api, err := openbox.New(openbox.Options{BaseURL: options.server, HTTPClient: httpClient, UserAgent: "openbox-cli/" + version.Version, Token: options.token})

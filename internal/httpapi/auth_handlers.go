@@ -164,14 +164,14 @@ func (h *Handler) routeBootstrap(w http.ResponseWriter, r *http.Request, request
 			return true
 		}
 		var input struct {
-			Secret   string `json:"secret"`
+			Username string `json:"username"`
 			Password string `json:"password"`
 		}
 		if h.decodeJSON(w, r, &input) != nil {
 			h.writeError(w, requestID, http.StatusBadRequest, string(domain.CodeInvalidArgument), "body")
 			return true
 		}
-		session, secret, err := h.auth.Bootstrap(r.Context(), h.clientAddress(r), input.Secret, input.Password)
+		session, secret, err := h.auth.Bootstrap(r.Context(), h.clientAddress(r), input.Username, input.Password)
 		if err != nil {
 			h.writeAuthError(w, requestID, err)
 			return true
@@ -471,8 +471,10 @@ func (h *Handler) writeAuthError(w http.ResponseWriter, id string, err error) {
 	case errors.Is(err, auth.ErrRateLimited):
 		w.Header().Set("Retry-After", "900")
 		h.writeError(w, id, http.StatusTooManyRequests, "rate_limited", "password")
+	case errors.Is(err, auth.ErrInvalidUser):
+		h.writeError(w, id, http.StatusBadRequest, string(domain.CodeInvalidArgument), "username")
 	case errors.Is(err, auth.ErrBootstrapUnavailable):
-		h.writeError(w, id, http.StatusConflict, "bootstrap_unavailable", "secret")
+		h.writeError(w, id, http.StatusConflict, "bootstrap_unavailable", "username")
 	case errors.Is(err, auth.ErrAmbiguousOrganization):
 		h.writeError(w, id, http.StatusConflict, "ambiguous_organization", "username")
 	default:

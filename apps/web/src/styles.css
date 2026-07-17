@@ -251,6 +251,38 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .page-heading h1 { margin: 0; font-size: 1.125rem; font-weight: 600; }
 .page-heading .primary-action { padding: .4rem .65rem; font-size: .7rem; }
 
+.setup-checklist {
+  margin: 0 0 1.25rem;
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 92%, var(--ink) 8%);
+}
+.setup-checklist-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: .35rem;
+}
+.setup-checklist h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 550;
+}
+.setup-checklist p { margin: 0 0 .65rem; color: var(--muted); font-size: .875rem; }
+.setup-checklist ol {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--ink);
+  font-size: .875rem;
+}
+.setup-checklist li { margin: .25rem 0; }
+.setup-checklist code {
+  font-size: .8125rem;
+  padding: .05rem .3rem;
+  border: 1px solid var(--line);
+}
+
 .capability-strip {
   display: flex;
   flex-wrap: wrap;

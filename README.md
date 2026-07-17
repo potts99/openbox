@@ -39,9 +39,9 @@ Missing KVM is reported as unavailable rather than fatal because OpenBox support
 
 See [the strong-isolation operator guide](docs/operators/strong-isolation.md) for VM selection, image requirements, readiness, and the opt-in KVM test. Sandbox create, exec, TTL, and expiry are covered in [the sandbox operator guide](docs/operators/sandbox.md) and [sandbox lifecycle](docs/api/sandbox-lifecycle.md).
 
-The API and embedded owner console default to loopback, with one-time owner
-bootstrap, browser sessions, and scoped API tokens. A non-loopback listener
-requires TLS. See the [private API operator guide](docs/operators/private-api.md),
+The API and embedded owner console default to loopback, with first-admin
+username/password setup, browser sessions, and scoped API tokens. A non-loopback
+listener requires TLS. See the [private API operator guide](docs/operators/private-api.md),
 [API v1 behavior](docs/api/v1.md), and
 [owner-authentication security model](docs/security/owner-authentication.md).
 

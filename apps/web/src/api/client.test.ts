@@ -38,8 +38,8 @@ describe("createHttpApi", () => {
       error: { code: "bootstrap_unavailable", message: "stored bootstrap hash was consumed at /private/path" },
     }), { status: 409, headers: { "content-type": "application/json" } }));
 
-    await expect(createHttpApi({ fetcher }).setup({ secret: "expired", password: "password-value" }))
-      .rejects.toThrow("Setup is unavailable. Restart openboxd to issue a new one-time secret.");
+    await expect(createHttpApi({ fetcher }).setup({ username: "admin", password: "password-value" }))
+      .rejects.toThrow("Setup is unavailable. An admin already exists on this host.");
   });
 
   it("treats a 401 session probe as logged out and normalizes backend session fields", async () => {

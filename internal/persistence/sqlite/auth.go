@@ -5,7 +5,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"strings"
 	"time"
@@ -14,81 +13,15 @@ import (
 	"github.com/openbox-dev/openbox/internal/domain"
 )
 
-func (s *Store) EnsureBootstrap(ctx context.Context, secretHash []byte, now, expires time.Time) (bool, error) {
-	release, err := s.acquireWrite(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer release()
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback()
-	var credentials int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_credentials`).Scan(&credentials); err != nil {
-		return false, err
-	}
-	if credentials != 0 {
-		return false, nil
-	}
-	var active int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM bootstrap_challenges WHERE consumed_at IS NULL AND expires_at > ?`, formatTime(now)).Scan(&active); err != nil {
-		return false, err
-	}
-	if active != 0 {
-		return false, nil
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE bootstrap_challenges SET consumed_at=? WHERE consumed_at IS NULL`, formatTime(now)); err != nil {
-		return false, err
-	}
-	id := hex.EncodeToString(secretHash[:12])
-	if _, err := tx.ExecContext(ctx, `INSERT INTO bootstrap_challenges(id,secret_hash,expires_at) VALUES(?,?,?)`, id, secretHash, formatTime(expires)); err != nil {
-		return false, mapWriteError(err)
-	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-func (s *Store) BootstrapStatus(ctx context.Context, now time.Time) (auth.BootstrapStatus, error) {
+func (s *Store) BootstrapStatus(ctx context.Context) (auth.BootstrapStatus, error) {
 	var credentials int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_credentials`).Scan(&credentials); err != nil {
 		return auth.BootstrapStatus{}, err
 	}
-	if credentials != 0 {
-		return auth.BootstrapStatus{Required: false}, nil
-	}
-	var raw string
-	err := s.db.QueryRowContext(ctx, `SELECT expires_at FROM bootstrap_challenges WHERE consumed_at IS NULL AND expires_at>? ORDER BY expires_at DESC LIMIT 1`, formatTime(now)).Scan(&raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return auth.BootstrapStatus{Required: true}, nil
-	}
-	if err != nil {
-		return auth.BootstrapStatus{}, err
-	}
-	expires, err := parseTime(raw)
-	if err != nil {
-		return auth.BootstrapStatus{}, err
-	}
-	return auth.BootstrapStatus{Required: true, ExpiresAt: &expires}, nil
+	return auth.BootstrapStatus{Required: credentials == 0}, nil
 }
 
-func (s *Store) MatchBootstrap(ctx context.Context, secretHash []byte, now time.Time) error {
-	var credentials int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_credentials`).Scan(&credentials); err != nil || credentials != 0 {
-		return auth.ErrBootstrapUnavailable
-	}
-	var stored []byte
-	err := s.db.QueryRowContext(ctx, `SELECT secret_hash FROM bootstrap_challenges WHERE consumed_at IS NULL AND expires_at>? LIMIT 1`, formatTime(now)).Scan(&stored)
-	if err != nil || !constantBytes(stored, secretHash) {
-		return auth.ErrBootstrapUnavailable
-	}
-	return nil
-}
-
-func (s *Store) ConsumeBootstrap(ctx context.Context, secretHash []byte, passwordHash string, now time.Time) (auth.Membership, error) {
+func (s *Store) CreateFirstAdmin(ctx context.Context, user auth.User, passwordHash string, now time.Time) (auth.Membership, error) {
 	release, err := s.acquireWrite(ctx)
 	if err != nil {
 		return auth.Membership{}, err
@@ -107,34 +40,18 @@ func (s *Store) ConsumeBootstrap(ctx context.Context, secretHash []byte, passwor
 	if err := tx.QueryRowContext(ctx, `SELECT id FROM owners LIMIT 1`).Scan(&owner); err != nil {
 		return auth.Membership{}, auth.ErrBootstrapUnavailable
 	}
-	var stored []byte
-	err = tx.QueryRowContext(ctx, `SELECT secret_hash FROM bootstrap_challenges WHERE consumed_at IS NULL AND expires_at>? LIMIT 1`, formatTime(now)).Scan(&stored)
-	if err != nil || !constantBytes(stored, secretHash) {
-		return auth.Membership{}, auth.ErrBootstrapUnavailable
-	}
 	var count int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_credentials`).Scan(&count); err != nil || count != 0 {
 		return auth.Membership{}, auth.ErrBootstrapUnavailable
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE bootstrap_challenges SET consumed_at=? WHERE consumed_at IS NULL AND expires_at>?`, formatTime(now), formatTime(now))
-	if err != nil {
-		return auth.Membership{}, err
-	}
-	if n, _ := result.RowsAffected(); n != 1 {
-		return auth.Membership{}, auth.ErrBootstrapUnavailable
-	}
-	user := auth.User{ID: "usr_" + string(owner), Username: string(owner), DisplayName: "Owner", Role: "admin", CreatedAt: now}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO users(id,username,display_name,created_at,updated_at) VALUES(?,?,?,?,?)`, user.ID, user.Username, user.DisplayName, formatTime(now), formatTime(now)); err != nil {
-		return auth.Membership{}, auth.ErrBootstrapUnavailable
+		return auth.Membership{}, mapWriteError(err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO org_memberships(owner_id,user_id,role,created_at) VALUES(?,?,?,?)`, owner, user.ID, user.Role, formatTime(now)); err != nil {
-		return auth.Membership{}, auth.ErrBootstrapUnavailable
+		return auth.Membership{}, mapWriteError(err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO user_credentials(user_id,password_hash,updated_at) VALUES(?,?,?)`, user.ID, passwordHash, formatTime(now)); err != nil {
-		return auth.Membership{}, auth.ErrBootstrapUnavailable
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO owner_credentials(owner_id,password_hash,updated_at) VALUES(?,?,?)`, owner, passwordHash, formatTime(now)); err != nil {
-		return auth.Membership{}, auth.ErrBootstrapUnavailable
+		return auth.Membership{}, mapWriteError(err)
 	}
 	if err := tx.Commit(); err != nil {
 		return auth.Membership{}, err
@@ -438,15 +355,4 @@ func (s *Store) DeleteSSHKey(ctx context.Context, o domain.OwnerID, id string) e
 		return &domain.Error{Code: domain.CodeNotFound, Field: "ssh_key"}
 	}
 	return nil
-}
-
-func constantBytes(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	var v byte
-	for i := range a {
-		v |= a[i] ^ b[i]
-	}
-	return v == 0
 }

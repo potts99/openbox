@@ -1191,13 +1191,12 @@ components:
       required: [required]
       properties:
         required: { type: boolean }
-        expires_at: { type: string, format: date-time }
     BootstrapRequest:
       type: object
       additionalProperties: false
-      required: [secret, password]
+      required: [username, password]
       properties:
-        secret: { type: string, minLength: 20, writeOnly: true }
+        username: { type: string, minLength: 1, maxLength: 100 }
         password: { type: string, minLength: 12, maxLength: 1024, writeOnly: true }
     LoginRequest:
       type: object

@@ -152,13 +152,6 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err != nil {
 		return fail(err)
 	}
-	bootstrapSecret, err := authManager.EnsureBootstrap(ctx)
-	if err != nil {
-		return fail(err)
-	}
-	if bootstrapSecret != "" {
-		log.Printf("openboxd: one-time owner bootstrap secret (expires in %s): %s", auth.DefaultBootstrapTTL, bootstrapSecret)
-	}
 	runtime, err := incus.New(incus.Options{SocketPath: config.IncusSocket, Project: config.Project, ContainerProfile: config.ContainerProfile, VMProfile: config.VMProfile, StoragePool: config.StoragePool})
 	if err != nil {
 		return fail(err)

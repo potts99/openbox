@@ -9,6 +9,7 @@ import type {
   OperationSummary,
   Session,
 } from "../api/client";
+import { dismissSetupChecklist, readSetupChecklistUsername, SetupChecklist } from "../auth/SetupChecklist";
 import { CapabilityBanner } from "../components/CapabilityBanner";
 import { OperationDrawer } from "../components/OperationDrawer";
 import { CreateInstancePage } from "./CreateInstancePage";
@@ -42,6 +43,7 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
   const [logoutPending, setLogoutPending] = useState(false);
   const [logoutError, setLogoutError] = useState("");
   const [view, setView] = useState<View>({ kind: "list" });
+  const [checklistUsername, setChecklistUsername] = useState(() => readSetupChecklistUsername());
   const operationsButton = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -214,6 +216,15 @@ export function ConsolePage({ api, session, onLoggedOut }: ConsolePageProps) {
             </button>
           </div>
 
+          {checklistUsername ? (
+            <SetupChecklist
+              username={checklistUsername}
+              onDismiss={() => {
+                dismissSetupChecklist();
+                setChecklistUsername("");
+              }}
+            />
+          ) : null}
           {data.status === "loading" ? <p className="data-message" role="status">Loading…</p> : null}
           {data.status === "error" ? <p className="data-message is-error" role="alert">{data.message}</p> : null}
           {data.status === "ready" ? (

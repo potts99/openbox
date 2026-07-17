@@ -291,13 +291,12 @@ type AuditEvent struct {
 // BootstrapRequest defines model for BootstrapRequest.
 type BootstrapRequest struct {
 	Password *string `json:"password,omitempty"`
-	Secret   *string `json:"secret,omitempty"`
+	Username string  `json:"username"`
 }
 
 // BootstrapStatus defines model for BootstrapStatus.
 type BootstrapStatus struct {
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	Required  bool       `json:"required"`
+	Required bool `json:"required"`
 }
 
 // BuildImageRequest defines model for BuildImageRequest.

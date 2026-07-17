@@ -149,7 +149,7 @@ OpenBox install complete.
 Next steps:
   1. Ensure Incus is running and OPENBOX_STORAGE_POOL in $ENV_FILE exists.
   2. Check health: curl -sS -H "X-OpenBox-API-Version: v1" http://127.0.0.1:8443/v1/health
-  3. Complete owner bootstrap (one-time secret in journal): journalctl -u openboxd -b | grep bootstrap
+  3. Create the first admin in the console, or run: openbox setup
   4. Configure Caddy for HTTPS:
        - copy deploy/caddy/Caddyfile to your Caddy config directory
        - add: import $ROUTES_FILE

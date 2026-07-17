@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,6 +21,62 @@ import (
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 	"github.com/openbox-dev/openbox/internal/runtime/fake"
 )
+
+func TestSetupReportsAlreadyConfigured(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/bootstrap" || r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"required":false}`)
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"setup", "--server", server.URL}, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), "already configured") || stderr.Len() != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestSetupCreatesFirstAdmin(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/bootstrap" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			_, _ = fmt.Fprint(w, `{"required":true}`)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), `"username":"admin"`) || !strings.Contains(string(body), `"password":"a sufficiently long password"`) {
+			t.Fatalf("body=%s", body)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = fmt.Fprint(w, `{"owner_id":"owner-local","username":"admin","role":"admin","user_id":"usr_1","expires_at":"2026-07-17T12:00:00Z","csrf_token":"x"}`)
+	}))
+	defer server.Close()
+	passwordFile := filepath.Join(t.TempDir(), "password")
+	if err := os.WriteFile(passwordFile, []byte("a sufficiently long password\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"setup", "--server", server.URL,
+		"--username", "admin",
+		"--password-file", passwordFile,
+	}, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), "Admin created: admin") || stderr.Len() != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
 
 func TestDoctorHumanAndJSON(t *testing.T) {
 	server := apiServer(t, func(w http.ResponseWriter, r *http.Request) {
