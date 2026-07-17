@@ -189,3 +189,30 @@ func TestMigrationBackfillsLegacyOwnerCredentialAsAdminUser(t *testing.T) {
 		t.Fatalf("backfilled session=%+v", session)
 	}
 }
+
+func TestUserCredentialRejectsAmbiguousOrganization(t *testing.T) {
+	ctx := context.Background()
+	store := openStore(t)
+	defer store.Close()
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	for _, owner := range []string{"owner-a", "owner-b"} {
+		if err := store.CreateOwner(ctx, domain.Owner{ID: domain.OwnerID(owner), Name: owner, CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hash, err := auth.HashPassword("a sufficiently long password", auth.DefaultPasswordParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateUser(ctx, "owner-a", auth.User{ID: "usr_shared", Username: "shared", DisplayName: "Shared", Role: "member", CreatedAt: now}, hash, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO org_memberships(owner_id,user_id,role,created_at) VALUES(?,?,?,?)`,
+		"owner-b", "usr_shared", "member", formatTime(now)); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = store.UserCredential(ctx, "shared")
+	if !errors.Is(err, auth.ErrAmbiguousOrganization) {
+		t.Fatalf("err=%v, want ambiguous organization", err)
+	}
+}

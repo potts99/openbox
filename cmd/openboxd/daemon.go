@@ -29,6 +29,7 @@ import (
 	"github.com/openbox-dev/openbox/internal/app/sshcommands"
 	"github.com/openbox-dev/openbox/internal/artifacts"
 	"github.com/openbox-dev/openbox/internal/auth"
+	"github.com/openbox-dev/openbox/internal/daemonlock"
 	"github.com/openbox-dev/openbox/internal/dnsproxy"
 	"github.com/openbox-dev/openbox/internal/domain"
 	"github.com/openbox-dev/openbox/internal/httpapi"
@@ -126,11 +127,23 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 	if err := os.MkdirAll(filepath.Dir(config.DatabasePath), 0o700); err != nil {
 		return daemonComponents{}, fmt.Errorf("create database directory: %w", err)
 	}
-	store, err := sqlite.Open(ctx, config.DatabasePath)
+	hostLock, err := daemonlock.TryAcquire(daemonlock.PathForDatabase(config.DatabasePath))
 	if err != nil {
+		if errors.Is(err, daemonlock.ErrHeld) {
+			return daemonComponents{}, fmt.Errorf("%w; stop the other openboxd process before starting", err)
+		}
 		return daemonComponents{}, err
 	}
-	fail := func(err error) (daemonComponents, error) { _ = store.Close(); return daemonComponents{}, err }
+	store, err := sqlite.Open(ctx, config.DatabasePath)
+	if err != nil {
+		_ = hostLock.Close()
+		return daemonComponents{}, err
+	}
+	fail := func(err error) (daemonComponents, error) {
+		_ = store.Close()
+		_ = hostLock.Close()
+		return daemonComponents{}, err
+	}
 	now := time.Now().UTC()
 	if err := store.EnsureOwner(ctx, domain.Owner{ID: domain.OwnerID(config.OwnerID), Name: config.OwnerName, CreatedAt: now, UpdatedAt: now}); err != nil {
 		return fail(err)
@@ -378,10 +391,23 @@ func (realComponentFactory) Build(ctx context.Context, config daemonConfig) (dae
 		reconciler:  expiryThenReconcile{expiry: expiry, egress: egressService, inner: reconciler},
 		metrics:     metricsSampler,
 		sandboxPool: sandboxPool,
-		closer:      store,
+		closer:      multiCloser{store, hostLock},
 		api:         api,
 		ssh:         sshServer,
 	}, nil
+}
+
+type multiCloser []daemonCloser
+
+func (c multiCloser) Close() error {
+	var err error
+	for i := len(c) - 1; i >= 0; i-- {
+		if c[i] == nil {
+			continue
+		}
+		err = errors.Join(err, c[i].Close())
+	}
+	return err
 }
 
 type egressRefresher interface {

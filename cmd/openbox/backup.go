@@ -18,13 +18,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openbox-dev/openbox/internal/daemonlock"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 	"github.com/openbox-dev/openbox/internal/runtime/incus"
 	"github.com/openbox-dev/openbox/internal/version"
 	_ "modernc.org/sqlite"
 )
 
-const backupFormatVersion = 2
+const (
+	backupFormatVersion   = 2
+	backupTransferTimeout = 30 * time.Minute
+)
 
 type backupManifest struct {
 	FormatVersion int              `json:"format_version"`
@@ -54,6 +58,7 @@ type backupRuntime interface {
 	InspectInstance(context.Context, string) (runtimeapi.Instance, error)
 	ExportInstance(context.Context, string, io.Writer) error
 	ImportInstance(context.Context, runtimeapi.InstanceBackup) (runtimeapi.Instance, error)
+	DeleteInstance(context.Context, string) error
 }
 
 func runBackup(args []string, jsonOutput bool, stdout, stderr io.Writer) int {
@@ -278,13 +283,15 @@ func exportInstanceBackups(databasePath, destination string, runtime backupRunti
 		return nil, fmt.Errorf("list backed up instances: %w", err)
 	}
 	defer rows.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), backupTransferTimeout)
+	defer cancel()
 	var exports []backupInstance
 	for rows.Next() {
 		var item backupInstance
 		if err := rows.Scan(&item.ID, &item.RuntimeRef); err != nil {
 			return nil, fmt.Errorf("read backed up instance: %w", err)
 		}
-		instance, err := runtime.InspectInstance(context.Background(), item.RuntimeRef)
+		instance, err := runtime.InspectInstance(ctx, item.RuntimeRef)
 		if err != nil {
 			return nil, fmt.Errorf("inspect instance %s before export: %w", item.RuntimeRef, err)
 		}
@@ -306,7 +313,7 @@ func exportInstanceBackups(databasePath, destination string, runtime backupRunti
 		if err != nil {
 			return nil, fmt.Errorf("create instance export %s: %w", item.RuntimeRef, err)
 		}
-		exportErr := runtime.ExportInstance(context.Background(), item.RuntimeRef, file)
+		exportErr := runtime.ExportInstance(ctx, item.RuntimeRef, file)
 		closeErr := file.Close()
 		if exportErr != nil {
 			return nil, fmt.Errorf("export instance %s: %w", item.RuntimeRef, exportErr)
@@ -508,19 +515,24 @@ func verifyBackup(root string) (backupManifest, error) {
 	return manifest, nil
 }
 
-// restoreBackup verifies source before changing host state. Call it only while
-// openboxd is stopped: it replaces the database, SSH gateway state, generated
-// Caddy routes, and (when present) daemon environment file.
+// restoreBackup verifies source, takes the host lock (so openboxd cannot be
+// live), replaces control-plane files, then imports any instance exports.
 func restoreBackup(source, databasePath, stateDir, configPath string, runtime backupRuntime) (backupManifest, error) {
+	hostLock, err := daemonlock.TryAcquire(daemonlock.PathForDatabase(databasePath))
+	if err != nil {
+		if errors.Is(err, daemonlock.ErrHeld) {
+			return backupManifest{}, fmt.Errorf("%w; stop openboxd before restoring a backup", err)
+		}
+		return backupManifest{}, err
+	}
+	defer hostLock.Close()
+
 	manifest, err := verifyBackup(source)
 	if err != nil {
 		return backupManifest{}, err
 	}
 	if len(manifest.Instances) > 0 && runtime == nil {
 		return backupManifest{}, errors.New("backup includes instance exports; an Incus runtime is required to restore them")
-	}
-	if err := importInstanceBackups(source, manifest, runtime); err != nil {
-		return backupManifest{}, err
 	}
 	filesByPath := make(map[string]backupFile, len(manifest.Files))
 	for _, file := range manifest.Files {
@@ -545,32 +557,66 @@ func restoreBackup(source, databasePath, stateDir, configPath string, runtime ba
 			return backupManifest{}, fmt.Errorf("restore openboxd environment: %w", err)
 		}
 	}
+	if err := importInstanceBackups(source, manifest, runtime); err != nil {
+		return backupManifest{}, err
+	}
 	return manifest, nil
 }
 
 func importInstanceBackups(root string, manifest backupManifest, runtime backupRuntime) error {
+	if len(manifest.Instances) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), backupTransferTimeout)
+	defer cancel()
+	imported := make([]string, 0, len(manifest.Instances))
+	rollback := func() {
+		for i := len(imported) - 1; i >= 0; i-- {
+			_ = runtime.DeleteInstance(context.Background(), imported[i])
+		}
+	}
 	for _, item := range manifest.Instances {
 		path, err := backupPath(root, item.Path)
 		if err != nil {
+			rollback()
 			return err
 		}
 		file, err := os.Open(path)
 		if err != nil {
+			rollback()
 			return fmt.Errorf("open instance export %s: %w", item.RuntimeRef, err)
 		}
-		instance, importErr := runtime.ImportInstance(context.Background(), runtimeapi.InstanceBackup{Ref: item.RuntimeRef, Body: file})
+		instance, importErr := runtime.ImportInstance(ctx, runtimeapi.InstanceBackup{Ref: item.RuntimeRef, Body: file})
 		closeErr := file.Close()
+		if errors.Is(importErr, runtimeapi.ErrAlreadyExists) {
+			existing, inspectErr := runtime.InspectInstance(ctx, item.RuntimeRef)
+			if inspectErr == nil && instanceMatchesBackup(existing, item) {
+				continue
+			}
+			rollback()
+			return fmt.Errorf("import instance %s: %w", item.RuntimeRef, importErr)
+		}
 		if importErr != nil {
+			rollback()
 			return fmt.Errorf("import instance %s: %w", item.RuntimeRef, importErr)
 		}
 		if closeErr != nil {
+			rollback()
+			_ = runtime.DeleteInstance(context.Background(), item.RuntimeRef)
 			return fmt.Errorf("close instance export %s: %w", item.RuntimeRef, closeErr)
 		}
-		if instance.Ref != item.RuntimeRef || instance.Metadata["user.openbox.instance_id"] != item.ID {
+		if !instanceMatchesBackup(instance, item) {
+			rollback()
+			_ = runtime.DeleteInstance(context.Background(), item.RuntimeRef)
 			return fmt.Errorf("imported instance %s does not retain OpenBox ownership metadata", item.RuntimeRef)
 		}
+		imported = append(imported, item.RuntimeRef)
 	}
 	return nil
+}
+
+func instanceMatchesBackup(instance runtimeapi.Instance, item backupInstance) bool {
+	return instance.Ref == item.RuntimeRef && instance.Metadata["user.openbox.instance_id"] == item.ID
 }
 
 func restoreSSHBackupTree(root string, files []backupFile, destination string) error {

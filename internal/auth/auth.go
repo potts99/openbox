@@ -52,6 +52,8 @@ var ErrUnauthenticated = errors.New("authentication required")
 var ErrForbidden = errors.New("authentication forbidden")
 var ErrBootstrapUnavailable = errors.New("bootstrap unavailable")
 var ErrRateLimited = errors.New("authentication rate limited")
+var ErrAmbiguousOrganization = errors.New("user belongs to multiple organizations")
+var ErrInvalidUser = errors.New("invalid user")
 
 type BootstrapStatus struct {
 	Required  bool       `json:"required"`
@@ -195,6 +197,9 @@ func (m *Manager) Login(ctx context.Context, key, username, password string) (Se
 	}
 	membership, encoded, err := m.store.UserCredential(ctx, username)
 	if err != nil {
+		if errors.Is(err, ErrAmbiguousOrganization) {
+			return Session{}, "", err
+		}
 		return Session{}, "", ErrUnauthenticated
 	}
 	valid, rehash, err := VerifyPassword(encoded, password)
@@ -367,13 +372,16 @@ func (m *Manager) AddUser(ctx context.Context, owner domain.OwnerID, username, d
 	username = strings.TrimSpace(username)
 	displayName = strings.TrimSpace(displayName)
 	if !validUsername(username) {
-		return User{}, errors.New("invalid username")
+		return User{}, fmt.Errorf("%w: username", ErrInvalidUser)
 	}
 	if displayName == "" {
 		displayName = username
 	}
 	if len(displayName) > 100 {
-		return User{}, errors.New("invalid display name")
+		return User{}, fmt.Errorf("%w: display_name", ErrInvalidUser)
+	}
+	if err := validatePassword(password); err != nil {
+		return User{}, fmt.Errorf("%w: password", ErrInvalidUser)
 	}
 	hash, err := m.hashPassword(password, DefaultPasswordParams)
 	if err != nil {

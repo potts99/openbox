@@ -142,26 +142,51 @@ func (s *Store) ConsumeBootstrap(ctx context.Context, secretHash []byte, passwor
 	return auth.Membership{OwnerID: owner, User: user}, nil
 }
 func (s *Store) UserCredential(ctx context.Context, username string) (auth.Membership, string, error) {
-	var membership auth.Membership
-	var h string
-	var created string
+	username = strings.TrimSpace(username)
+	query := `SELECT m.owner_id,u.id,u.username,u.display_name,m.role,u.created_at,c.password_hash
+		FROM user_credentials c JOIN users u ON u.id=c.user_id JOIN org_memberships m ON m.user_id=u.id`
+	var rows *sql.Rows
 	var err error
-	if strings.TrimSpace(username) == "" {
-		err = s.db.QueryRowContext(ctx, `SELECT m.owner_id,u.id,u.username,u.display_name,m.role,u.created_at,c.password_hash
-			FROM user_credentials c JOIN users u ON u.id=c.user_id JOIN org_memberships m ON m.user_id=u.id
-			WHERE (SELECT COUNT(*) FROM user_credentials)=1 LIMIT 1`).Scan(
-			&membership.OwnerID, &membership.User.ID, &membership.User.Username, &membership.User.DisplayName, &membership.User.Role, &created, &h)
+	if username == "" {
+		rows, err = s.db.QueryContext(ctx, query+` WHERE (SELECT COUNT(*) FROM user_credentials)=1 ORDER BY m.owner_id,u.id`)
 	} else {
-		err = s.db.QueryRowContext(ctx, `SELECT m.owner_id,u.id,u.username,u.display_name,m.role,u.created_at,c.password_hash
-			FROM user_credentials c JOIN users u ON u.id=c.user_id JOIN org_memberships m ON m.user_id=u.id
-			WHERE u.username=? LIMIT 1`, username).Scan(
-			&membership.OwnerID, &membership.User.ID, &membership.User.Username, &membership.User.DisplayName, &membership.User.Role, &created, &h)
+		rows, err = s.db.QueryContext(ctx, query+` WHERE u.username=? ORDER BY m.owner_id,u.id`, username)
 	}
 	if err != nil {
 		return auth.Membership{}, "", err
 	}
-	membership.User.CreatedAt, err = parseTime(created)
-	return membership, h, err
+	defer rows.Close()
+
+	var memberships []auth.Membership
+	var hash string
+	for rows.Next() {
+		var membership auth.Membership
+		var created, passwordHash string
+		if err := rows.Scan(&membership.OwnerID, &membership.User.ID, &membership.User.Username, &membership.User.DisplayName, &membership.User.Role, &created, &passwordHash); err != nil {
+			return auth.Membership{}, "", err
+		}
+		membership.User.CreatedAt, err = parseTime(created)
+		if err != nil {
+			return auth.Membership{}, "", err
+		}
+		if hash == "" {
+			hash = passwordHash
+		} else if hash != passwordHash {
+			return auth.Membership{}, "", auth.ErrAmbiguousOrganization
+		}
+		memberships = append(memberships, membership)
+	}
+	if err := rows.Err(); err != nil {
+		return auth.Membership{}, "", err
+	}
+	switch len(memberships) {
+	case 0:
+		return auth.Membership{}, "", sql.ErrNoRows
+	case 1:
+		return memberships[0], hash, nil
+	default:
+		return auth.Membership{}, "", auth.ErrAmbiguousOrganization
+	}
 }
 func (s *Store) UpdateCredential(ctx context.Context, userID, h string, now time.Time) error {
 	r, e := s.db.ExecContext(ctx, `UPDATE user_credentials SET password_hash=?,updated_at=? WHERE user_id=?`, h, formatTime(now), userID)

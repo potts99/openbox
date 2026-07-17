@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openbox-dev/openbox/internal/daemonlock"
 	runtimeapi "github.com/openbox-dev/openbox/internal/runtime"
 	"github.com/openbox-dev/openbox/internal/runtime/fake"
 )
@@ -329,6 +331,112 @@ func TestBackupCreateAndVerify(t *testing.T) {
 	if code != 1 || !strings.Contains(stderr.String(), "integrity check failed") {
 		t.Fatalf("corrupt verify exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
+}
+
+func TestBackupRestoreRefusesHeldDaemonLock(t *testing.T) {
+	root := t.TempDir()
+	stateDir := filepath.Join(root, "state")
+	if err := os.MkdirAll(filepath.Join(stateDir, "ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "ssh", "gateway_host"), []byte("host"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	databasePath := filepath.Join(stateDir, "openbox.db")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE fixture (value TEXT); INSERT INTO fixture VALUES ('ok')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	backupPath := filepath.Join(root, "backup")
+	if _, err := createBackup(backupPath, databasePath, stateDir, ""); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := daemonlock.TryAcquire(daemonlock.PathForDatabase(databasePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	_, err = restoreBackup(backupPath, databasePath, stateDir, "", nil)
+	if !errors.Is(err, daemonlock.ErrHeld) {
+		t.Fatalf("err=%v, want daemonlock.ErrHeld", err)
+	}
+}
+
+func TestBackupInstanceImportRollsBackOnFailure(t *testing.T) {
+	root := t.TempDir()
+	stateDir := filepath.Join(root, "state")
+	if err := os.MkdirAll(filepath.Join(stateDir, "ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, contents := range map[string]string{"gateway_host": "host key", "instance_client": "client key"} {
+		if err := os.WriteFile(filepath.Join(stateDir, "ssh", name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	databasePath := filepath.Join(stateDir, "openbox.db")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TABLE instances (id TEXT, runtime_ref TEXT, deleted_at TEXT);
+		INSERT INTO instances VALUES ('instance-a', 'obx-a', NULL);
+		INSERT INTO instances VALUES ('instance-b', 'obx-b', NULL);`,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	runtime := fake.New(runtimeapi.Capabilities{})
+	runtime.AddImage(runtimeapi.Image{Fingerprint: "sha256:base"})
+	for _, ref := range []string{"obx-a", "obx-b"} {
+		if _, err := runtime.CreateInstance(context.Background(), runtimeapi.CreateRequest{
+			Ref: ref, Image: "sha256:base", Unprivileged: true,
+			Metadata: map[string]string{"user.openbox.instance_id": "instance-" + strings.TrimPrefix(ref, "obx-")},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backupPath := filepath.Join(root, "backup")
+	if _, err := createBackupWithRuntime(backupPath, databasePath, stateDir, "", runtime); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.DeleteInstance(context.Background(), "obx-a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.DeleteInstance(context.Background(), "obx-b"); err != nil {
+		t.Fatal(err)
+	}
+	failing := &failSecondImport{Runtime: fake.New(runtimeapi.Capabilities{})}
+	if _, err := restoreBackup(backupPath, databasePath, stateDir, "", failing); err == nil {
+		t.Fatal("expected second import failure")
+	}
+	if _, err := failing.InspectInstance(context.Background(), "obx-a"); !errors.Is(err, runtimeapi.ErrNotFound) {
+		t.Fatalf("rolled back instance still present: %v", err)
+	}
+	if _, err := failing.InspectInstance(context.Background(), "obx-b"); !errors.Is(err, runtimeapi.ErrNotFound) {
+		t.Fatalf("second instance present: %v", err)
+	}
+}
+
+type failSecondImport struct {
+	*fake.Runtime
+	imports int
+}
+
+func (r *failSecondImport) ImportInstance(ctx context.Context, backup runtimeapi.InstanceBackup) (runtimeapi.Instance, error) {
+	r.imports++
+	if r.imports >= 2 {
+		return runtimeapi.Instance{}, errors.New("boom")
+	}
+	return r.Runtime.ImportInstance(ctx, backup)
 }
 
 func TestBackupInstanceExportAndImport(t *testing.T) {

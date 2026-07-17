@@ -320,7 +320,11 @@ func (h *Handler) routeUsers(w http.ResponseWriter, r *http.Request, requestID s
 		}
 		user, err := h.auth.AddUser(r.Context(), h.requestOwner(r), input.Username, input.DisplayName, input.Password)
 		if err != nil {
-			h.writeError(w, requestID, http.StatusBadRequest, string(domain.CodeInvalidArgument), "user")
+			if errors.Is(err, auth.ErrInvalidUser) {
+				h.writeError(w, requestID, http.StatusBadRequest, string(domain.CodeInvalidArgument), "user")
+				return true
+			}
+			h.writeServiceError(w, requestID, err)
 			return true
 		}
 		h.writeJSON(w, http.StatusCreated, user)
@@ -469,6 +473,8 @@ func (h *Handler) writeAuthError(w http.ResponseWriter, id string, err error) {
 		h.writeError(w, id, http.StatusTooManyRequests, "rate_limited", "password")
 	case errors.Is(err, auth.ErrBootstrapUnavailable):
 		h.writeError(w, id, http.StatusConflict, "bootstrap_unavailable", "secret")
+	case errors.Is(err, auth.ErrAmbiguousOrganization):
+		h.writeError(w, id, http.StatusConflict, "ambiguous_organization", "username")
 	default:
 		h.writeError(w, id, http.StatusUnauthorized, "unauthenticated", "password")
 	}
