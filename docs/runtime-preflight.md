@@ -14,7 +14,7 @@ openbox doctor --json
 OPENBOX_SERVER=https://openbox.example OPENBOX_TOKEN="$OPENBOX_TOKEN" openbox doctor
 ```
 
-Doctor checks the daemon version and architecture, required Linux namespaces, cgroups, supported storage drivers, host networking tools, accessible `/dev/kvm`, and Incus virtual-machine support. A host without KVM remains usable for standard container isolation; strong isolation is clearly reported as unavailable. Use the [host matrix and capacity guide](operators/host-matrix.md) to choose a supported host and size its warm-pool budget.
+Doctor checks the daemon version and architecture, required Linux namespaces, cgroups, supported storage drivers, host networking tools, accessible `/dev/kvm`, and Incus virtual-machine support. A host without KVM remains usable for standard container isolation; strong isolation is clearly reported as unavailable. Use the [host matrix and capacity guide](operators/host-matrix.md) to choose a supported host and size its warm-pool budget. For first-time setup, start with the [install guide](operators/install.md).
 
 Fatal results prevent safe container operation. Warnings identify optional or repairable host tooling. JSON output uses stable status strings for automation.
 
