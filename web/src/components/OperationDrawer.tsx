@@ -95,6 +95,7 @@ export function OperationDrawer({ open, operations, onClose }: OperationDrawerPr
         onClick={onClose}
       />
       <aside
+        id="operations-drawer"
         className="operation-drawer is-open"
         role="complementary"
         aria-label="Operations"
